@@ -29,6 +29,8 @@ def main():
     parser.add_argument("--grad-acc", type=int, default=8)
     parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--save-steps", type=int, default=50)
+    parser.add_argument("--max-seq-len", type=int, default=1024, help="最大序列长度（7B建议 512/1024）")
+    parser.add_argument("--grad-ckpt", action="store_true", help="启用梯度检查点以节省显存")
     parser.add_argument("--smoke", action="store_true", help="冒烟测试：更小batch+更少步数")
 
     args = parser.parse_args()
@@ -48,6 +50,8 @@ def main():
         lora_r=8,
         lora_alpha=16,
         lora_dropout=0.05,
+        max_seq_length=args.max_seq_len,
+        gradient_checkpointing=args.grad_ckpt,
     )
 
     trainer.train(
