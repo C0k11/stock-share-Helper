@@ -107,6 +107,8 @@ class DataFetcher:
         """
         import feedparser
         import requests
+        from pathlib import Path
+        import yaml
 
         def _match_keywords(title: str, content: str) -> bool:
             if not keywords:
@@ -116,49 +118,143 @@ class DataFetcher:
 
         news: List[Dict] = []
 
-        rss_sources = sources
-        if not rss_sources:
-            rss_sources = [
-                "https://feeds.finance.yahoo.com/rss/2.0/headline?s=SPY&region=US&lang=en-US",
-                "https://feeds.finance.yahoo.com/rss/2.0/headline?s=QQQ&region=US&lang=en-US",
-                "https://feeds.finance.yahoo.com/rss/2.0/headline?s=TLT&region=US&lang=en-US",
-                "https://feeds.finance.yahoo.com/rss/2.0/headline?s=GLD&region=US&lang=en-US",
+        def _load_config_sources() -> List[Dict]:
+            try:
+                cfg_path = Path(__file__).resolve().parents[2] / "config" / "sources.yaml"
+                if not cfg_path.exists():
+                    return []
+                with open(cfg_path, "r", encoding="utf-8") as f:
+                    cfg = yaml.safe_load(f) or {}
+                srcs = cfg.get("sources") or []
+                out = []
+                for s in srcs:
+                    if not isinstance(s, dict):
+                        continue
+                    if not s.get("enabled", True):
+                        continue
+                    if (s.get("type") or "").lower() != "rss":
+                        continue
+                    url = (s.get("url") or "").strip()
+                    if not url.lower().startswith("http"):
+                        continue
+                    out.append({
+                        "id": s.get("id") or url,
+                        "name": s.get("name") or "rss",
+                        "url": url,
+                        "category": s.get("category") or "market_news",
+                        "weight": float(s.get("weight", 1.0) or 1.0),
+                    })
+                return out
+            except Exception as e:
+                logger.warning(f"Failed to load config sources.yaml: {e}")
+                return []
+
+        def _normalize_text(s: str) -> str:
+            return " ".join((s or "").strip().split()).lower()
+
+        def _dedup_key(item: Dict) -> str:
+            url = (item.get("url") or "").strip()
+            if url:
+                return f"url::{url.lower()}"
+            title = _normalize_text(item.get("title") or "")
+            content = _normalize_text(item.get("content") or "")
+            return f"tc::{title}::{content[:200]}"
+
+        seen_keys = set()
+
+        config_sources = []
+        if not sources:
+            config_sources = _load_config_sources()
+
+        rss_sources: List[Dict] = []
+        if sources:
+            for src in sources:
+                if not isinstance(src, str) or not src.strip():
+                    continue
+                if not src.lower().startswith("http"):
+                    continue
+                rss_sources.append({
+                    "id": src,
+                    "name": "rss",
+                    "url": src,
+                    "category": "market_news",
+                    "weight": 1.0,
+                })
+        else:
+            rss_sources = config_sources or [
+                {
+                    "id": "yahoo_spy",
+                    "name": "Yahoo Finance - SPY",
+                    "url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=SPY&region=US&lang=en-US",
+                    "category": "market_news",
+                    "weight": 1.0,
+                },
+                {
+                    "id": "yahoo_qqq",
+                    "name": "Yahoo Finance - QQQ",
+                    "url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=QQQ&region=US&lang=en-US",
+                    "category": "market_news",
+                    "weight": 1.0,
+                },
+                {
+                    "id": "yahoo_tlt",
+                    "name": "Yahoo Finance - TLT",
+                    "url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=TLT&region=US&lang=en-US",
+                    "category": "market_news",
+                    "weight": 1.0,
+                },
+                {
+                    "id": "yahoo_gld",
+                    "name": "Yahoo Finance - GLD",
+                    "url": "https://feeds.finance.yahoo.com/rss/2.0/headline?s=GLD&region=US&lang=en-US",
+                    "category": "market_news",
+                    "weight": 1.0,
+                },
             ]
 
         for src in rss_sources:
-            if not isinstance(src, str) or not src.strip():
-                continue
-            if not src.lower().startswith("http"):
+            src_url = (src.get("url") or "").strip()
+            if not src_url.lower().startswith("http"):
                 continue
 
             try:
-                feed = feedparser.parse(src)
+                feed = feedparser.parse(src_url)
                 for entry in getattr(feed, "entries", []) or []:
                     title = (getattr(entry, "title", None) or "").strip()
                     link = (getattr(entry, "link", None) or "").strip()
                     summary = (getattr(entry, "summary", None) or "").strip()
                     published = (getattr(entry, "published", None) or getattr(entry, "updated", None) or "")
-                    source_name = (getattr(feed, "feed", {}) or {}).get("title", "rss")
+                    source_name = src.get("name") or (getattr(feed, "feed", {}) or {}).get("title", "rss")
 
                     if not title and not summary:
                         continue
                     if not _match_keywords(title, summary):
                         continue
 
-                    news.append({
+                    item = {
                         "title": title,
                         "content": summary,
                         "source": source_name,
+                        "source_id": src.get("id") or src_url,
+                        "category": src.get("category") or "market_news",
+                        "weight": float(src.get("weight", 1.0) or 1.0),
                         "published_at": published,
                         "url": link,
-                    })
+                    }
+
+                    key = _dedup_key(item)
+                    if key in seen_keys:
+                        continue
+                    seen_keys.add(key)
+
+                    news.append(item)
                     if len(news) >= limit:
                         break
                 if len(news) >= limit:
                     break
 
             except Exception as e:
-                logger.warning(f"Failed to parse RSS source {src}: {e}")
+                logger.warning(f"Failed to parse RSS source {src_url}: {e}")
 
         if news:
             return news[:limit]

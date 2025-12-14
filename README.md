@@ -49,7 +49,8 @@ Stock/
 ├── config/                   # Configuration files
 │   ├── settings.yaml         # Global settings
 │   ├── symbols.yaml          # Symbol pool config
-│   └── risk_profiles.yaml    # Risk profile config
+│   ├── risk_profiles.yaml    # Risk profile config
+│   └── sources.yaml          # News sources (RSS) config
 ├── data/                     # Data directory (not in git)
 ├── src/                      # Source code
 │   ├── data/                 # Data layer (fetcher/calendar/storage)
@@ -86,11 +87,11 @@ Stock/
 - [ ] Walk-forward validation
 
 ### Phase 3: LLM Fine-tuning 
-- [ ] News data collection & labeling
-- [ ] Fine-tuning dataset construction
-- [ ] LoRA fine-tuning Qwen2.5-7B
-- [ ] News structuring inference
-- [ ] Decision explanation generation
+- [x] News data collection (multi-source RSS)
+- [x] Fine-tuning dataset construction (append/dedup/confidence + train/val split)
+- [x] LoRA/QLoRA fine-tuning (Qwen2.5-14B supported)
+- [x] News structuring inference (base vs LoRA)
+- [x] Decision explanation generation (base vs LoRA)
 
 ### Phase 4: Product Integration
 - [ ] User risk profile configuration
@@ -168,6 +169,46 @@ python scripts/run_backtest.py
 
 ---
 
+##  LLM Fine-tuning (Quickstart)
+
+This repo includes a practical pipeline for building a weak-labeled dataset from public RSS sources and fine-tuning Qwen2.5 models with LoRA/QLoRA.
+
+### 1) Configure news sources
+
+Edit `config/sources.yaml` to enable/disable sources and adjust weights/categories.
+
+### 2) Build finetune dataset (append + dedup + quality filters)
+
+Outputs are written under `data/` (ignored by git). Recommended command:
+
+```bash
+.\venv311\Scripts\python.exe scripts\build_finetune_dataset.py --limit 800 --add-explain --append --dedup --split-val --val-ratio 0.05
+```
+
+This will generate:
+
+- `data/finetune/train.json`
+- `data/finetune/val.json`
+
+### 3) Train (Qwen2.5-14B QLoRA + checkpoints + resume)
+
+For 14B on a single RTX 4090, use QLoRA 4-bit + gradient checkpointing:
+
+```bash
+.\venv311\Scripts\python.exe scripts\finetune_llm.py --model Qwen/Qwen2.5-14B-Instruct --data data/finetune/train.json --qlora --grad-ckpt --max-seq-len 1024 --batch-size 1 --grad-acc 16 --lr 1e-4 --epochs 10 --save-steps 20 --save-total-limit 10 --outdir models/llm_qwen14b_overnight --resume auto
+```
+
+### 4) Inference (base vs LoRA)
+
+For 14B + LoRA inference, 4-bit loading is recommended to avoid CPU/disk offloading issues:
+
+```bash
+.\venv311\Scripts\python.exe scripts\infer_llm.py --model Qwen/Qwen2.5-14B-Instruct --task news --load-in-4bit
+.\venv311\Scripts\python.exe scripts\infer_llm.py --model Qwen/Qwen2.5-14B-Instruct --task news --use-lora --lora models\llm_qwen14b_overnight\lora_weights --load-in-4bit
+```
+
+---
+
 ##  Disclaimer
 
  **For educational and research purposes only. Not investment advice.**
@@ -236,7 +277,8 @@ Stock/
 ├── config/                   # 配置文件
 │   ├── settings.yaml         # 全局配置
 │   ├── symbols.yaml          # 标的池配置
-│   └── risk_profiles.yaml    # 风险档位配置
+│   ├── risk_profiles.yaml    # 风险档位配置
+│   └── sources.yaml          # 新闻源（RSS）配置
 ├── data/                     # 数据目录（不提交到git）
 ├── src/                      # 源代码
 │   ├── data/                 # 数据层（fetcher/calendar/storage）
@@ -273,11 +315,11 @@ Stock/
 - [ ] Walk-forward验证
 
 ### Phase 3: LLM微调 
-- [ ] 新闻数据收集与标注
-- [ ] 微调数据集构建（事件分类/情绪/影响方向）
-- [ ] LoRA微调Qwen2.5-7B
-- [ ] 新闻结构化推理
-- [ ] 决策解释生成
+- [x] 新闻数据收集（多源RSS）
+- [x] 微调数据集构建（append/dedup/confidence + train/val切分）
+- [x] LoRA/QLoRA微调（支持Qwen2.5-14B）
+- [x] 新闻结构化推理（base vs LoRA）
+- [x] 决策解释生成（base vs LoRA）
 
 ### Phase 4: 产品集成
 - [ ] 用户风险档位配置
@@ -351,6 +393,46 @@ venv\Scripts\activate  # Windows
 pip install -r requirements.txt
 python scripts/download_data.py
 python scripts/run_backtest.py
+```
+
+---
+
+##  LLM微调（快速开始）
+
+本仓库提供从公开RSS源构建弱标注数据集，并使用LoRA/QLoRA微调Qwen2.5模型的可用流水线。
+
+### 1) 配置新闻源
+
+编辑 `config/sources.yaml`，按需开启/关闭来源并调整权重/类别。
+
+### 2) 构建微调数据集（追加+去重+质量过滤）
+
+输出在 `data/`（默认不提交到git）：
+
+```bash
+.\venv311\Scripts\python.exe scripts\build_finetune_dataset.py --limit 800 --add-explain --append --dedup --split-val --val-ratio 0.05
+```
+
+会生成：
+
+- `data/finetune/train.json`
+- `data/finetune/val.json`
+
+### 3) 训练（14B QLoRA + checkpoints + 断点续训）
+
+单卡4090建议使用4bit QLoRA + gradient checkpointing：
+
+```bash
+.\venv311\Scripts\python.exe scripts\finetune_llm.py --model Qwen/Qwen2.5-14B-Instruct --data data/finetune/train.json --qlora --grad-ckpt --max-seq-len 1024 --batch-size 1 --grad-acc 16 --lr 1e-4 --epochs 10 --save-steps 20 --save-total-limit 10 --outdir models/llm_qwen14b_overnight --resume auto
+```
+
+### 4) 推理（base vs LoRA）
+
+14B+LoRA 推理建议加 `--load-in-4bit`，避免CPU/磁盘offload导致失败：
+
+```bash
+.\venv311\Scripts\python.exe scripts\infer_llm.py --model Qwen/Qwen2.5-14B-Instruct --task news --load-in-4bit
+.\venv311\Scripts\python.exe scripts\infer_llm.py --model Qwen/Qwen2.5-14B-Instruct --task news --use-lora --lora models\llm_qwen14b_overnight\lora_weights --load-in-4bit
 ```
 
 ---

@@ -18,6 +18,8 @@
 import sys
 from pathlib import Path
 import argparse
+import hashlib
+import random
 from loguru import logger
 
 
@@ -33,8 +35,40 @@ def main():
     parser.add_argument("--keywords", nargs="+", default=None, help="关键词过滤")
     parser.add_argument("--sources", nargs="+", default=None, help="RSS源URL列表（可选，默认内置）")
     parser.add_argument("--add-explain", action="store_true", help="同时生成解释类样本（弱标注）")
+    parser.add_argument("--append", action="store_true", help="如果输出文件已存在，则追加新样本而不是覆盖")
+    parser.add_argument("--dedup", action="store_true", help="合并时按输入去重（建议与--append一起使用）")
+    parser.add_argument("--min-title-len", type=int, default=8, help="最短标题长度，过短则丢弃")
+    parser.add_argument("--min-content-len", type=int, default=30, help="最短内容长度，过短则丢弃")
+    parser.add_argument("--split-val", action="store_true", help="同时输出验证集 val.json（从合并后的样本中切分）")
+    parser.add_argument("--val-ratio", type=float, default=0.05, help="验证集比例（默认 0.05）")
+    parser.add_argument("--seed", type=int, default=42, help="切分随机种子")
 
     args = parser.parse_args()
+
+    def conversation_key(item: dict) -> str:
+        convs = item.get("conversations") or []
+        user_text = ""
+        for msg in convs:
+            if msg.get("role") == "user":
+                user_text = (msg.get("content") or "").strip()
+                break
+        norm = " ".join(user_text.split())
+        return hashlib.sha1(norm.encode("utf-8")).hexdigest()
+
+    def load_existing(out_path: Path):
+        if not out_path.exists():
+            return []
+        try:
+            import json
+
+            with open(out_path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, list):
+                return []
+            return data
+        except Exception as e:
+            logger.warning(f"Failed to load existing dataset for append: {e}")
+            return []
 
     from src.data.fetcher import DataFetcher
     from src.llm.news_parser import RuleBasedNewsParser
@@ -54,13 +88,37 @@ def main():
     ds = FineTuneDataset(data_path=str(Path(args.out).parent))
 
     kept = 0
+
+    def compute_confidence(item: dict) -> float:
+        # Heuristic confidence: source weight + content length
+        w = float(item.get("weight", 1.0) or 1.0)
+        title = (item.get("title") or "")
+        content = (item.get("content") or "")
+        length_score = min(1.0, (len(title) + len(content)) / 600.0)
+        return max(0.0, min(1.0, 0.35 + 0.20 * w + 0.45 * length_score))
+
     for n in news_list:
         title = (n.get("title") or "").strip()
         content = (n.get("content") or "").strip()
         if not title and not content:
             continue
 
+        if len(title) < args.min_title_len:
+            continue
+        if len(content) < args.min_content_len:
+            continue
+
         parsed = parser_rb.parse(title=title, content=content)
+
+        meta = {
+            "source": n.get("source") or "",
+            "source_id": n.get("source_id") or "",
+            "category": n.get("category") or "",
+            "weight": float(n.get("weight", 1.0) or 1.0),
+            "published_at": n.get("published_at") or "",
+            "url": n.get("url") or "",
+        }
+        meta["confidence"] = compute_confidence({**n, **meta})
 
         ds.add_news_sample(
             title=title,
@@ -71,6 +129,7 @@ def main():
             impact_bond=int(parsed.impact_bond),
             impact_gold=int(parsed.impact_gold),
             summary=parsed.summary,
+            meta=meta,
         )
 
         if args.add_explain:
@@ -110,13 +169,57 @@ def main():
                 f"因此建议：{'; '.join(actions)}。"
                 "同时注意控制回撤与波动，若后续价格走势与预期不一致，应及时减仓/止损并等待趋势确认。"
             )
-            ds.add_explanation_sample(context=context, explanation=explanation)
+            ds.add_explanation_sample(context=context, explanation=explanation, meta=meta)
 
         kept += 1
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    ds.save(filename=out_path.name)
+
+    new_data = ds.to_conversation_format()
+
+    if args.append and out_path.exists():
+        existing = load_existing(out_path)
+        logger.info(f"Appending to existing dataset: {out_path} (existing={len(existing)}, new={len(new_data)})")
+        merged = existing + new_data
+        if args.dedup:
+            seen = set()
+            deduped = []
+            for item in merged:
+                key = conversation_key(item)
+                if key in seen:
+                    continue
+                seen.add(key)
+                deduped.append(item)
+            merged = deduped
+            logger.info(f"Dedup applied: total={len(merged)}")
+        import json
+
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(merged, f, ensure_ascii=False, indent=2)
+
+        final_data = merged
+    else:
+        ds.save(filename=out_path.name)
+        final_data = new_data
+
+    if args.split_val:
+        random.seed(args.seed)
+        data = list(final_data)
+        random.shuffle(data)
+        val_n = int(len(data) * float(args.val_ratio))
+        val_n = max(1, val_n) if len(data) >= 2 else 0
+        val_data = data[:val_n]
+        train_data = data[val_n:]
+        import json
+
+        val_path = out_path.parent / "val.json"
+        train_path = out_path.parent / out_path.name
+        with open(train_path, "w", encoding="utf-8") as f:
+            json.dump(train_data, f, ensure_ascii=False, indent=2)
+        with open(val_path, "w", encoding="utf-8") as f:
+            json.dump(val_data, f, ensure_ascii=False, indent=2)
+        logger.info(f"Split dataset: train={len(train_data)} val={len(val_data)}")
 
     stats = ds.get_statistics()
     logger.info(f"Dataset written: {out_path}")

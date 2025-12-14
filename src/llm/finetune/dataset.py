@@ -25,7 +25,8 @@ class FineTuneDataset:
         impact_equity: int,
         impact_bond: int,
         impact_gold: int,
-        summary: str
+        summary: str,
+        meta: Optional[Dict] = None
     ):
         """添加新闻解析样本"""
         sample = {
@@ -40,12 +41,15 @@ class FineTuneDataset:
                 "summary": summary
             }, ensure_ascii=False)
         }
+        if meta is not None:
+            sample["meta"] = meta
         self.samples.append(sample)
     
     def add_explanation_sample(
         self,
         context: str,
-        explanation: str
+        explanation: str,
+        meta: Optional[Dict] = None
     ):
         """添加决策解释样本"""
         sample = {
@@ -53,6 +57,8 @@ class FineTuneDataset:
             "input": context,
             "output": explanation
         }
+        if meta is not None:
+            sample["meta"] = meta
         self.samples.append(sample)
     
     def to_conversation_format(self) -> List[Dict]:
@@ -67,13 +73,16 @@ class FineTuneDataset:
                 system = "你是一个专业的投资顾问助手。"
                 user = sample["input"]
             
-            conversations.append({
+            item = {
                 "conversations": [
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
                     {"role": "assistant", "content": sample["output"]}
                 ]
-            })
+            }
+            if "meta" in sample:
+                item["meta"] = sample["meta"]
+            conversations.append(item)
         
         return conversations
     

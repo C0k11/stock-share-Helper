@@ -1,0 +1,78 @@
+version: 1
+
+defaults:
+  enabled: true
+  weight: 1.0
+
+sources:
+  - id: fed_press_monetary
+    name: "Fed Press Releases - Monetary Policy"
+    type: rss
+    url: "https://www.federalreserve.gov/feeds/press_monetary.xml"
+    category: macro_policy
+    weight: 3.0
+    enabled: true
+
+  - id: fed_press_all
+    name: "Fed Press Releases - All"
+    type: rss
+    url: "https://www.federalreserve.gov/feeds/press_all.xml"
+    category: macro_policy
+    weight: 2.5
+    enabled: true
+
+  - id: fed_speeches_testimony
+    name: "Fed Speeches & Testimony"
+    type: rss
+    url: "https://www.federalreserve.gov/feeds/speeches_and_testimony.xml"
+    category: macro_policy
+    weight: 2.0
+    enabled: true
+
+  - id: bea_releases
+    name: "BEA Releases"
+    type: rss
+    url: "https://apps.bea.gov/rss/rss.xml"
+    category: macro_data
+    weight: 2.0
+    enabled: true
+
+  - id: bls_latest
+    name: "BLS Major Economic Indicators (Latest)"
+    type: rss
+    url: "https://www.bls.gov/feed/bls_latest.rss"
+    category: macro_data
+    weight: 2.0
+    enabled: true
+
+  - id: yahoo_spy
+    name: "Yahoo Finance - SPY"
+    type: rss
+    url: "https://feeds.finance.yahoo.com/rss/2.0/headline?s=SPY&region=US&lang=en-US"
+    category: market_news
+    weight: 1.0
+    enabled: true
+
+  - id: yahoo_qqq
+    name: "Yahoo Finance - QQQ"
+    type: rss
+    url: "https://feeds.finance.yahoo.com/rss/2.0/headline?s=QQQ&region=US&lang=en-US"
+    category: market_news
+    weight: 1.0
+    enabled: true
+
+  - id: yahoo_tlt
+    name: "Yahoo Finance - TLT"
+    type: rss
+    url: "https://feeds.finance.yahoo.com/rss/2.0/headline?s=TLT&region=US&lang=en-US"
+    category: market_news
+    weight: 1.0
+    enabled: true
+
+  - id: yahoo_gld
+    name: "Yahoo Finance - GLD"
+    type: rss
+    url: "https://feeds.finance.yahoo.com/rss/2.0/headline?s=GLD&region=US&lang=en-US"
+    category: market_news
+    weight: 1.0
+    enabled: true

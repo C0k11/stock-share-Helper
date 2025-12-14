@@ -19,7 +19,8 @@ class FineTuner:
         lora_alpha: int = 32,
         lora_dropout: float = 0.05,
         max_seq_length: int = 2048,
-        gradient_checkpointing: bool = False
+        gradient_checkpointing: bool = False,
+        load_in_4bit: bool = False
     ):
         """
         Args:
@@ -35,6 +36,7 @@ class FineTuner:
 
         self.max_seq_length = max_seq_length
         self.gradient_checkpointing = gradient_checkpointing
+        self.load_in_4bit = load_in_4bit
         
         self.lora_config = {
             "r": lora_r,
@@ -54,6 +56,7 @@ class FineTuner:
         
         try:
             import torch
+            import inspect
             from transformers import AutoModelForCausalLM, AutoTokenizer
             from peft import LoraConfig, get_peft_model
             
@@ -64,13 +67,43 @@ class FineTuner:
             )
             self.tokenizer.pad_token = self.tokenizer.eos_token
             
-            # 加载模型（4090可以不用量化）
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_name,
-                torch_dtype=torch.bfloat16 if torch.cuda.is_available() else None,
-                device_map="auto",
-                trust_remote_code=True
-            )
+            model_kwargs = {
+                "device_map": "auto",
+                "trust_remote_code": True,
+            }
+            if torch.cuda.is_available():
+                model_kwargs["torch_dtype"] = torch.bfloat16
+                model_kwargs["low_cpu_mem_usage"] = True
+
+            if self.load_in_4bit:
+                from transformers import BitsAndBytesConfig
+
+                compute_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float16
+                model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                    load_in_4bit=True,
+                    bnb_4bit_quant_type="nf4",
+                    bnb_4bit_use_double_quant=True,
+                    bnb_4bit_compute_dtype=compute_dtype,
+                )
+
+            self.model = AutoModelForCausalLM.from_pretrained(self.model_name, **model_kwargs)
+
+            if self.load_in_4bit:
+                from peft import prepare_model_for_kbit_training
+
+                if hasattr(self.model, "config"):
+                    self.model.config.use_cache = False
+
+                try:
+                    sig = inspect.signature(prepare_model_for_kbit_training)
+                    if "use_gradient_checkpointing" in sig.parameters:
+                        self.model = prepare_model_for_kbit_training(
+                            self.model, use_gradient_checkpointing=self.gradient_checkpointing
+                        )
+                    else:
+                        self.model = prepare_model_for_kbit_training(self.model)
+                except Exception:
+                    self.model = prepare_model_for_kbit_training(self.model)
 
             if self.gradient_checkpointing and hasattr(self.model, "gradient_checkpointing_enable"):
                 self.model.gradient_checkpointing_enable()
@@ -96,7 +129,9 @@ class FineTuner:
         learning_rate: float = 2e-4,
         gradient_accumulation_steps: int = 4,
         warmup_ratio: float = 0.03,
-        save_steps: int = 100
+        save_steps: int = 100,
+        save_total_limit: int = 3,
+        resume_from_checkpoint: Optional[str] = None
     ):
         """
         执行微调训练
@@ -149,21 +184,41 @@ class FineTuner:
             
             # 训练参数
             use_bf16 = bool(torch.cuda.is_available())
-            training_args = TrainingArguments(
-                output_dir=str(self.output_dir / "checkpoints"),
-                num_train_epochs=num_epochs,
-                per_device_train_batch_size=batch_size,
-                gradient_accumulation_steps=gradient_accumulation_steps,
-                learning_rate=learning_rate,
-                warmup_ratio=warmup_ratio,
-                logging_steps=10,
-                save_steps=save_steps,
-                save_total_limit=3,
-                fp16=not use_bf16,
-                bf16=use_bf16,
-                optim="adamw_torch",
-                report_to="none"
-            )
+            optim = "paged_adamw_8bit" if self.load_in_4bit else "adamw_torch"
+            try:
+                training_args = TrainingArguments(
+                    output_dir=str(self.output_dir / "checkpoints"),
+                    num_train_epochs=num_epochs,
+                    per_device_train_batch_size=batch_size,
+                    gradient_accumulation_steps=gradient_accumulation_steps,
+                    learning_rate=learning_rate,
+                    warmup_ratio=warmup_ratio,
+                    logging_steps=10,
+                    save_steps=save_steps,
+                    save_total_limit=save_total_limit,
+                    fp16=not use_bf16,
+                    bf16=use_bf16,
+                    optim=optim,
+                    gradient_checkpointing=self.gradient_checkpointing,
+                    report_to="none",
+                )
+            except ValueError:
+                training_args = TrainingArguments(
+                    output_dir=str(self.output_dir / "checkpoints"),
+                    num_train_epochs=num_epochs,
+                    per_device_train_batch_size=batch_size,
+                    gradient_accumulation_steps=gradient_accumulation_steps,
+                    learning_rate=learning_rate,
+                    warmup_ratio=warmup_ratio,
+                    logging_steps=10,
+                    save_steps=save_steps,
+                    save_total_limit=save_total_limit,
+                    fp16=not use_bf16,
+                    bf16=use_bf16,
+                    optim="adamw_torch",
+                    gradient_checkpointing=self.gradient_checkpointing,
+                    report_to="none",
+                )
             
             # 数据整理器
             data_collator = DataCollatorForLanguageModeling(
@@ -180,7 +235,7 @@ class FineTuner:
             )
             
             # 开始训练
-            trainer.train()
+            trainer.train(resume_from_checkpoint=resume_from_checkpoint)
             
             # 保存模型
             self.save()

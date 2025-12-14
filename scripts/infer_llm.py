@@ -57,26 +57,40 @@ def main():
     parser.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct", help="Base model")
     parser.add_argument("--lora", default="models/llm/lora_weights", help="LoRA weights path")
     parser.add_argument("--use-lora", action="store_true", help="Load LoRA weights")
+    parser.add_argument("--load-in-4bit", action="store_true", help="Load base model in 4-bit (recommended for 14B + LoRA)")
     parser.add_argument("--task", choices=["news", "explain", "chat"], default="news")
     parser.add_argument("--max-new-tokens", type=int, default=256)
 
     args = parser.parse_args()
 
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer
+    from transformers import AutoModelForCausalLM, AutoTokenizer, TextStreamer
 
     logger.info(f"Loading base model: {args.model}")
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
-    model = AutoModelForCausalLM.from_pretrained(
-        args.model,
-        torch_dtype=torch.bfloat16 if torch.cuda.is_available() else None,
-        device_map="auto",
-        low_cpu_mem_usage=True,
-        trust_remote_code=True,
-    )
+    model_kwargs = {
+        "device_map": "auto",
+        "low_cpu_mem_usage": True,
+        "trust_remote_code": True,
+    }
+    if torch.cuda.is_available():
+        model_kwargs["torch_dtype"] = torch.bfloat16
+
+    if args.load_in_4bit:
+        from transformers import BitsAndBytesConfig
+
+        compute_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float16
+        model_kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=compute_dtype,
+        )
+
+    model = AutoModelForCausalLM.from_pretrained(args.model, **model_kwargs)
 
     if args.use_lora:
         from peft import PeftModel
@@ -98,6 +112,10 @@ def main():
 
     inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
 
+    streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
+
+    print("=" * 80)
+
     with torch.no_grad():
         outputs = model.generate(
             **inputs,
@@ -105,13 +123,10 @@ def main():
             do_sample=True,
             temperature=0.7,
             top_p=0.9,
+            streamer=streamer,
         )
 
-    text = tokenizer.decode(outputs[0], skip_special_tokens=True)
-
-    print("=" * 80)
-    print(text)
-    print("=" * 80)
+    print("\n" + "=" * 80)
 
 
 if __name__ == "__main__":
