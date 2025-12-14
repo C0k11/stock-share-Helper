@@ -162,6 +162,20 @@ def build_teacher_messages_cn(title: str, content: str) -> List[Dict[str, str]]:
     ]
 
 
+def normalize_openai_compat_base_url(base_url: str) -> str:
+    """Normalize base_url to an OpenAI-compatible root.
+
+    - Accepts both https://api.xxx.com and https://api.xxx.com/v1
+    - Returns https://api.xxx.com/v1 (no trailing slash)
+    """
+    b = (base_url or "").strip().rstrip("/")
+    if not b:
+        raise ValueError("Empty base_url")
+    if b.endswith("/v1"):
+        return b
+    return b + "/v1"
+
+
 def call_openai_compatible_chat(
     *,
     base_url: str,
@@ -170,6 +184,7 @@ def call_openai_compatible_chat(
     messages: List[Dict[str, str]],
     timeout: int,
 ) -> str:
+    base_url = normalize_openai_compat_base_url(base_url)
     url = base_url.rstrip("/") + "/chat/completions"
     headers = {
         "Authorization": f"Bearer {api_key}",
