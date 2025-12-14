@@ -216,6 +216,16 @@ def load_news_items(path: Path) -> List[Dict[str, Any]]:
     return data
 
 
+def try_load_dotenv() -> None:
+    try:
+        from dotenv import load_dotenv  # type: ignore
+
+        load_dotenv(project_root / ".env.local", override=False)
+        load_dotenv(project_root / ".env", override=False)
+    except Exception:
+        return
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--in", dest="inp", required=True, help="Input JSON list of news items")
@@ -232,6 +242,8 @@ def main():
     parser.add_argument("--max", type=int, default=0, help="Limit number of items (0=all)")
 
     args = parser.parse_args()
+
+    try_load_dotenv()
 
     api_key = os.getenv(args.teacher_api_key_env, "").strip()
     if not api_key:
