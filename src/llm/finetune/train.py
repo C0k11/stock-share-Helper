@@ -116,6 +116,7 @@ class FineTuner:
         logger.info(f"Starting fine-tuning with {train_data_path}")
         
         try:
+            import torch
             from datasets import load_dataset
             from transformers import TrainingArguments, Trainer, DataCollatorForLanguageModeling
             
@@ -147,6 +148,7 @@ class FineTuner:
             )
             
             # 训练参数
+            use_bf16 = bool(torch.cuda.is_available())
             training_args = TrainingArguments(
                 output_dir=str(self.output_dir / "checkpoints"),
                 num_train_epochs=num_epochs,
@@ -157,8 +159,8 @@ class FineTuner:
                 logging_steps=10,
                 save_steps=save_steps,
                 save_total_limit=3,
-                fp16=False,
-                bf16=True,
+                fp16=not use_bf16,
+                bf16=use_bf16,
                 optim="adamw_torch",
                 report_to="none"
             )
