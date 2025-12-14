@@ -28,6 +28,7 @@ wheels/
 # 虚拟环境
 # ====================
 venv/
+venv311/
 ENV/
 env/
 .venv/
@@ -79,6 +80,7 @@ secrets.yaml
 # ====================
 .DS_Store
 Thumbs.db
+desktop.ini
 
 # ====================
 # 临时文件
