@@ -1,0 +1,139 @@
+# QuantAI 全局配置
+
+# ====================
+# 项目信息
+# ====================
+project:
+  name: "QuantAI"
+  version: "0.1.0"
+  description: "智能量化投顾助手"
+
+# ====================
+# 市场配置
+# ====================
+market:
+  primary: "US"  # 主市场: US, HK, CN
+  timezone: "America/New_York"
+  currency: "USD"
+
+# ====================
+# 数据源配置
+# ====================
+data:
+  # 行情数据源
+  price_source: "yfinance"  # yfinance, stooq, polygon, tiingo
+  
+  # 新闻数据源
+  news_source: "rss"  # rss, newsapi, custom
+  news_feeds:
+    - "https://feeds.finance.yahoo.com/rss/2.0/headline"
+    - "https://www.cnbc.com/id/100003114/device/rss/rss.html"
+  
+  # 数据存储
+  storage:
+    type: "parquet"  # parquet, sqlite, csv
+    path: "data/"
+  
+  # 缓存
+  cache:
+    enabled: true
+    ttl_hours: 24
+
+# ====================
+# 回测配置
+# ====================
+backtest:
+  # 默认时间范围
+  start_date: "2010-01-01"
+  end_date: null  # null表示到今天
+  
+  # 成本模型
+  costs:
+    commission_rate: 0.0005  # 0.05% 佣金
+    min_commission: 1.0      # 最低佣金$1
+    slippage_bps: 5          # 5个基点滑点
+  
+  # 再平衡
+  rebalance:
+    frequency: "weekly"      # daily, weekly, monthly
+    threshold: 0.05          # 仓位偏离5%才调仓
+  
+  # 初始资金
+  initial_capital: 100000
+
+# ====================
+# 策略配置
+# ====================
+strategy:
+  # 趋势/动量参数
+  trend:
+    ma_short: 20
+    ma_long: 200
+    momentum_lookback: 63  # 约3个月
+  
+  # 波动率目标
+  volatility:
+    target_annual: 0.10    # 10%年化波动
+    lookback_days: 20      # 波动率计算窗口
+    vol_ceiling: 0.25      # 波动率上限
+  
+  # 风险状态(Regime)检测
+  regime:
+    vix_threshold_high: 25
+    vix_threshold_low: 15
+    trend_ma: 50
+
+# ====================
+# 风控配置
+# ====================
+risk:
+  # 回撤控制
+  max_drawdown_halt: 0.25   # 组合回撤25%暂停交易
+  
+  # 单标的限制
+  max_single_position: 0.5  # 单标的最大50%
+  
+  # 现金最低持有
+  min_cash: 0.05            # 最低5%现金
+
+# ====================
+# LLM配置
+# ====================
+llm:
+  # 模型选择
+  model_name: "Qwen/Qwen2.5-7B-Instruct"
+  
+  # 本地推理配置
+  inference:
+    device: "cuda"
+    load_in_4bit: false     # 4090显存够，不需要量化
+    max_new_tokens: 512
+  
+  # 微调配置
+  finetune:
+    method: "lora"
+    lora_r: 16
+    lora_alpha: 32
+    lora_dropout: 0.05
+    target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
+    learning_rate: 2e-4
+    num_epochs: 3
+    batch_size: 4
+    gradient_accumulation_steps: 4
+
+# ====================
+# API配置
+# ====================
+api:
+  host: "0.0.0.0"
+  port: 8000
+  debug: true
+
+# ====================
+# 日志配置
+# ====================
+logging:
+  level: "INFO"
+  format: "{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}"
+  file: "logs/quantai.log"
+  rotation: "10 MB"

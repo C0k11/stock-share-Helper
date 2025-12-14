@@ -1,0 +1,162 @@
+# QuantAI 用户风险档位配置
+
+# ====================
+# 风险档位定义
+# ====================
+profiles:
+  # 保守型
+  conservative:
+    name: "保守型"
+    description: "追求稳健，厌恶波动，优先保本"
+    
+    # 风险约束
+    constraints:
+      max_drawdown: 0.05        # 最大回撤5%
+      target_volatility: 0.06   # 目标年化波动6%
+      max_volatility: 0.08      # 波动上限8%
+    
+    # 仓位限制
+    position_limits:
+      max_equity: 0.40          # 股票类最多40%
+      min_bond: 0.40            # 债券类最少40%
+      min_cash: 0.10            # 现金最少10%
+      max_single: 0.25          # 单标的最多25%
+    
+    # 交易约束
+    trading:
+      min_rebalance_threshold: 0.03  # 偏离3%才调仓
+      max_turnover_monthly: 0.30     # 月换手率上限30%
+    
+    # 止损止盈
+    stop_rules:
+      stop_loss_portfolio: 0.03      # 组合止损3%
+      stop_loss_single: 0.05         # 单标的止损5%
+      take_profit_single: 0.15       # 单标的止盈15%
+    
+    # 推荐组合模板
+    default_portfolio: "defensive"
+
+  # 平衡型
+  balanced:
+    name: "平衡型"
+    description: "追求收益与风险的平衡，能接受适度波动"
+    
+    constraints:
+      max_drawdown: 0.10
+      target_volatility: 0.10
+      max_volatility: 0.12
+    
+    position_limits:
+      max_equity: 0.60
+      min_bond: 0.25
+      min_cash: 0.05
+      max_single: 0.35
+    
+    trading:
+      min_rebalance_threshold: 0.05
+      max_turnover_monthly: 0.50
+    
+    stop_rules:
+      stop_loss_portfolio: 0.06
+      stop_loss_single: 0.08
+      take_profit_single: 0.25
+    
+    default_portfolio: "all_weather"
+
+  # 进取型
+  aggressive:
+    name: "进取型"
+    description: "追求高收益，能承受较大波动和回撤"
+    
+    constraints:
+      max_drawdown: 0.20
+      target_volatility: 0.15
+      max_volatility: 0.20
+    
+    position_limits:
+      max_equity: 0.80
+      min_bond: 0.10
+      min_cash: 0.05
+      max_single: 0.50
+    
+    trading:
+      min_rebalance_threshold: 0.08
+      max_turnover_monthly: 0.80
+    
+    stop_rules:
+      stop_loss_portfolio: 0.12
+      stop_loss_single: 0.15
+      take_profit_single: 0.40
+    
+    default_portfolio: "aggressive"
+
+# ====================
+# 用户画像问卷映射
+# ====================
+questionnaire:
+  questions:
+    - id: "q1"
+      text: "您的投资期限是？"
+      options:
+        - value: 1
+          label: "1年以内"
+        - value: 2
+          label: "1-3年"
+        - value: 3
+          label: "3-5年"
+        - value: 4
+          label: "5年以上"
+    
+    - id: "q2"
+      text: "如果投资亏损10%，您会？"
+      options:
+        - value: 1
+          label: "立即卖出，无法接受"
+        - value: 2
+          label: "焦虑，考虑减仓"
+        - value: 3
+          label: "能接受，继续持有"
+        - value: 4
+          label: "加仓，视为机会"
+    
+    - id: "q3"
+      text: "您的投资目标是？"
+      options:
+        - value: 1
+          label: "保本为主，跑赢通胀即可"
+        - value: 2
+          label: "稳健增值，略高于存款收益"
+        - value: 3
+          label: "追求收益，能承受一定波动"
+        - value: 4
+          label: "追求高收益，接受高风险"
+    
+    - id: "q4"
+      text: "您过去的投资经验？"
+      options:
+        - value: 1
+          label: "几乎没有"
+        - value: 2
+          label: "有一些，主要是存款/理财"
+        - value: 3
+          label: "较丰富，有股票/基金经验"
+        - value: 4
+          label: "非常丰富，熟悉各类投资品"
+    
+    - id: "q5"
+      text: "您可投资资金占总资产的比例？"
+      options:
+        - value: 1
+          label: "10%以下"
+        - value: 2
+          label: "10%-30%"
+        - value: 3
+          label: "30%-50%"
+        - value: 4
+          label: "50%以上"
+
+  # 得分映射到风险档位
+  score_mapping:
+    conservative: [5, 10]    # 总分5-10分
+    balanced: [11, 15]       # 总分11-15分
+    aggressive: [16, 20]     # 总分16-20分
