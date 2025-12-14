@@ -32,6 +32,7 @@ def main():
     parser.add_argument("--limit", type=int, default=50, help="最大新闻条数")
     parser.add_argument("--keywords", nargs="+", default=None, help="关键词过滤")
     parser.add_argument("--sources", nargs="+", default=None, help="RSS源URL列表（可选，默认内置）")
+    parser.add_argument("--add-explain", action="store_true", help="同时生成解释类样本（弱标注）")
 
     args = parser.parse_args()
 
@@ -71,6 +72,46 @@ def main():
             impact_gold=int(parsed.impact_gold),
             summary=parsed.summary,
         )
+
+        if args.add_explain:
+            # 弱标注解释：根据影响方向生成一个可训练的“解释/建议”模板
+            actions = []
+            if int(parsed.impact_equity) < 0:
+                actions.append("降低股票(如SPY/QQQ)仓位")
+            elif int(parsed.impact_equity) > 0:
+                actions.append("增加股票(如SPY/QQQ)仓位")
+
+            if int(parsed.impact_bond) > 0:
+                actions.append("增加债券(如TLT/IEF)仓位")
+            elif int(parsed.impact_bond) < 0:
+                actions.append("降低债券(如TLT/IEF)仓位")
+
+            if int(parsed.impact_gold) > 0:
+                actions.append("增加黄金(如GLD)仓位")
+            elif int(parsed.impact_gold) < 0:
+                actions.append("降低黄金(如GLD)仓位")
+
+            if not actions:
+                actions.append("保持组合不变，等待更多确认信号")
+
+            context = (
+                f"新闻标题：{title}\n"
+                f"新闻摘要：{parsed.summary}\n"
+                f"事件类型：{parsed.event_type}\n"
+                f"情绪：{parsed.sentiment}\n"
+                f"影响：equity={int(parsed.impact_equity)}, bond={int(parsed.impact_bond)}, gold={int(parsed.impact_gold)}\n"
+                "当前组合：SPY 40%, TLT 40%, GLD 20%。风险档位：balanced。\n"
+                "请解释应如何调整仓位，并给出风险提示（简洁、可执行）。"
+            )
+
+            explanation = (
+                f"根据该新闻事件（{parsed.event_type}）及其情绪（{parsed.sentiment}），"
+                f"对资产的影响倾向为：股票{int(parsed.impact_equity)}、债券{int(parsed.impact_bond)}、黄金{int(parsed.impact_gold)}。"
+                f"因此建议：{'; '.join(actions)}。"
+                "同时注意控制回撤与波动，若后续价格走势与预期不一致，应及时减仓/止损并等待趋势确认。"
+            )
+            ds.add_explanation_sample(context=context, explanation=explanation)
+
         kept += 1
 
     out_path = Path(args.out)
