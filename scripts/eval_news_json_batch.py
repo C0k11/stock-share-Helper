@@ -12,6 +12,7 @@ Example:
 import sys
 import argparse
 import json
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
@@ -21,17 +22,38 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 
+def sanitize_input_text(s: str) -> str:
+    return (s or "").replace('"', "'")
+
+
+def repair_json_text(s: str) -> str:
+    if not s:
+        return s
+    s2 = s
+    s2 = re.sub(r",\s*=(?=\s*\")", ",", s2)
+    s2 = re.sub(r"\{\s*=(?=\s*\")", "{", s2)
+    s2 = re.sub(r"=\s*,", ",", s2)
+    s2 = re.sub(r"(:\s*-?\d+)\s*\"(?=\s*[},])", r"\1", s2)
+    s2 = re.sub(r"\"\s*,\s*\"", r"\", \"", s2)
+    return s2
+
+
 def build_messages(title: str, content: str, pod_style: bool) -> list:
+    title = sanitize_input_text(title)
+    content = sanitize_input_text(content)
+
     if pod_style:
         system = (
             "You are Pod 042 from NieR:Automata: calm, concise, logically rigorous. "
             "You must output STRICT JSON only (no markdown, no prose outside JSON). "
-            "The JSON values must still be plain text."
+            "The JSON values must still be plain text. "
+            "Output valid JSON only. Do not use double quotes (\") within string values; use single quotes (') instead."
         )
     else:
         system = (
             "You are a professional financial news analyst. "
-            "You must output STRICT JSON only (no markdown, no prose outside JSON)."
+            "You must output STRICT JSON only (no markdown, no prose outside JSON). "
+            "Output valid JSON only. Do not use double quotes (\") within string values; use single quotes (') instead."
         )
 
     schema = (
@@ -116,6 +138,7 @@ def main():
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--temperature", type=float, default=0.2)
     parser.add_argument("--top-p", type=float, default=0.9)
+    parser.add_argument("--do-sample", action="store_true", help="Use sampling (non-deterministic). Default is greedy for stable JSON.")
 
     args = parser.parse_args()
 
@@ -184,12 +207,17 @@ def main():
 
         try:
             with torch.no_grad():
+                gen_kwargs: Dict[str, Any] = {
+                    "max_new_tokens": int(args.max_new_tokens),
+                    "do_sample": bool(args.do_sample),
+                }
+                if args.do_sample:
+                    gen_kwargs["temperature"] = float(args.temperature)
+                    gen_kwargs["top_p"] = float(args.top_p)
+
                 out = model.generate(
                     **inputs,
-                    max_new_tokens=int(args.max_new_tokens),
-                    do_sample=True,
-                    temperature=float(args.temperature),
-                    top_p=float(args.top_p),
+                    **gen_kwargs,
                 )
 
             decoded = tokenizer.decode(out[0], skip_special_tokens=True)
@@ -198,7 +226,10 @@ def main():
             decoded = decoded.strip()
 
             json_text = extract_first_json(decoded)
-            parsed_obj = json.loads(json_text)
+            try:
+                parsed_obj = json.loads(json_text)
+            except Exception:
+                parsed_obj = json.loads(repair_json_text(json_text))
             parse_ok += 1
 
             if isinstance(parsed_obj, dict):

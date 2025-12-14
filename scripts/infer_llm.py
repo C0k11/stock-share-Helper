@@ -19,14 +19,22 @@ project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 
+def sanitize_input_text(s: str) -> str:
+    return (s or "").replace('"', "'")
+
+
 def build_messages(task: str) -> list:
     if task == "news":
-        system = "You are a professional financial news analyst. Read the news and output a structured JSON."
+        system = (
+            "You are a professional financial news analyst. Read the news and output a structured JSON. "
+            "Output valid JSON only. Do not use double quotes (\") within string values; use single quotes (') instead."
+        )
         user = (
             "Title: Fed signals rates may stay higher for longer\n"
             "Content: In the latest minutes, policymakers emphasized inflation risks and kept a restrictive stance.\n\n"
             "Output JSON with fields: event_type, sentiment, impact_equity(-1/0/1), impact_bond(-1/0/1), impact_gold(-1/0/1), summary."
         )
+        user = sanitize_input_text(user)
         return [
             {"role": "system", "content": system},
             {"role": "user", "content": user},

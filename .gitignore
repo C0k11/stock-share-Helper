@@ -91,6 +91,7 @@ temp/
 *.bak
 
 /scripts/eval_outputs/
+/scripts/eval_results/
 
 # ====================
 # Local-only helper scripts
