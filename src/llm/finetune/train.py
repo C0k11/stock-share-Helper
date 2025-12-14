@@ -17,7 +17,9 @@ class FineTuner:
         output_dir: str = "models/llm",
         lora_r: int = 16,
         lora_alpha: int = 32,
-        lora_dropout: float = 0.05
+        lora_dropout: float = 0.05,
+        max_seq_length: int = 2048,
+        gradient_checkpointing: bool = False
     ):
         """
         Args:
@@ -30,6 +32,9 @@ class FineTuner:
         self.model_name = model_name
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        self.max_seq_length = max_seq_length
+        self.gradient_checkpointing = gradient_checkpointing
         
         self.lora_config = {
             "r": lora_r,
@@ -49,8 +54,8 @@ class FineTuner:
         
         try:
             import torch
-            from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
-            from peft import LoraConfig, get_peft_model, prepare_model_for_kbit_training
+            from transformers import AutoModelForCausalLM, AutoTokenizer
+            from peft import LoraConfig, get_peft_model
             
             # 加载tokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(
@@ -62,10 +67,13 @@ class FineTuner:
             # 加载模型（4090可以不用量化）
             self.model = AutoModelForCausalLM.from_pretrained(
                 self.model_name,
-                torch_dtype=torch.bfloat16,
+                torch_dtype=torch.bfloat16 if torch.cuda.is_available() else None,
                 device_map="auto",
                 trust_remote_code=True
             )
+
+            if self.gradient_checkpointing and hasattr(self.model, "gradient_checkpointing_enable"):
+                self.model.gradient_checkpointing_enable()
             
             # 应用LoRA
             lora_config = LoraConfig(**self.lora_config)
@@ -128,7 +136,7 @@ class FineTuner:
                 return self.tokenizer(
                     texts,
                     truncation=True,
-                    max_length=2048,
+                    max_length=self.max_seq_length,
                     padding="max_length"
                 )
             
