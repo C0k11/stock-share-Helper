@@ -1,0 +1,121 @@
+# QuantAI 标的池配置
+
+# ====================
+# 美股ETF标的池（MVP）
+# ====================
+us_etf:
+  # 核心标的
+  core:
+    # 股票宽基
+    - symbol: "SPY"
+      name: "SPDR S&P 500 ETF"
+      category: "equity"
+      subcategory: "large_cap"
+      benchmark: true
+    
+    - symbol: "QQQ"
+      name: "Invesco QQQ Trust"
+      category: "equity"
+      subcategory: "tech"
+      benchmark: false
+    
+    # 长期国债
+    - symbol: "TLT"
+      name: "iShares 20+ Year Treasury Bond ETF"
+      category: "bond"
+      subcategory: "long_treasury"
+      benchmark: false
+    
+    # 中期国债
+    - symbol: "IEF"
+      name: "iShares 7-10 Year Treasury Bond ETF"
+      category: "bond"
+      subcategory: "mid_treasury"
+      benchmark: false
+    
+    # 黄金
+    - symbol: "GLD"
+      name: "SPDR Gold Shares"
+      category: "commodity"
+      subcategory: "gold"
+      benchmark: false
+    
+    # 短期国债（现金替代）
+    - symbol: "SHY"
+      name: "iShares 1-3 Year Treasury Bond ETF"
+      category: "cash_equivalent"
+      subcategory: "short_treasury"
+      benchmark: false
+
+  # 宏观指标（用于Regime检测，不交易）
+  macro_indicators:
+    - symbol: "^VIX"
+      name: "CBOE Volatility Index"
+      type: "volatility"
+    
+    - symbol: "^TNX"
+      name: "10-Year Treasury Yield"
+      type: "yield"
+
+# ====================
+# 港股ETF标的池（Phase 2）
+# ====================
+hk_etf:
+  core:
+    - symbol: "2800.HK"
+      name: "Tracker Fund of Hong Kong"
+      category: "equity"
+      subcategory: "hk_broad"
+    
+    - symbol: "3067.HK"
+      name: "iShares MSCI China A ETF"
+      category: "equity"
+      subcategory: "china_a"
+    
+    - symbol: "2840.HK"
+      name: "SPDR Gold Trust"
+      category: "commodity"
+      subcategory: "gold"
+
+# ====================
+# 组合模板
+# ====================
+portfolios:
+  # 经典60/40
+  classic_60_40:
+    name: "经典60/40组合"
+    description: "60%股票 + 40%债券"
+    allocation:
+      SPY: 0.60
+      TLT: 0.40
+  
+  # 全天候
+  all_weather:
+    name: "全天候组合"
+    description: "风险平价思路"
+    allocation:
+      SPY: 0.30
+      TLT: 0.40
+      IEF: 0.15
+      GLD: 0.15
+  
+  # 防守型
+  defensive:
+    name: "防守型组合"
+    description: "低波动、重债券"
+    allocation:
+      SPY: 0.20
+      TLT: 0.30
+      IEF: 0.30
+      GLD: 0.10
+      SHY: 0.10
+  
+  # 进攻型
+  aggressive:
+    name: "进攻型组合"
+    description: "偏股票、高波动容忍"
+    allocation:
+      SPY: 0.50
+      QQQ: 0.25
+      TLT: 0.15
+      GLD: 0.10
