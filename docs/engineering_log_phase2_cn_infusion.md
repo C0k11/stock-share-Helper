@@ -117,3 +117,63 @@
 - 扩展新闻数据入口：RSS + 公开历史数据集（避免版权风险）。
 - 回测/策略最小闭环：信号→仓位→交易规则→绩效，确保无未来函数。
 - 存储预算：控制 checkpoints 数量，仅保留必要 LoRA 权重。
+
+## 8. 每日工程记录（2025-12-14）
+
+### 8.1 当日目标
+
+- 目标 1：生成 CN400 teacher 数据集（DeepSeek-V3 / `deepseek-chat`），确保 strict JSON 可解析与字段稳定。
+- 目标 2：补齐“数据管道可靠性”证据：QC 指标、后处理清洗、可复现脚本与工程日志。
+- 目标 3：为 LoRA-C（US+CN 混合）训练准备可训练数据文件与训练入口命令。
+
+### 8.2 关键决策与原因
+
+- 决策：使用本地 `.env.local` 管理 `TEACHER_*` 配置（并保持 `.gitignore` 忽略）。
+  - 原因：避免在命令行参数/仓库文件中暴露密钥；同时支持 IDE 内直接复现运行。
+  - 备注：IDE 对被 `.gitignore` 命中的文件存在访问限制，因此采用“仓库内 `env.local.example` 模板 + 本地复制为 `.env.local`”的双文件策略。
+
+- 决策：teacher 生成完成后，增加“可训练化后处理”步骤。
+  - 原因：teacher 输出存在 `sentiment` 类型混用（数字与字符串并存）与少量 `impact_bond` 异常值，会降低微调稳定性。
+  - 策略：不重跑 teacher，直接对输出做本地后处理，生成 clean 版本。
+
+- 决策：混合数据集构建使用可复现采样（seed 固定）。
+  - 原因：当前 US 训练集规模不足预期（本地现存 `train.json` 为 284），为了先启动 LoRA-C 验证 Phase 2 假设，采用有放回采样补足到 target=1000，同时保留可追溯性。
+
+### 8.3 当日实现与产物
+
+- CN 新闻抓取扩展：
+  - `scripts/fetch_cn_news.py` 增加分页抓取能力，最终生成 `data/cn_news_400.json`（400 条）。
+
+- CN400 teacher 生成：
+  - `scripts/generate_phase2_teacher_dataset.py` 支持 DeepSeek base_url 规范化（自动补 `/v1`）。
+  - 运行结果：`data/finetune/phase2_cn_teacher.json` items=400。
+
+- QC（原始 teacher 输出）：
+  - `parse_ok=400, parse_fail=0`
+  - `missing={}`，`extra={}`
+  - `event_type` 分布：concept_hype 137 / corporate_restructuring 100 / policy_stimulus 78 / regulation_crackdown 60 / market_intervention 25
+  - 发现：`sentiment` 混用（如 `negative/neutral/positive` 与 `-1/0/1` 并存）；`impact_bond` 存在少量非预期值。
+
+- 后处理 clean 版本：
+  - 产出：`data/finetune/phase2_cn_teacher_clean.json`
+  - 处理：
+    - `sentiment` 归一到 `-1/0/1`
+    - `impact_bond` 规则化：仅 `policy_stimulus=1`，其余置 `0`
+
+- 脚本入库（可复现证据）：
+  - `scripts/qc_phase2_cn_teacher.py`
+  - `scripts/postprocess_phase2_cn_teacher.py`
+  - `scripts/build_phase2_hybrid_dataset.py`（US+CN 目标 1000、US:CN=60:40、seed 固定、可选 shuffle）
+
+### 8.4 当前状态与下一步
+
+- 训练数据：
+  - 推荐训练输入使用 `data/finetune/phase2_hybrid_1000.json`（由脚本生成，target=1000，US:CN=60:40）。
+  - CN 侧使用 clean 版本：`data/finetune/phase2_cn_teacher_clean.json`。
+
+- 下一步（进入“炼丹”）：
+  - 使用 `scripts/finetune_llm.py` 启动 LoRA-C（Qwen2.5-14B + QLoRA + grad checkpointing）。
+  - 训练后用固定 A 股 5-case 回归评测：检查 `event_type` 与 impact 强绑定是否符合预期。
+
+- 安全：
+  - 若密钥曾出现在聊天/文本中，应视为泄露并尽快作废，后续仅使用本地 `.env.local` 或环境变量。
