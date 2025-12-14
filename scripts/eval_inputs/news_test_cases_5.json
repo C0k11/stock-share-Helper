@@ -1,0 +1,32 @@
+[
+  {
+    "id": "case_1_macro_cpi",
+    "category": "macro",
+    "title": "US CPI Rises 3.4% in November, Exceeding Expectations; Fed Swaps Push First Rate Cut to Late 2026",
+    "content": "The Consumer Price Index (CPI) accelerated for a second consecutive month, driven by shelter and energy costs. Core services ex-housing remains sticky. Market probability of a January rate cut plummeted to 12% from 60% last week."
+  },
+  {
+    "id": "case_2_earnings_crwd",
+    "category": "earnings",
+    "title": "CloudStrike (CRWD) Q3 Revenue Beats Estimates on AI Security Demand, Shares Tumble 8% After-Hours on Weak Guidance",
+    "content": "While Q3 EPS of $0.95 beat the street view of $0.88, the cybersecurity firm forecasted Q4 revenue below consensus, citing elongated sales cycles in the enterprise sector and budget tightening in Europe."
+  },
+  {
+    "id": "case_3_geopolitics_metals",
+    "category": "geopolitics",
+    "title": "Beijing Restricts Exports of Gallium and Germanium, Key Materials for Semiconductor Manufacturing, Effective Immediately",
+    "content": "The Ministry of Commerce cited national security for the new controls. This move is seen as a direct countermeasure to recent US-led chip equipment bans. European chipmakers warn of potential supply chain disruptions within weeks."
+  },
+  {
+    "id": "case_4_regulation_antitrust",
+    "category": "regulation",
+    "title": "EU Commission Opens Formal Antitrust Investigation into BioPharma Giant's Acquisition of Rare Disease Startup",
+    "content": "Regulators are concerned the $15B deal could stifle innovation in gene therapies. The FTC has also signaled it will join the probe, marking a rare cross-Atlantic regulatory alignment against pharma consolidation."
+  },
+  {
+    "id": "case_5_industry_ev_price_war",
+    "category": "industry",
+    "title": "Global EV Market: Leading Automakers Announce New Round of Price Cuts in China as Inventory Levels Hit Record Highs",
+    "content": "Following Tesla's lead, three major domestic manufacturers slashed prices by an average of 5% this morning. Analysts warn this \"race to the bottom\" will severely compress gross margins across the sector in Q1 2026."
+  }
+]

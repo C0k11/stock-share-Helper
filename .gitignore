@@ -90,6 +90,8 @@ temp/
 *.tmp
 *.bak
 
+/scripts/eval_outputs/
+
 # ====================
 # Local-only helper scripts
 # ====================
