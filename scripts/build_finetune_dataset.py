@@ -20,6 +20,8 @@ from pathlib import Path
 import argparse
 import hashlib
 import random
+from datetime import datetime, timezone
+from email.utils import parsedate_to_datetime
 from loguru import logger
 
 
@@ -69,6 +71,23 @@ def main():
         except Exception as e:
             logger.warning(f"Failed to load existing dataset for append: {e}")
             return []
+
+    def parse_published_at(item: dict) -> datetime:
+        meta = item.get("meta") or {}
+        s = (meta.get("published_at") or "").strip()
+        if not s:
+            return datetime.min.replace(tzinfo=timezone.utc)
+        try:
+            dt = parsedate_to_datetime(s)
+        except Exception:
+            try:
+                dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+            except Exception:
+                return datetime.min.replace(tzinfo=timezone.utc)
+
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return dt.astimezone(timezone.utc)
 
     from src.data.fetcher import DataFetcher
     from src.llm.news_parser import RuleBasedNewsParser
@@ -179,8 +198,16 @@ def main():
     new_data = ds.to_conversation_format()
 
     if args.append and out_path.exists():
-        existing = load_existing(out_path)
-        logger.info(f"Appending to existing dataset: {out_path} (existing={len(existing)}, new={len(new_data)})")
+        existing_train = load_existing(out_path)
+        existing_val = []
+        if args.split_val:
+            val_path = out_path.parent / "val.json"
+            existing_val = load_existing(val_path)
+
+        existing = existing_train + existing_val
+        logger.info(
+            f"Appending to existing dataset: {out_path} (existing_train={len(existing_train)}, existing_val={len(existing_val)}, new={len(new_data)})"
+        )
         merged = existing + new_data
         if args.dedup:
             seen = set()
@@ -204,13 +231,13 @@ def main():
         final_data = new_data
 
     if args.split_val:
-        random.seed(args.seed)
         data = list(final_data)
-        random.shuffle(data)
+        data.sort(key=lambda x: (parse_published_at(x), conversation_key(x)))
+
         val_n = int(len(data) * float(args.val_ratio))
         val_n = max(1, val_n) if len(data) >= 2 else 0
-        val_data = data[:val_n]
-        train_data = data[val_n:]
+        val_data = data[-val_n:] if val_n > 0 else []
+        train_data = data[:-val_n] if val_n > 0 else data
         import json
 
         val_path = out_path.parent / "val.json"
