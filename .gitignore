@@ -91,6 +91,11 @@ temp/
 *.bak
 
 # ====================
+# Local-only helper scripts
+# ====================
+/scripts/overnight_queue.ps1
+
+# ====================
 # 测试覆盖率
 # ====================
 htmlcov/
