@@ -48,7 +48,19 @@ class DataFetcher:
         if self.source == "yfinance":
             for symbol in symbols:
                 try:
-                    ticker = yf.Ticker(symbol)
+                    sym = str(symbol).strip()
+                    yf_symbol = sym
+
+                    # Support CN A-share / ETF numeric tickers via Yahoo suffix mapping.
+                    # - Shanghai: .SS
+                    # - Shenzhen: .SZ
+                    if sym.isdigit() and len(sym) == 6 and "." not in sym:
+                        if sym.startswith(("5", "6", "9")):
+                            yf_symbol = f"{sym}.SS"
+                        else:
+                            yf_symbol = f"{sym}.SZ"
+
+                    ticker = yf.Ticker(yf_symbol)
                     df = ticker.history(start=start_date, end=end_date, interval=interval)
                     
                     if df.empty:
@@ -59,11 +71,104 @@ class DataFetcher:
                     df.columns = [c.lower().replace(" ", "_") for c in df.columns]
                     df.index.name = "date"
                     
-                    result[symbol] = df
-                    logger.info(f"Fetched {len(df)} bars for {symbol}")
+                    result[sym] = df
+                    if yf_symbol != sym:
+                        logger.info(f"Fetched {len(df)} bars for {sym} (yfinance={yf_symbol})")
+                    else:
+                        logger.info(f"Fetched {len(df)} bars for {sym}")
                     
                 except Exception as e:
                     logger.error(f"Error fetching {symbol}: {e}")
+
+        elif self.source == "akshare":
+            if interval != "1d":
+                raise NotImplementedError("akshare source currently supports interval=1d only")
+
+            try:
+                import akshare as ak  # type: ignore
+            except Exception as e:
+                raise ImportError(
+                    "akshare is required for DataFetcher(source='akshare'). "
+                    "Install it with: pip install akshare"
+                ) from e
+
+            def to_yyyymmdd(s: str) -> str:
+                return s.replace("-", "")
+
+            start_yyyymmdd = to_yyyymmdd(start_date)
+            end_yyyymmdd = to_yyyymmdd(end_date) if end_date else to_yyyymmdd(datetime.now().strftime("%Y-%m-%d"))
+
+            for symbol in symbols:
+                try:
+                    sym = str(symbol).strip()
+                    is_numeric = sym.isdigit()
+
+                    if is_numeric:
+                        # Heuristic: 6-digit numeric codes often represent A-share stocks or ETFs.
+                        # Prefer ETF API for common ETF codes; fall back to stock API.
+                        try:
+                            df_raw = ak.fund_etf_hist_em(
+                                symbol=sym,
+                                period="daily",
+                                start_date=start_yyyymmdd,
+                                end_date=end_yyyymmdd,
+                                adjust="qfq",
+                            )
+                            source_kind = "etf"
+                        except Exception:
+                            df_raw = ak.stock_zh_a_hist(
+                                symbol=sym,
+                                period="daily",
+                                start_date=start_yyyymmdd,
+                                end_date=end_yyyymmdd,
+                                adjust="qfq",
+                            )
+                            source_kind = "stock"
+                    else:
+                        raise ValueError(
+                            f"akshare source expects numeric CN symbols like '510300' or '600519', got: {sym}"
+                        )
+
+                    if df_raw is None or df_raw.empty:
+                        logger.warning(f"No data for {symbol} (akshare/{source_kind})")
+                        continue
+
+                    # Normalize columns to: open/high/low/close/volume/adj_close
+                    col_map = {
+                        "日期": "date",
+                        "开盘": "open",
+                        "收盘": "close",
+                        "最高": "high",
+                        "最低": "low",
+                        "成交量": "volume",
+                        "成交额": "amount",
+                    }
+                    df = df_raw.rename(columns={k: v for k, v in col_map.items() if k in df_raw.columns}).copy()
+
+                    if "date" not in df.columns:
+                        # Some akshare endpoints already have `date` or `日期`
+                        if "date" in df_raw.columns:
+                            df["date"] = df_raw["date"]
+                        else:
+                            raise ValueError(f"akshare returned unexpected columns for {symbol}: {list(df_raw.columns)}")
+
+                    df["date"] = pd.to_datetime(df["date"])
+                    df = df.set_index("date")
+
+                    for required in ["open", "high", "low", "close"]:
+                        if required not in df.columns:
+                            raise ValueError(f"Missing column '{required}' for {symbol} from akshare")
+
+                    if "volume" not in df.columns:
+                        df["volume"] = 0
+
+                    df["adj_close"] = df["close"]
+                    df = df[["open", "high", "low", "close", "volume", "adj_close"]].sort_index()
+
+                    result[symbol] = df
+                    logger.info(f"Fetched {len(df)} bars for {symbol} (akshare/{source_kind})")
+                except Exception as e:
+                    logger.error(f"Error fetching {symbol} (akshare): {e}")
         
         else:
             raise NotImplementedError(f"Source {self.source} not implemented")

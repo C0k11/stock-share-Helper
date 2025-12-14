@@ -44,6 +44,22 @@ class FineTuneDataset:
         if meta is not None:
             sample["meta"] = meta
         self.samples.append(sample)
+
+    def add_trading_case_sample(
+        self,
+        context: str,
+        output_json: Dict,
+        meta: Optional[Dict] = None,
+    ):
+        """添加交易案例样本（输出严格JSON）"""
+        sample = {
+            "type": "trading_case",
+            "input": context,
+            "output": json.dumps(output_json, ensure_ascii=False),
+        }
+        if meta is not None:
+            sample["meta"] = meta
+        self.samples.append(sample)
     
     def add_explanation_sample(
         self,
@@ -69,6 +85,12 @@ class FineTuneDataset:
             if sample["type"] == "news_parsing":
                 system = "你是一个专业的金融新闻分析师。分析新闻并输出结构化JSON。"
                 user = sample["input"] + "\n\n请输出JSON格式的分析结果。"
+            elif sample["type"] == "trading_case":
+                system = (
+                    "你是一个专业的交易与风险管理助手。"
+                    "你必须输出严格JSON（不要markdown，不要额外文字，不要多余字段）。"
+                )
+                user = sample["input"]
             else:
                 system = "你是一个专业的投资顾问助手。"
                 user = sample["input"]
