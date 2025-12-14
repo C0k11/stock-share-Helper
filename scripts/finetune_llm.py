@@ -9,8 +9,15 @@
   .\\venv311\\Scripts\\python.exe scripts\\finetune_llm.py --model Qwen/Qwen2.5-7B-Instruct --epochs 1
 """
 
+import sys
+from pathlib import Path
 import argparse
 from loguru import logger
+
+
+# 添加项目根目录到路径（确保可直接运行脚本）
+project_root = Path(__file__).parent.parent
+sys.path.insert(0, str(project_root))
 
 
 def main():
