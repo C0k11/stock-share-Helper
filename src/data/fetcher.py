@@ -2,6 +2,7 @@
 数据抓取模块 - 获取行情、宏观指标、新闻数据
 """
 
+import os
 import pandas as pd
 import yfinance as yf
 from datetime import datetime, timedelta
@@ -104,9 +105,101 @@ class DataFetcher:
         Returns:
             新闻列表，每条包含 title, content, source, published_at, url
         """
-        # TODO: 实现新闻抓取（RSS/NewsAPI）
-        logger.warning("News fetching not implemented yet")
-        return []
+        import feedparser
+        import requests
+
+        def _match_keywords(title: str, content: str) -> bool:
+            if not keywords:
+                return True
+            text = f"{title} {content}".lower()
+            return any(str(k).lower() in text for k in keywords)
+
+        news: List[Dict] = []
+
+        rss_sources = sources
+        if not rss_sources:
+            rss_sources = [
+                "https://feeds.finance.yahoo.com/rss/2.0/headline?s=SPY&region=US&lang=en-US",
+                "https://feeds.finance.yahoo.com/rss/2.0/headline?s=QQQ&region=US&lang=en-US",
+                "https://feeds.finance.yahoo.com/rss/2.0/headline?s=TLT&region=US&lang=en-US",
+                "https://feeds.finance.yahoo.com/rss/2.0/headline?s=GLD&region=US&lang=en-US",
+            ]
+
+        for src in rss_sources:
+            if not isinstance(src, str) or not src.strip():
+                continue
+            if not src.lower().startswith("http"):
+                continue
+
+            try:
+                feed = feedparser.parse(src)
+                for entry in getattr(feed, "entries", []) or []:
+                    title = (getattr(entry, "title", None) or "").strip()
+                    link = (getattr(entry, "link", None) or "").strip()
+                    summary = (getattr(entry, "summary", None) or "").strip()
+                    published = (getattr(entry, "published", None) or getattr(entry, "updated", None) or "")
+                    source_name = (getattr(feed, "feed", {}) or {}).get("title", "rss")
+
+                    if not title and not summary:
+                        continue
+                    if not _match_keywords(title, summary):
+                        continue
+
+                    news.append({
+                        "title": title,
+                        "content": summary,
+                        "source": source_name,
+                        "published_at": published,
+                        "url": link,
+                    })
+                    if len(news) >= limit:
+                        break
+                if len(news) >= limit:
+                    break
+
+            except Exception as e:
+                logger.warning(f"Failed to parse RSS source {src}: {e}")
+
+        if news:
+            return news[:limit]
+
+        api_key = os.getenv("NEWSAPI_KEY")
+        if not api_key:
+            return []
+
+        try:
+            q = " OR ".join(keywords) if keywords else "market OR stocks OR ETF"
+            params = {
+                "q": q,
+                "language": "en",
+                "sortBy": "publishedAt",
+                "pageSize": min(limit, 100),
+                "apiKey": api_key,
+            }
+            resp = requests.get("https://newsapi.org/v2/everything", params=params, timeout=20)
+            resp.raise_for_status()
+            data = resp.json() or {}
+
+            for a in data.get("articles", []) or []:
+                title = (a.get("title") or "").strip()
+                content = (a.get("content") or a.get("description") or "").strip()
+                if not _match_keywords(title, content):
+                    continue
+
+                news.append({
+                    "title": title,
+                    "content": content,
+                    "source": (a.get("source") or {}).get("name") or "newsapi",
+                    "published_at": a.get("publishedAt") or "",
+                    "url": a.get("url") or "",
+                })
+                if len(news) >= limit:
+                    break
+
+        except Exception as e:
+            logger.warning(f"NewsAPI fetch failed: {e}")
+
+        return news[:limit]
 
 
 # 便捷函数
