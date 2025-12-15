@@ -9,6 +9,7 @@
 """
 
 import sys
+import json
 from pathlib import Path
 import argparse
 from loguru import logger
@@ -23,15 +24,50 @@ def sanitize_input_text(s: str) -> str:
     return (s or "").replace('"', "'")
 
 
-def build_messages(task: str) -> list:
+CN_EVENT_TYPES = [
+    "policy_stimulus",
+    "regulation_crackdown",
+    "market_intervention",
+    "concept_hype",
+    "corporate_restructuring",
+]
+
+
+def build_messages(
+    task: str,
+    title: str | None = None,
+    content: str | None = None,
+    *,
+    market: str = "us",
+) -> list:
     if task == "news":
-        system = (
-            "You are a professional financial news analyst. Read the news and output a structured JSON. "
-            "Output valid JSON only. Do not use double quotes (\") within string values; use single quotes (') instead."
-        )
+        market = (market or "us").strip().lower()
+        if market == "cn":
+            system = (
+                "You are an expert A-Share (Chinese Stock Market) trader. You understand hidden signals and A-share jargon. "
+                "You must output STRICT JSON only (no markdown, no prose outside JSON). "
+                "Output valid JSON only. Do not use double quotes (\") within string values; use single quotes (') instead. "
+                "You MUST choose event_type from this enum: "
+                f"{CN_EVENT_TYPES}. "
+                "You MUST follow these hard rules: "
+                "- If event_type is regulation_crackdown, impact_equity MUST be -1. "
+                "- If event_type is market_intervention, impact_equity MUST be 1. "
+                "- If event_type is corporate_restructuring, impact_equity MUST be 1. "
+                "- If event_type is policy_stimulus, impact_equity MUST be 1 and impact_bond MUST be 1. "
+                "- If event_type is concept_hype, impact_equity MUST be 1 and summary MUST mention speculative/short-term nature."
+            )
+        else:
+            system = (
+                "You are a professional financial news analyst. Read the news and output a structured JSON. "
+                "Output valid JSON only. Do not use double quotes (\") within string values; use single quotes (') instead."
+            )
+        if title is None:
+            title = "Fed signals rates may stay higher for longer"
+        if content is None:
+            content = "In the latest minutes, policymakers emphasized inflation risks and kept a restrictive stance."
         user = (
-            "Title: Fed signals rates may stay higher for longer\n"
-            "Content: In the latest minutes, policymakers emphasized inflation risks and kept a restrictive stance.\n\n"
+            f"Title: {title}\n"
+            f"Content: {content}\n\n"
             "Output JSON with fields: event_type, sentiment, impact_equity(-1/0/1), impact_bond(-1/0/1), impact_gold(-1/0/1), summary."
         )
         user = sanitize_input_text(user)
@@ -60,19 +96,92 @@ def build_messages(task: str) -> list:
     ]
 
 
+def _extract_first_json_object(text: str) -> str | None:
+    if not text:
+        return None
+    start = text.find("{")
+    if start == -1:
+        return None
+    depth = 0
+    in_str = False
+    esc = False
+    for i in range(start, len(text)):
+        ch = text[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == "\\":
+                esc = True
+            elif ch == '"':
+                in_str = False
+        else:
+            if ch == '"':
+                in_str = True
+            elif ch == "{":
+                depth += 1
+            elif ch == "}":
+                depth -= 1
+                if depth == 0:
+                    return text[start : i + 1]
+    return None
+
+
+def _try_parse_json(text: str) -> tuple[bool, str | None]:
+    js = _extract_first_json_object(text)
+    if js is None:
+        return False, None
+    try:
+        json.loads(js)
+        return True, js
+    except Exception:
+        return False, js
+
+
+def _generate_once(model, tokenizer, messages: list, max_new_tokens: int, deterministic: bool):
+    import torch
+
+    prompt = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+
+    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+
+    gen_kwargs = {
+        "max_new_tokens": max_new_tokens,
+        "do_sample": not deterministic,
+    }
+    if not deterministic:
+        gen_kwargs.update({"temperature": 0.7, "top_p": 0.9})
+
+    with torch.no_grad():
+        outputs = model.generate(**inputs, **gen_kwargs)
+
+    prompt_len = inputs["input_ids"].shape[1]
+    out_text = tokenizer.decode(outputs[0][prompt_len:], skip_special_tokens=True)
+    return out_text
+
+
 def main():
     parser = argparse.ArgumentParser(description="Infer with base model and optional LoRA")
     parser.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct", help="Base model")
     parser.add_argument("--lora", default="models/llm/lora_weights", help="LoRA weights path")
     parser.add_argument("--use-lora", action="store_true", help="Load LoRA weights")
+    parser.add_argument("--compare-lora", action="store_true", help="Run base vs LoRA comparison in one process")
     parser.add_argument("--load-in-4bit", action="store_true", help="Load base model in 4-bit (recommended for 14B + LoRA)")
     parser.add_argument("--task", choices=["news", "explain", "chat"], default="news")
     parser.add_argument("--max-new-tokens", type=int, default=256)
+    parser.add_argument("--deterministic", action="store_true")
+    parser.add_argument("--title", default=None)
+    parser.add_argument("--content", default=None)
+    parser.add_argument("--cases", default=None, help="Path to JSON list: [{title, content, id?, tag?}, ...]")
+    parser.add_argument("--limit", type=int, default=0, help="Limit number of cases loaded from --cases (0 = no limit)")
 
     args = parser.parse_args()
 
     import torch
-    from transformers import AutoModelForCausalLM, AutoTokenizer, TextStreamer
+    from transformers import AutoModelForCausalLM, AutoTokenizer
 
     logger.info(f"Loading base model: {args.model}")
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
@@ -100,6 +209,68 @@ def main():
 
     model = AutoModelForCausalLM.from_pretrained(args.model, **model_kwargs)
 
+    def run_cases(current_model, label: str):
+        if args.cases:
+            cases_path = Path(args.cases)
+            if not cases_path.exists():
+                raise FileNotFoundError(f"Cases file not found: {cases_path}")
+            cases = json.load(open(cases_path, "r", encoding="utf-8"))
+            if not isinstance(cases, list):
+                raise ValueError("--cases must be a JSON list")
+            if args.limit and args.limit > 0:
+                cases = cases[: args.limit]
+        else:
+            cases = [{"title": args.title, "content": args.content, "id": "single"}]
+
+        print("=" * 80)
+        print(f"RUN={label} task={args.task} deterministic={args.deterministic} cases={len(cases)}")
+
+        ok_cnt = 0
+        for idx, c in enumerate(cases, start=1):
+            title = c.get("title")
+            content = c.get("content")
+            case_id = c.get("id", str(idx))
+            tag = c.get("tag", "")
+            market = c.get("market") or "us"
+            messages = build_messages(args.task, title=title, content=content, market=market)
+            out_text = _generate_once(
+                current_model,
+                tokenizer,
+                messages,
+                max_new_tokens=args.max_new_tokens,
+                deterministic=args.deterministic,
+            )
+
+            ok, js = _try_parse_json(out_text)
+            ok_cnt += 1 if ok else 0
+
+            print("-" * 80)
+            print(f"CASE {idx}/{len(cases)} id={case_id} market={market} tag={tag}")
+            if title:
+                print(f"TITLE: {title}")
+            print(f"JSON_PARSE_OK={ok}")
+            if js is not None:
+                print(js)
+            else:
+                print(out_text.strip())
+
+        print("-" * 80)
+        print(f"JSON_PARSE_OK_RATE={ok_cnt}/{len(cases)}")
+        print("=" * 80)
+
+    if args.compare_lora:
+        run_cases(model, label="BASE")
+
+        from peft import PeftModel
+
+        lora_path = Path(args.lora)
+        if not lora_path.exists():
+            raise FileNotFoundError(f"LoRA weights not found: {lora_path}")
+        logger.info(f"Loading LoRA weights: {lora_path}")
+        lora_model = PeftModel.from_pretrained(model, str(lora_path))
+        run_cases(lora_model, label="LORA")
+        return
+
     if args.use_lora:
         from peft import PeftModel
 
@@ -110,31 +281,7 @@ def main():
         logger.info(f"Loading LoRA weights: {lora_path}")
         model = PeftModel.from_pretrained(model, str(lora_path))
 
-    messages = build_messages(args.task)
-
-    prompt = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True,
-    )
-
-    inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
-
-    streamer = TextStreamer(tokenizer, skip_prompt=True, skip_special_tokens=True)
-
-    print("=" * 80)
-
-    with torch.no_grad():
-        outputs = model.generate(
-            **inputs,
-            max_new_tokens=args.max_new_tokens,
-            do_sample=True,
-            temperature=0.7,
-            top_p=0.9,
-            streamer=streamer,
-        )
-
-    print("\n" + "=" * 80)
+    run_cases(model, label="SINGLE")
 
 
 if __name__ == "__main__":
