@@ -276,6 +276,22 @@ For 14B + LoRA inference, 4-bit loading is recommended to avoid CPU/disk offload
 .\venv311\Scripts\python.exe scripts\infer_llm.py --model Qwen/Qwen2.5-14B-Instruct --task news --use-lora --lora models\llm_qwen14b_overnight\lora_weights --load-in-4bit
 ```
 
+### 5) Teacher distillation dataset (DeepSeek, ETF)
+
+This repo supports generating a high-quality teacher dataset from daily ETF feature snapshots using an OpenAI-compatible API (e.g., DeepSeek).
+
+Environment variables:
+
+- `TEACHER_API_KEY`
+- `TEACHER_BASE_URL` (e.g. `https://api.deepseek.com`)
+- `TEACHER_MODEL` (e.g. `deepseek-chat`)
+
+Example:
+
+```bash
+.\venv311\Scripts\python.exe scripts\generate_etf_teacher_dataset.py --daily-dir data/daily --start-date 2025-12-01 --end-date 2025-12-31 --include-cot --resume
+```
+
 ---
 
 ##  Disclaimer
@@ -569,6 +585,22 @@ schtasks /Create /TN "QuantAI_DailyPipeline" /SC DAILY /ST 07:30 /RL HIGHEST /F 
 ```bash
 .\venv311\Scripts\python.exe scripts\infer_llm.py --model Qwen/Qwen2.5-14B-Instruct --task news --load-in-4bit
 .\venv311\Scripts\python.exe scripts\infer_llm.py --model Qwen/Qwen2.5-14B-Instruct --task news --use-lora --lora models\llm_qwen14b_overnight\lora_weights --load-in-4bit
+```
+
+### 5) Teacher 蒸馏数据集（DeepSeek，ETF）
+
+支持从每日 ETF 特征快照生成高质量 teacher 数据集（OpenAI-compat API，例如 DeepSeek），用于后续 LoRA 蒸馏训练。
+
+环境变量：
+
+- `TEACHER_API_KEY`
+- `TEACHER_BASE_URL`（例如 `https://api.deepseek.com`）
+- `TEACHER_MODEL`（例如 `deepseek-chat`）
+
+示例（多角色辩论 + 长推演，支持断点续跑）：
+
+```bash
+.\venv311\Scripts\python.exe scripts\generate_etf_teacher_dataset.py --daily-dir data/daily --start-date 2025-12-01 --end-date 2025-12-31 --include-cot --resume
 ```
 
 ---
