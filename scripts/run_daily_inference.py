@@ -160,6 +160,9 @@ def main():
     parser.add_argument("--deterministic", action="store_true", default=True)
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--offset", type=int, default=0)
+    parser.add_argument("--market", choices=["ALL", "US", "CN"], default="ALL")
+    parser.add_argument("--sample-us", type=int, default=0, help="Take first N US items (overrides --offset/--limit selection)")
+    parser.add_argument("--sample-cn", type=int, default=0, help="Take first N CN items (overrides --offset/--limit selection)")
 
     args = parser.parse_args()
 
@@ -169,10 +172,26 @@ def main():
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     items = _load_json_list(in_path)
-    if args.offset and args.offset > 0:
-        items = items[args.offset :]
-    if args.limit and args.limit > 0:
-        items = items[: args.limit]
+
+    # Market filtering / sampling (for smoke tests and split-brain validation)
+    market_filter = (args.market or "ALL").upper()
+    if market_filter in ("US", "CN"):
+        items = [it for it in items if str(it.get("market") or "US").strip().upper() == market_filter]
+
+    if (args.sample_us and args.sample_us > 0) or (args.sample_cn and args.sample_cn > 0):
+        us_items = [it for it in items if str(it.get("market") or "US").strip().upper() == "US"]
+        cn_items = [it for it in items if str(it.get("market") or "US").strip().upper() == "CN"]
+        picked: List[Dict[str, Any]] = []
+        if args.sample_us and args.sample_us > 0:
+            picked.extend(us_items[: args.sample_us])
+        if args.sample_cn and args.sample_cn > 0:
+            picked.extend(cn_items[: args.sample_cn])
+        items = picked
+    else:
+        if args.offset and args.offset > 0:
+            items = items[args.offset :]
+        if args.limit and args.limit > 0:
+            items = items[: args.limit]
 
     logger.info(f"Input items: {len(items)} from {in_path}")
 
