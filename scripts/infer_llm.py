@@ -60,7 +60,8 @@ def build_messages(
             system = (
                 "You are an expert A-Share (Chinese Stock Market) trader. You understand hidden signals and A-share jargon. "
                 "You must output STRICT JSON only (no markdown, no prose outside JSON). "
-                "Output valid JSON only. Do not use double quotes (\") within string values; use single quotes (') instead. "
+                "Output valid JSON only using standard JSON double quotes for keys and string values. "
+                "Do NOT use single quotes (') to delimit JSON strings. Do NOT include quote characters inside string values. "
                 "You MUST choose event_type from this enum: "
                 f"{CN_EVENT_TYPES}. "
                 "You MUST follow these hard rules: "
@@ -75,7 +76,8 @@ def build_messages(
             system = (
                 "You are a professional US financial news analyst. "
                 "You must output STRICT JSON only (no markdown, no prose outside JSON). "
-                "Output valid JSON only. Do not use double quotes (\") within string values; use single quotes (') instead. "
+                "Output valid JSON only using standard JSON double quotes for keys and string values. "
+                "Do NOT use single quotes (') to delimit JSON strings. Do NOT include quote characters inside string values. "
                 "This is a US market task. "
                 "You MUST choose event_type from this US-only enum: "
                 f"{US_EVENT_TYPES}. "
