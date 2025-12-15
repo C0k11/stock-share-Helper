@@ -193,6 +193,8 @@ Outputs (under `data/daily/`):
 - `report_YYYY-MM-DD.md`
 - `health_YYYY-MM-DD.json` (fetch health report)
 
+The daily report also includes a **Risk Watch** section for CN `regulation_crackdown` signals.
+
 ### Run scripts manually
 
 ```powershell
@@ -207,10 +209,29 @@ Outputs (under `data/daily/`):
 .\venv311\Scripts\python.exe scripts\evaluate_signal.py --signals data/daily/signals_2025-12-14.json --date 2025-12-14 --align-mode run_date --sample 20
 ```
 
+Multi-day aggregated evaluation (scan `data/daily/signals_*.json`):
+
+```powershell
+.\venv311\Scripts\python.exe scripts\evaluate_signal.py --scan-daily --daily-dir data/daily --start-date 2025-12-01 --end-date 2025-12-31 --align-mode run_date --auto-fetch
+```
+
 Event-based analysis is printed automatically (by `event_type`). You can also filter the evaluation to specific event types:
 
 ```powershell
 .\venv311\Scripts\python.exe scripts\evaluate_signal.py --signals data/daily/signals_2025-12-14.json --date 2025-12-14 --align-mode run_date --types regulation_crackdown
+```
+
+### Scheduling (Windows Task Scheduler)
+
+To accumulate history automatically, schedule `run_pipeline.bat` daily.
+
+- Create a basic task in Task Scheduler, set **Program/script** to the absolute path of `run_pipeline.bat`.
+- Set **Start in** to the repo root folder.
+
+Optional CLI example (run PowerShell as Administrator, adjust paths):
+
+```powershell
+schtasks /Create /TN "QuantAI_DailyPipeline" /SC DAILY /ST 07:30 /RL HIGHEST /F /TR "\"D:\\Project\\Stock\\run_pipeline.bat\""
 ```
 
 ---
@@ -467,6 +488,8 @@ run_pipeline.bat
 - `report_YYYY-MM-DD.md`
 - `health_YYYY-MM-DD.json`（抓取健康检查）
 
+日报中会额外包含 **Risk Watch** 专栏（CN `regulation_crackdown`）。
+
 ### 手动运行脚本
 
 ```powershell
@@ -481,10 +504,29 @@ run_pipeline.bat
 .\venv311\Scripts\python.exe scripts\evaluate_signal.py --signals data/daily/signals_2025-12-14.json --date 2025-12-14 --align-mode run_date --sample 20
 ```
 
+多日聚合评测（扫描 `data/daily/signals_*.json`，包含 `signals_full_*.json`）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\evaluate_signal.py --scan-daily --daily-dir data/daily --start-date 2025-12-01 --end-date 2025-12-31 --align-mode run_date --auto-fetch
+```
+
 脚本会自动打印按 `event_type` 的分组统计；也支持用 `--types` 只评测特定类型（如风控专场）：
 
 ```powershell
 .\venv311\Scripts\python.exe scripts\evaluate_signal.py --signals data/daily/signals_2025-12-14.json --date 2025-12-14 --align-mode run_date --types regulation_crackdown
+```
+
+### 定时运行（Windows 任务计划程序）
+
+为了自动积累历史数据，建议用任务计划程序每天定时运行 `run_pipeline.bat`。
+
+- Program/script：填写 `run_pipeline.bat` 的绝对路径
+- Start in：仓库根目录
+
+可选命令行示例（管理员权限运行 PowerShell，按需修改路径）：
+
+```powershell
+schtasks /Create /TN "QuantAI_DailyPipeline" /SC DAILY /ST 07:30 /RL HIGHEST /F /TR "\"D:\\Project\\Stock\\run_pipeline.bat\""
 ```
 
 ##  LLM微调（快速开始）

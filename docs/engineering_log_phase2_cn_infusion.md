@@ -554,3 +554,10 @@ Ground Truth 数据源（本地已有）：
 本地验证（2h 窗口）：
 
 - CN RSS 0 条时自动启用 fallback，并写出 health 文件用于后续监控。
+
+## 12. Phase 4 增强：多日聚合评测 + 风控专栏（2025-12-14）
+
+新增：
+
+- `scripts/evaluate_signal.py` 支持 `--scan-daily`：扫描 `data/daily/signals_*.json`（含 `signals_full_*.json`）并输出跨日汇总统计。
+- `scripts/generate_daily_report.py` 增加 `Risk Watch (CN: regulation_crackdown)` 专栏：统计数量/占比并列出 Top 条目。

@@ -4,6 +4,7 @@ import argparse
 from collections import defaultdict
 import datetime as dt
 import json
+import re
 import sys
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -16,6 +17,9 @@ sys.path.insert(0, str(PROJECT_ROOT))
 
 from src.data.storage import DataStorage
 from src.data.fetcher import DataFetcher
+
+
+_SIGNALS_RE = re.compile(r"^signals_(?:full_)?(\d{4}-\d{2}-\d{2})\.json$", re.IGNORECASE)
 
 
 def _today_str() -> str:
@@ -32,6 +36,27 @@ def _load_json_list(path: Path) -> List[Dict[str, Any]]:
     if not isinstance(data, list):
         raise ValueError("signals file must be a JSON list")
     return data
+
+
+def _parse_signals_date_from_path(path: Path) -> Optional[str]:
+    m = _SIGNALS_RE.match(path.name)
+    if not m:
+        return None
+    return m.group(1)
+
+
+def _iter_signal_files(daily_dir: Path, *, start_date: Optional[str], end_date: Optional[str]) -> List[Path]:
+    files: List[Path] = []
+    for p in sorted(daily_dir.glob("signals_*.json")):
+        d = _parse_signals_date_from_path(p)
+        if not d:
+            continue
+        if start_date and d < start_date:
+            continue
+        if end_date and d > end_date:
+            continue
+        files.append(p)
+    return files
 
 
 def _build_daily_returns(df: pd.DataFrame) -> Dict[str, float]:
@@ -70,6 +95,75 @@ def _last_available_date(daily_returns: Dict[str, float]) -> Optional[str]:
 def _max_pub_date(preds: List[Dict[str, Any]]) -> Optional[str]:
     dates = sorted({p["pub_date"] for p in preds if p.get("pub_date")})
     return dates[-1] if dates else None
+
+
+def _merge_type_stats(dst: Dict[str, Dict[str, int]], src: Dict[str, Dict[str, int]]):
+    for et, st in src.items():
+        if et not in dst:
+            dst[et] = {"total": 0, "wins": 0}
+        dst[et]["total"] += int(st.get("total", 0))
+        dst[et]["wins"] += int(st.get("wins", 0))
+
+
+def _evaluate_preds(
+    preds: List[Dict[str, Any]],
+    *,
+    us_ret: Dict[str, float],
+    cn_ret: Dict[str, float],
+    max_lag_days: int,
+    allowed_types: Optional[set],
+) -> Tuple[int, int, int, Dict[str, Dict[str, int]], Dict[str, Dict[str, int]], List[Dict[str, Any]]]:
+    total = 0
+    wins = 0
+    skipped = 0
+
+    type_stats: Dict[str, Dict[str, int]] = defaultdict(lambda: {"total": 0, "wins": 0})
+    by_market: Dict[str, Dict[str, int]] = {"US": {"total": 0, "wins": 0, "skipped": 0}, "CN": {"total": 0, "wins": 0, "skipped": 0}}
+    rows: List[Dict[str, Any]] = []
+
+    for p in preds:
+        market = p["market"]
+        pub_date = p["pub_date"]
+        impact = int(p["impact_equity"])
+
+        et = str(p.get("event_type") or "unknown").strip() or "unknown"
+        if allowed_types is not None and et not in allowed_types:
+            continue
+
+        if market == "CN":
+            match_date, real = _find_tplus1_return(pub_date, cn_ret, max_lag_days=max_lag_days)
+        else:
+            match_date, real = _find_tplus1_return(pub_date, us_ret, max_lag_days=max_lag_days)
+
+        if real is None or match_date is None:
+            skipped += 1
+            by_market["CN" if market == "CN" else "US"]["skipped"] += 1
+            continue
+
+        is_win = (impact > 0 and real > 0) or (impact < 0 and real < 0)
+        total += 1
+        wins += 1 if is_win else 0
+
+        type_stats[et]["total"] += 1
+        type_stats[et]["wins"] += 1 if is_win else 0
+
+        mkey = "CN" if market == "CN" else "US"
+        by_market[mkey]["total"] += 1
+        by_market[mkey]["wins"] += 1 if is_win else 0
+
+        rows.append(
+            {
+                "match_date": match_date,
+                "market": mkey,
+                "ai": impact,
+                "real_pct": real,
+                "win": is_win,
+                "event_type": p.get("event_type"),
+                "title": p.get("title"),
+            }
+        )
+
+    return total, wins, skipped, by_market, dict(type_stats), rows
 
 
 def _ensure_price_coverage(
@@ -214,57 +308,13 @@ def evaluate(
             logger.info(f"Signal pub_date range: {pub_dates[0]} .. {pub_dates[-1]}")
     logger.info(f"Align mode: {align_mode} run_date={run_date}")
 
-    total = 0
-    wins = 0
-    skipped = 0
-
-    type_stats: Dict[str, Dict[str, int]] = defaultdict(lambda: {"total": 0, "wins": 0})
-
-    by_market: Dict[str, Dict[str, int]] = {"US": {"total": 0, "wins": 0, "skipped": 0}, "CN": {"total": 0, "wins": 0, "skipped": 0}}
-
-    rows: List[Dict[str, Any]] = []
-
-    for p in preds:
-        market = p["market"]
-        pub_date = p["pub_date"]
-        impact = int(p["impact_equity"])
-
-        et = str(p.get("event_type") or "unknown").strip() or "unknown"
-        if allowed_types is not None and et not in allowed_types:
-            continue
-
-        if market == "CN":
-            match_date, real = _find_tplus1_return(pub_date, cn_ret, max_lag_days=max_lag_days)
-        else:
-            match_date, real = _find_tplus1_return(pub_date, us_ret, max_lag_days=max_lag_days)
-
-        if real is None or match_date is None:
-            skipped += 1
-            by_market["CN" if market == "CN" else "US"]["skipped"] += 1
-            continue
-
-        is_win = (impact > 0 and real > 0) or (impact < 0 and real < 0)
-        total += 1
-        wins += 1 if is_win else 0
-
-        type_stats[et]["total"] += 1
-        type_stats[et]["wins"] += 1 if is_win else 0
-
-        mkey = "CN" if market == "CN" else "US"
-        by_market[mkey]["total"] += 1
-        by_market[mkey]["wins"] += 1 if is_win else 0
-
-        rows.append(
-            {
-                "match_date": match_date,
-                "market": mkey,
-                "ai": impact,
-                "real_pct": real,
-                "win": is_win,
-                "event_type": p.get("event_type"),
-                "title": p.get("title"),
-            }
-        )
+    total, wins, skipped, by_market, type_stats, rows = _evaluate_preds(
+        preds,
+        us_ret=us_ret,
+        cn_ret=cn_ret,
+        max_lag_days=max_lag_days,
+        allowed_types=allowed_types,
+    )
 
     df_out = pd.DataFrame(rows)
 
@@ -283,12 +333,112 @@ def evaluate(
         logger.info(f"Skipped (no market data match): {skipped}")
         return 0
 
+
+def evaluate_scan_daily(
+    *,
+    daily_dir: Path,
+    start_date: Optional[str],
+    end_date: Optional[str],
+    us_symbol: str,
+    cn_symbol: str,
+    category: str,
+    sample_n: int,
+    max_lag_days: int,
+    auto_fetch: bool,
+    fetch_source: str,
+    align_mode: str,
+    allowed_types: Optional[set],
+) -> int:
+    files = _iter_signal_files(daily_dir, start_date=start_date, end_date=end_date)
+    if not files:
+        logger.warning(f"No signals files found in {daily_dir} for range {start_date}..{end_date}")
+        return 0
+
+    per_file_preds: List[Tuple[str, List[Dict[str, Any]]]] = []
+    all_preds: List[Dict[str, Any]] = []
+    for p in files:
+        d = _parse_signals_date_from_path(p)
+        if not d:
+            continue
+        raw = _load_json_list(p)
+        preds = _iter_predictions(raw)
+        preds = _apply_align_mode(preds, align_mode=align_mode, run_date=d)
+        per_file_preds.append((d, preds))
+        all_preds.extend(preds)
+
+    storage = DataStorage(base_path="data")
+    us_df = storage.load_price_data(us_symbol, category=category)
+    cn_df = storage.load_price_data(cn_symbol, category=category)
+    if us_df is None:
+        logger.error(f"Missing US price data for {us_symbol} in data/{category}")
+        return 3
+    if cn_df is None:
+        logger.error(f"Missing CN price data for {cn_symbol} in data/{category}")
+        return 3
+
+    max_pub = _max_pub_date(all_preds)
+    if auto_fetch and max_pub:
+        required_end = (_parse_date(max_pub) + dt.timedelta(days=max(1, int(max_lag_days)))).strftime("%Y-%m-%d")
+        fetcher = DataFetcher(source=str(fetch_source))
+        us_df = _ensure_price_coverage(storage=storage, fetcher=fetcher, symbol=us_symbol, category=category, required_end_date=required_end) or us_df
+        cn_df = _ensure_price_coverage(storage=storage, fetcher=fetcher, symbol=cn_symbol, category=category, required_end_date=required_end) or cn_df
+
+    us_ret = _build_daily_returns(us_df)
+    cn_ret = _build_daily_returns(cn_df)
+    logger.info(f"US symbol={us_symbol} last_return_date={_last_available_date(us_ret)}")
+    logger.info(f"CN symbol={cn_symbol} last_return_date={_last_available_date(cn_ret)}")
+    logger.info(f"Scan files: {len(per_file_preds)} align_mode={align_mode}")
+
+    total = 0
+    wins = 0
+    skipped = 0
+    by_market: Dict[str, Dict[str, int]] = {"US": {"total": 0, "wins": 0, "skipped": 0}, "CN": {"total": 0, "wins": 0, "skipped": 0}}
+    type_stats: Dict[str, Dict[str, int]] = {}
+    sample_rows: List[Dict[str, Any]] = []
+
+    for d, preds in per_file_preds:
+        t, w, s, bm, ts, rows = _evaluate_preds(
+            preds,
+            us_ret=us_ret,
+            cn_ret=cn_ret,
+            max_lag_days=max_lag_days,
+            allowed_types=allowed_types,
+        )
+        total += t
+        wins += w
+        skipped += s
+        for m in ("US", "CN"):
+            by_market[m]["total"] += int(bm[m]["total"])
+            by_market[m]["wins"] += int(bm[m]["wins"])
+            by_market[m]["skipped"] += int(bm[m]["skipped"])
+        _merge_type_stats(type_stats, ts)
+        if sample_n > 0 and len(sample_rows) < sample_n:
+            for r in rows:
+                r2 = dict(r)
+                r2["signals_date"] = d
+                sample_rows.append(r2)
+                if len(sample_rows) >= sample_n:
+                    break
+
+    if sample_n > 0 and sample_rows:
+        print(f"{'SignalsDate':<12} | {'MatchDate':<12} | {'Mkt':<2} | {'AI':>3} | {'Real%':>8} | {'Win':<4} | {'event_type':<22} | title")
+        print("-" * 140)
+        for r in sample_rows[:sample_n]:
+            wstr = "WIN" if bool(r["win"]) else "LOSS"
+            print(
+                f"{str(r.get('signals_date','')):<12} | {str(r['match_date']):<12} | {str(r['market']):<2} | {int(r['ai']):>3} | {float(r['real_pct']):>7.2f}% | {wstr:<4} | {str(r.get('event_type')):<22} | {str(r.get('title') or '')[:70]}"
+            )
+
+    if total == 0:
+        logger.warning("No evaluatable signals matched to market data")
+        logger.info(f"Skipped (no market data match): {skipped}")
+        return 0
+
     acc = wins / total * 100.0
     logger.info(f"Total evaluated: {total}")
     logger.info(f"Wins: {wins}")
     logger.info(f"Accuracy: {acc:.2f}%")
     logger.info(f"Skipped (no market data match): {skipped}")
-
     for m in ("US", "CN"):
         mt = by_market[m]["total"]
         mw = by_market[m]["wins"]
@@ -299,7 +449,7 @@ def evaluate(
             logger.info(f"{m} accuracy: n/a (skipped={ms})")
 
     if type_stats:
-        print("\n--- Event Type Analysis ---")
+        print("\n--- Event Type Analysis (aggregated) ---")
         print(f"{'Event Type':<25} | {'Total':<6} | {'Acc':<8}")
         print("-" * 45)
         for et, st in sorted(type_stats.items(), key=lambda x: x[1]["total"], reverse=True):
@@ -315,6 +465,10 @@ def main():
     parser = argparse.ArgumentParser(description="Evaluate AI signals vs market ground truth (T+1 alignment)")
     parser.add_argument("--signals", default=None, help="Signals JSON path (default: data/daily/signals_YYYY-MM-DD.json)")
     parser.add_argument("--date", default=None, help="Date for default signals path (YYYY-MM-DD)")
+    parser.add_argument("--scan-daily", action="store_true", help="Scan data/daily/signals_*.json and aggregate stats")
+    parser.add_argument("--daily-dir", default="data/daily")
+    parser.add_argument("--start-date", default=None, help="Start date YYYY-MM-DD (for --scan-daily)")
+    parser.add_argument("--end-date", default=None, help="End date YYYY-MM-DD (for --scan-daily)")
     parser.add_argument("--us-symbol", default="SPY")
     parser.add_argument("--cn-symbol", default="510300")
     parser.add_argument("--category", default="raw", choices=["raw", "processed", "cache", "features"])
@@ -335,19 +489,35 @@ def main():
         if not allowed_types:
             allowed_types = None
 
-    code = evaluate(
-        signals_path,
-        us_symbol=str(args.us_symbol),
-        cn_symbol=str(args.cn_symbol),
-        category=str(args.category),
-        sample_n=int(args.sample),
-        max_lag_days=int(args.max_lag_days),
-        auto_fetch=bool(args.auto_fetch),
-        fetch_source=str(args.fetch_source),
-        align_mode=str(args.align_mode),
-        run_date=str(date_str),
-        allowed_types=allowed_types,
-    )
+    if bool(args.scan_daily) or args.start_date or args.end_date:
+        code = evaluate_scan_daily(
+            daily_dir=Path(str(args.daily_dir)),
+            start_date=str(args.start_date) if args.start_date else None,
+            end_date=str(args.end_date) if args.end_date else None,
+            us_symbol=str(args.us_symbol),
+            cn_symbol=str(args.cn_symbol),
+            category=str(args.category),
+            sample_n=int(args.sample),
+            max_lag_days=int(args.max_lag_days),
+            auto_fetch=bool(args.auto_fetch),
+            fetch_source=str(args.fetch_source),
+            align_mode=str(args.align_mode),
+            allowed_types=allowed_types,
+        )
+    else:
+        code = evaluate(
+            signals_path,
+            us_symbol=str(args.us_symbol),
+            cn_symbol=str(args.cn_symbol),
+            category=str(args.category),
+            sample_n=int(args.sample),
+            max_lag_days=int(args.max_lag_days),
+            auto_fetch=bool(args.auto_fetch),
+            fetch_source=str(args.fetch_source),
+            align_mode=str(args.align_mode),
+            run_date=str(date_str),
+            allowed_types=allowed_types,
+        )
     raise SystemExit(code)
 
 
