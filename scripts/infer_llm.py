@@ -33,6 +33,20 @@ CN_EVENT_TYPES = [
 ]
 
 
+US_EVENT_TYPES = [
+    "fomc_decision",
+    "inflation_data",
+    "jobs_report",
+    "gdp_data",
+    "fiscal_tariff",
+    "corporate_earnings",
+    "geopolitical_risk",
+    "financial_stability",
+    "commodity_shock",
+    "other_us",
+]
+
+
 def build_messages(
     task: str,
     title: str | None = None,
@@ -59,8 +73,14 @@ def build_messages(
             )
         else:
             system = (
-                "You are a professional financial news analyst. Read the news and output a structured JSON. "
-                "Output valid JSON only. Do not use double quotes (\") within string values; use single quotes (') instead."
+                "You are a professional US financial news analyst. "
+                "You must output STRICT JSON only (no markdown, no prose outside JSON). "
+                "Output valid JSON only. Do not use double quotes (\") within string values; use single quotes (') instead. "
+                "This is a US market task. "
+                "You MUST choose event_type from this US-only enum: "
+                f"{US_EVENT_TYPES}. "
+                "Do NOT output any China/A-share event types (forbidden examples: policy_stimulus, regulation_crackdown, market_intervention, concept_hype, corporate_restructuring). "
+                "If you are unsure, use other_us."
             )
         if title is None:
             title = "Fed signals rates may stay higher for longer"
