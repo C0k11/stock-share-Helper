@@ -514,3 +514,26 @@ Ground Truth 数据源（本地已有）：
 - `policy_stimulus`: 11 条，Acc 0.00%
 - `regulation_crackdown`: 15 条，Acc 100.00%
 - `market_intervention`: 11 条，Acc 9.09%
+
+### 10.5 评测“滤网”：按事件类型过滤（Risk-only 专场）
+
+新增：
+
+- `scripts/evaluate_signal.py` 增加 `--types`（逗号分隔），仅评测指定 `event_type`。
+
+示例（仅评风控事件）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\evaluate_signal.py --signals data/daily/signals_full_2025-12-14.json --date 2025-12-14 --align-mode run_date --types regulation_crackdown
+```
+
+### 10.6 自动化积累：每日一键流水线（Windows）
+
+背景：
+
+- RSS 通常仅保留近 24h，无法天然回溯历史；因此需要从今天开始日更积累 signals + 评测数据。
+
+新增：
+
+- 根目录新增 `run_pipeline.bat`：一键执行 `fetch_daily_rss.py` → `run_daily_inference.py` → `generate_daily_report.py`。
+- `TODAY` 由 Python 生成（避免 Windows 区域设置导致 `%date%` 切片不一致）。
