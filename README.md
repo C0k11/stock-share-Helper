@@ -169,6 +169,52 @@ python scripts/run_backtest.py
 
 ---
 
+## Daily News Pipeline (US + CN)
+
+This repo includes a production-oriented daily pipeline:
+
+- **Fetch** news (US RSS + CN RSS with JSON fallback)
+- **Infer** structured signals with Qwen2.5 + LoRA
+- **Generate** a Markdown daily report
+- **Evaluate** signals vs market ground truth (optional)
+
+### One-click (Windows)
+
+Run:
+
+```powershell
+run_pipeline.bat
+```
+
+Outputs (under `data/daily/`):
+
+- `news_YYYY-MM-DD.json`
+- `signals_YYYY-MM-DD.json`
+- `report_YYYY-MM-DD.md`
+- `health_YYYY-MM-DD.json` (fetch health report)
+
+### Run scripts manually
+
+```powershell
+.\venv311\Scripts\python.exe scripts\fetch_daily_rss.py --date 2025-12-14 --health-out auto
+.\venv311\Scripts\python.exe scripts\run_daily_inference.py --date 2025-12-14 --use-lora --load-in-4bit --batch-size 4 --max-input-chars 6000
+.\venv311\Scripts\python.exe scripts\generate_daily_report.py --date 2025-12-14
+```
+
+### Evaluation (T+1 alignment)
+
+```powershell
+.\venv311\Scripts\python.exe scripts\evaluate_signal.py --signals data/daily/signals_2025-12-14.json --date 2025-12-14 --align-mode run_date --sample 20
+```
+
+Event-based analysis is printed automatically (by `event_type`). You can also filter the evaluation to specific event types:
+
+```powershell
+.\venv311\Scripts\python.exe scripts\evaluate_signal.py --signals data/daily/signals_2025-12-14.json --date 2025-12-14 --align-mode run_date --types regulation_crackdown
+```
+
+---
+
 ##  LLM Fine-tuning (Quickstart)
 
 This repo includes a practical pipeline for building a weak-labeled dataset from public RSS sources and fine-tuning Qwen2.5 models with LoRA/QLoRA.
@@ -396,6 +442,50 @@ python scripts/run_backtest.py
 ```
 
 ---
+
+## 每日新闻流水线（US + CN）
+
+本仓库包含一套偏生产化的日更流水线：
+
+- **抓取** 新闻（US RSS + CN RSS，并带 CN JSON fallback 兜底）
+- **推理** 结构化 signals（Qwen2.5 + LoRA）
+- **生成** Markdown 日报
+- **评测** 信号（可选）
+
+### 一键运行（Windows）
+
+运行：
+
+```powershell
+run_pipeline.bat
+```
+
+产物（位于 `data/daily/`）：
+
+- `news_YYYY-MM-DD.json`
+- `signals_YYYY-MM-DD.json`
+- `report_YYYY-MM-DD.md`
+- `health_YYYY-MM-DD.json`（抓取健康检查）
+
+### 手动运行脚本
+
+```powershell
+.\venv311\Scripts\python.exe scripts\fetch_daily_rss.py --date 2025-12-14 --health-out auto
+.\venv311\Scripts\python.exe scripts\run_daily_inference.py --date 2025-12-14 --use-lora --load-in-4bit --batch-size 4 --max-input-chars 6000
+.\venv311\Scripts\python.exe scripts\generate_daily_report.py --date 2025-12-14
+```
+
+### 评测（T+1 对齐）
+
+```powershell
+.\venv311\Scripts\python.exe scripts\evaluate_signal.py --signals data/daily/signals_2025-12-14.json --date 2025-12-14 --align-mode run_date --sample 20
+```
+
+脚本会自动打印按 `event_type` 的分组统计；也支持用 `--types` 只评测特定类型（如风控专场）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\evaluate_signal.py --signals data/daily/signals_2025-12-14.json --date 2025-12-14 --align-mode run_date --types regulation_crackdown
+```
 
 ##  LLM微调（快速开始）
 
