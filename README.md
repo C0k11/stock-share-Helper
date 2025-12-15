@@ -192,6 +192,7 @@ Outputs (under `data/daily/`):
 - `signals_YYYY-MM-DD.json`
 - `report_YYYY-MM-DD.md`
 - `health_YYYY-MM-DD.json` (fetch health report)
+- `etf_features_YYYY-MM-DD.json` (daily ETF/index feature snapshot)
 
 The daily report also includes a **Risk Watch** section for CN `regulation_crackdown` signals.
 
@@ -199,6 +200,7 @@ The daily report also includes a **Risk Watch** section for CN `regulation_crack
 
 ```powershell
 .\venv311\Scripts\python.exe scripts\fetch_daily_rss.py --date 2025-12-14 --health-out auto
+.\venv311\Scripts\python.exe scripts\build_daily_etf_features.py --date 2025-12-14
 .\venv311\Scripts\python.exe scripts\run_daily_inference.py --date 2025-12-14 --use-lora --load-in-4bit --batch-size 4 --max-input-chars 6000
 .\venv311\Scripts\python.exe scripts\generate_daily_report.py --date 2025-12-14
 ```
@@ -487,6 +489,7 @@ run_pipeline.bat
 - `signals_YYYY-MM-DD.json`
 - `report_YYYY-MM-DD.md`
 - `health_YYYY-MM-DD.json`（抓取健康检查）
+- `etf_features_YYYY-MM-DD.json`（ETF/指数特征快照）
 
 日报中会额外包含 **Risk Watch** 专栏（CN `regulation_crackdown`）。
 
@@ -494,6 +497,7 @@ run_pipeline.bat
 
 ```powershell
 .\venv311\Scripts\python.exe scripts\fetch_daily_rss.py --date 2025-12-14 --health-out auto
+.\venv311\Scripts\python.exe scripts\build_daily_etf_features.py --date 2025-12-14
 .\venv311\Scripts\python.exe scripts\run_daily_inference.py --date 2025-12-14 --use-lora --load-in-4bit --batch-size 4 --max-input-chars 6000
 .\venv311\Scripts\python.exe scripts\generate_daily_report.py --date 2025-12-14
 ```

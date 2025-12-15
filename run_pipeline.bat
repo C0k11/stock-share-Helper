@@ -5,11 +5,15 @@ set VENV=.\venv311\Scripts\python.exe
 
 for /f %%i in ('%VENV% -c "import datetime as dt; print(dt.date.today().strftime(\"%%Y-%%m-%%d\"))"') do set TODAY=%%i
 
-echo [1/3] Fetching RSS for %TODAY%...
+echo [1/4] Fetching RSS for %TODAY%...
 %VENV% scripts\fetch_daily_rss.py --date %TODAY% --health-out auto
 if errorlevel 1 goto :error
 
-echo [2/3] Running Inference for %TODAY%...
+echo [2/4] Building ETF Feature Snapshot for %TODAY%...
+%VENV% scripts\build_daily_etf_features.py --date %TODAY%
+if errorlevel 1 goto :error
+
+echo [3/4] Running Inference for %TODAY%...
 %VENV% scripts\run_daily_inference.py ^
   --date %TODAY% ^
   --use-lora --load-in-4bit ^
@@ -18,7 +22,7 @@ echo [2/3] Running Inference for %TODAY%...
   --save-every 20
 if errorlevel 1 goto :error
 
-echo [3/3] Generating Report for %TODAY%...
+echo [4/4] Generating Report for %TODAY%...
 %VENV% scripts\generate_daily_report.py --date %TODAY%
 if errorlevel 1 goto :error
 

@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+import pandas as pd
 from loguru import logger
 
 
@@ -18,6 +19,14 @@ def _load_json_list(path: Path) -> List[Dict[str, Any]]:
         data = json.load(f)
     if not isinstance(data, list):
         raise ValueError("Input must be a JSON list")
+    return data
+
+
+def _load_json_dict(path: Path) -> Dict[str, Any]:
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    if not isinstance(data, dict):
+        raise ValueError("Input must be a JSON object")
     return data
 
 
@@ -148,6 +157,73 @@ def _section_risk_watch_cn(items: List[Dict[str, Any]], *, k: int = 10) -> str:
     return "\n".join(lines)
 
 
+def _section_etf_features(payload: Optional[Dict[str, Any]]) -> str:
+    lines: List[str] = ["## ETF Feature Summary"]
+    if not payload:
+        lines.append("(none)")
+        return "\n".join(lines)
+
+    items = payload.get("items")
+    if not isinstance(items, list) or not items:
+        lines.append("(none)")
+        return "\n".join(lines)
+
+    lines.append("- **schema**: etf_features")
+    lines.append("")
+    lines.append("| Symbol | Date | Close | Regime | Strength | TargetPos | PvMA20 | PvMA200 | Vol20d | DD |")
+    lines.append("|---|---|---:|---|---|---:|---:|---:|---:|---:|")
+
+    for it in items:
+        sym = str(it.get("symbol") or "")
+        d = str(it.get("date") or "")
+        tech = it.get("technical") if isinstance(it.get("technical"), dict) else {}
+        sig = it.get("signal") if isinstance(it.get("signal"), dict) else {}
+        teacher = it.get("teacher") if isinstance(it.get("teacher"), dict) else {}
+        mr = it.get("market_regime") if isinstance(it.get("market_regime"), dict) else {}
+
+        close = tech.get("close")
+        pv20 = tech.get("price_vs_ma20")
+        pv200 = tech.get("price_vs_ma200")
+        vol20 = tech.get("volatility_20d")
+        dd = tech.get("drawdown")
+
+        regime = str(mr.get("regime") or "")
+        strength = str(sig.get("strength") or "")
+        tp = teacher.get("target_position_profiled")
+
+        def fmt(x: Any, nd: int = 4) -> str:
+            try:
+                if x is None:
+                    return ""
+                v = float(x)
+                if pd.isna(v):
+                    return ""
+                return f"{v:.{nd}f}"
+            except Exception:
+                return str(x) if x is not None else ""
+
+        lines.append(
+            "| "
+            + " | ".join(
+                [
+                    _md_escape(sym),
+                    _md_escape(d),
+                    fmt(close, 4),
+                    _md_escape(regime),
+                    _md_escape(strength),
+                    fmt(tp, 3),
+                    fmt(pv20, 4),
+                    fmt(pv200, 4),
+                    fmt(vol20, 4),
+                    fmt(dd, 4),
+                ]
+            )
+            + " |"
+        )
+
+    return "\n".join(lines)
+
+
 def _section_top(items: List[Dict[str, Any]], *, title: str, k: int = 10) -> str:
     ranked = _rank_items([it for it in items if it.get("parse_ok")])[:k]
     lines: List[str] = [f"## {title}"]
@@ -197,6 +273,14 @@ def main():
     out_path = Path(args.out_path) if args.out_path else Path("data/daily") / f"report_{date_str}.md"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    etf_path = Path("data/daily") / f"etf_features_{date_str}.json"
+    etf_payload: Optional[Dict[str, Any]] = None
+    if etf_path.exists():
+        try:
+            etf_payload = _load_json_dict(etf_path)
+        except Exception:
+            etf_payload = None
+
     items = _load_json_list(in_path)
 
     total = len(items)
@@ -233,6 +317,7 @@ def main():
 
     parts.append(fmt_counts("CN event_type distribution (top)", cn_counts))
     parts.append(_section_risk_watch_cn(cn, k=min(args.top, 12)))
+    parts.append(_section_etf_features(etf_payload))
     parts.append(_section_top(cn, title="CN top signals", k=args.top))
 
     parts.append(_section_failures(items, k=10))
