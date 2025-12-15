@@ -177,3 +177,27 @@
 
 - 安全：
   - 若密钥曾出现在聊天/文本中，应视为泄露并尽快作废，后续仅使用本地 `.env.local` 或环境变量。
+
+### 8.5 LoRA-C 微调实测记录（Hybrid 1000, 2025-12-14）
+
+- 训练输入：`data/finetune/phase2_hybrid_1000.json`（1000 条，US:CN=60:40）
+- 训练命令（不含密钥）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\finetune_llm.py `
+  --model Qwen/Qwen2.5-14B-Instruct `
+  --data data\finetune\phase2_hybrid_1000.json `
+  --qlora --grad-ckpt --max-seq-len 1024 `
+  --batch-size 1 --grad-acc 16 `
+  --lr 1e-4 --epochs 3 `
+  --save-steps 50 --save-total-limit 5 `
+  --outdir models\llm_qwen14b_lora_c_hybrid `
+  --resume auto
+```
+
+- 训练结果摘要：
+  - `train_runtime`: 3477.8323s（约 58min）
+  - steps: 189（`18.40s/it`）
+  - 末段 loss（log）：0.5997 → 0.5967
+  - `train_loss`（全程均值）：0.9075121551594406
+  - 保存路径：`models\llm_qwen14b_lora_c_hybrid\lora_weights`
