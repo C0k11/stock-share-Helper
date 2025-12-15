@@ -233,6 +233,7 @@ def build_teacher_messages(
     etf_item: Dict[str, Any],
     risk_watch: Dict[str, Any],
     include_cot: bool,
+    variant_index: int,
 ) -> List[Dict[str, str]]:
     system = (
         "You are a senior portfolio manager and risk officer. "
@@ -255,6 +256,17 @@ def build_teacher_messages(
         else "Provide concise reasoning in each role (<=120 Chinese characters)."
     )
 
+    # Variant nudges: keep schema stable, vary reasoning emphasis to increase diversity.
+    vi = int(variant_index)
+    if vi % 4 == 0:
+        variant_nudge = "Variant focus: prioritize risk control and drawdown protection; be conservative with position sizing."
+    elif vi % 4 == 1:
+        variant_nudge = "Variant focus: prioritize trend/momentum confirmation; treat signals as technical-system driven."
+    elif vi % 4 == 2:
+        variant_nudge = "Variant focus: prioritize macro/policy narrative; consider risk-watch news as the main driver."
+    else:
+        variant_nudge = "Variant focus: stress-test adverse scenarios (tail risk); include contingency risk_notes."
+
     label_schema = (
         "The JSON object MUST have keys: role_aggressive, role_risk, role_quant, synthesis, label. "
         "label MUST be an object with keys: action, target_position, risk_notes, rationale. "
@@ -269,10 +281,11 @@ def build_teacher_messages(
         "symbol": symbol,
         "etf_features": etf_item,
         "risk_watch": risk_watch,
+        "variant": {"index": vi, "nudge": variant_nudge},
     }
 
     user = (
-        f"{role_spec}\n{cot}\n{label_schema}\n\n"
+        f"{role_spec}\n{cot}\n{variant_nudge}\n{label_schema}\n\n"
         f"INPUT_JSON={json.dumps(user_payload, ensure_ascii=False)}"
     )
 
@@ -328,6 +341,7 @@ def main():
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--sleep", type=float, default=0.2)
     parser.add_argument("--max", type=int, default=0, help="Limit number of symbols across all days (0=all)")
+    parser.add_argument("--variants", type=int, default=1, help="Generate N variants per (date,symbol)")
     parser.add_argument("--max-retries", type=int, default=3)
     parser.add_argument("--max-output-tokens", type=int, default=2200)
     parser.add_argument("--temperature", type=float, default=0.2)
@@ -358,121 +372,132 @@ def main():
     skipped = 0
     failed = 0
 
-    with open(out_path, "a", encoding="utf-8") as fout:
-        for fp in files:
-            date_str = _DATE_RE.match(fp.name).group(1)  # type: ignore
-            payload = load_json_dict(fp)
-            items = payload.get("items")
-            if not isinstance(items, list):
-                continue
-
-            risk_watch = build_risk_watch_summary(daily_dir, date_str)
-
-            for it in items:
-                if not isinstance(it, dict):
-                    continue
-                symbol = str(it.get("symbol") or "").strip()
-                if not symbol:
+    try:
+        with open(out_path, "a", encoding="utf-8") as fout:
+            for fp in files:
+                date_str = _DATE_RE.match(fp.name).group(1)  # type: ignore
+                payload = load_json_dict(fp)
+                items = payload.get("items")
+                if not isinstance(items, list):
                     continue
 
-                sid = stable_sample_id(date_str, symbol, {"etf": it, "risk": risk_watch})
-                if sid in existing_ids:
-                    skipped += 1
-                    continue
+                risk_watch = build_risk_watch_summary(daily_dir, date_str)
 
-                messages = build_teacher_messages(
-                    symbol=symbol,
-                    date_str=date_str,
-                    etf_item=it,
-                    risk_watch=risk_watch,
-                    include_cot=bool(args.include_cot),
-                )
+                for it in items:
+                    if not isinstance(it, dict):
+                        continue
+                    symbol = str(it.get("symbol") or "").strip()
+                    if not symbol:
+                        continue
 
-                raw = ""
-                parsed: Optional[Dict[str, Any]] = None
-                err = ""
-                missing: List[str] = []
-                extra: List[str] = []
-
-                for attempt in range(1, int(args.max_retries) + 1):
-                    try:
-                        raw = call_openai_compatible_chat(
-                            base_url=str(args.teacher_base_url),
-                            api_key=api_key,
-                            model=str(args.teacher_model),
-                            messages=messages,
-                            timeout=int(args.timeout),
-                            max_tokens=int(args.max_output_tokens),
-                            temperature=float(args.temperature),
+                    for vi in range(max(1, int(args.variants))):
+                        sid = stable_sample_id(
+                            date_str,
+                            symbol,
+                            {"etf": it, "risk": risk_watch, "variant": int(vi)},
                         )
-
-                        json_text = extract_first_json(raw.strip())
-                        try:
-                            parsed = json.loads(json_text)
-                        except Exception:
-                            parsed = json.loads(repair_json_text(json_text))
-
-                        if not isinstance(parsed, dict):
-                            raise ValueError("Teacher output JSON is not an object")
-
-                        missing, extra = validate_label(parsed)
-                        if missing or extra:
-                            raise ValueError(f"Schema mismatch missing={missing} extra={extra}")
-
-                        break
-                    except Exception as e:
-                        err = str(e)
-                        parsed = None
-                        if attempt < int(args.max_retries):
-                            time.sleep(0.8 * attempt)
+                        if sid in existing_ids:
+                            skipped += 1
                             continue
 
-                out_obj = {
-                    "id": sid,
-                    "date": date_str,
-                    "symbol": symbol,
-                    "teacher": {
-                        "base_url": str(args.teacher_base_url),
-                        "model": str(args.teacher_model),
-                        "include_cot": bool(args.include_cot),
-                        "max_output_tokens": int(args.max_output_tokens),
-                        "temperature": float(args.temperature),
-                        "error": err,
-                        "missing": missing,
-                        "extra": extra,
-                    },
-                    "input": {
-                        "etf_features": it,
-                        "risk_watch": risk_watch,
-                    },
-                    "output": parsed if parsed is not None else {},
-                    "raw": raw,
-                }
+                        messages = build_teacher_messages(
+                            symbol=symbol,
+                            date_str=date_str,
+                            etf_item=it,
+                            risk_watch=risk_watch,
+                            include_cot=bool(args.include_cot),
+                            variant_index=int(vi),
+                        )
 
-                fout.write(json.dumps(out_obj, ensure_ascii=False) + "\n")
-                fout.flush()
+                        raw = ""
+                        parsed: Optional[Dict[str, Any]] = None
+                        err = ""
+                        missing: List[str] = []
+                        extra: List[str] = []
 
-                if parsed is None:
-                    failed += 1
-                    status = "FAIL"
-                else:
-                    written += 1
-                    status = "OK"
-                    existing_ids.add(sid)
+                        for attempt in range(1, int(args.max_retries) + 1):
+                            try:
+                                raw = call_openai_compatible_chat(
+                                    base_url=str(args.teacher_base_url),
+                                    api_key=api_key,
+                                    model=str(args.teacher_model),
+                                    messages=messages,
+                                    timeout=int(args.timeout),
+                                    max_tokens=int(args.max_output_tokens),
+                                    temperature=float(args.temperature),
+                                )
 
-                logger.info(
-                    f"[{date_str}] {symbol} {status} written={written} failed={failed} skipped={skipped} err={err[:120]}"
-                )
+                                json_text = extract_first_json(raw.strip())
+                                try:
+                                    parsed = json.loads(json_text)
+                                except Exception:
+                                    parsed = json.loads(repair_json_text(json_text))
 
-                if args.sleep and float(args.sleep) > 0:
-                    time.sleep(float(args.sleep))
+                                if not isinstance(parsed, dict):
+                                    raise ValueError("Teacher output JSON is not an object")
+
+                                missing, extra = validate_label(parsed)
+                                if missing or extra:
+                                    raise ValueError(f"Schema mismatch missing={missing} extra={extra}")
+
+                                break
+                            except Exception as e:
+                                err = str(e)
+                                parsed = None
+                                if attempt < int(args.max_retries):
+                                    time.sleep(0.8 * attempt)
+                                    continue
+
+                    out_obj = {
+                        "id": sid,
+                        "date": date_str,
+                        "symbol": symbol,
+                        "variant_index": int(vi),
+                        "teacher": {
+                            "base_url": str(args.teacher_base_url),
+                            "model": str(args.teacher_model),
+                            "include_cot": bool(args.include_cot),
+                            "max_output_tokens": int(args.max_output_tokens),
+                            "temperature": float(args.temperature),
+                            "error": err,
+                            "missing": missing,
+                            "extra": extra,
+                        },
+                        "input": {
+                            "etf_features": it,
+                            "risk_watch": risk_watch,
+                        },
+                        "output": parsed if parsed is not None else {},
+                        "raw": raw,
+                    }
+
+                    fout.write(json.dumps(out_obj, ensure_ascii=False) + "\n")
+                    fout.flush()
+
+                    if parsed is None:
+                        failed += 1
+                        status = "FAIL"
+                    else:
+                        written += 1
+                        status = "OK"
+                        existing_ids.add(sid)
+
+                    logger.info(
+                        f"[{date_str}] {symbol} v={vi} {status} written={written} failed={failed} skipped={skipped} err={err[:120]}"
+                    )
+
+                    if args.sleep and float(args.sleep) > 0:
+                        time.sleep(float(args.sleep))
+
+                    if args.max and int(args.max) > 0 and written >= int(args.max):
+                        logger.info(f"Reached --max {args.max}, stopping")
+                        break
 
                 if args.max and int(args.max) > 0 and written >= int(args.max):
-                    logger.info(f"Reached --max {args.max}, stopping")
                     break
-
-            if args.max and int(args.max) > 0 and written >= int(args.max):
-                break
+    except KeyboardInterrupt:
+        logger.warning(f"Interrupted by user. Partial results saved: {out_path} ok={written} failed={failed} skipped={skipped}")
+        return
 
     logger.info(f"Saved teacher dataset: {out_path} ok={written} failed={failed} skipped={skipped}")
 

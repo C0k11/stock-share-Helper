@@ -610,3 +610,9 @@ Ground Truth 数据源（本地已有）：
 
 - 通过 env 读取：`TEACHER_API_KEY` / `TEACHER_BASE_URL` / `TEACHER_MODEL`
   - DeepSeek OpenAI-compat 示例：`TEACHER_BASE_URL=https://api.deepseek.com`，`TEACHER_MODEL=deepseek-chat`
+
+运行记录：
+
+- 通过 `--variants` 支持同一（date,symbol）多视角多样本生成（用于“烧钱换质量”）。
+- 以 `2025-12-14` 为例：7 个 ETF × 6 variants = 42 行 JSONL（`failed=0`）。
+- Windows PowerShell 抽样解析注意：建议 `Get-Content ... -Encoding UTF8 | ConvertFrom-Json`，否则可能出现乱码导致解析失败。
