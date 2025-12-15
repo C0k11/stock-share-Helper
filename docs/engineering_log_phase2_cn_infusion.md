@@ -538,7 +538,7 @@ Ground Truth 数据源（本地已有）：
 - 根目录新增 `run_pipeline.bat`：一键执行 `fetch_daily_rss.py` → `run_daily_inference.py` → `generate_daily_report.py`。
 - `TODAY` 由 Python 生成（避免 Windows 区域设置导致 `%date%` 切片不一致）。
 
-## 11. 新闻模块运维：每日抓取健康检查（2025-12-14）
+## 11. 新闻模块运维：每日抓取健康检查（2025-12-15）
 
 新增：
 
@@ -555,9 +555,58 @@ Ground Truth 数据源（本地已有）：
 
 - CN RSS 0 条时自动启用 fallback，并写出 health 文件用于后续监控。
 
-## 12. Phase 4 增强：多日聚合评测 + 风控专栏（2025-12-14）
+## 12. Phase 4 增强：多日聚合评测 + 风控专栏（2025-12-15）
 
 新增：
 
 - `scripts/evaluate_signal.py` 支持 `--scan-daily`：扫描 `data/daily/signals_*.json`（含 `signals_full_*.json`）并输出跨日汇总统计。
 - `scripts/generate_daily_report.py` 增加 `Risk Watch (CN: regulation_crackdown)` 专栏：统计数量/占比并列出 Top 条目。
+
+## 13. Phase 5（A/A）：ETF 特征快照 + 日更接入（2025-12-15）
+
+目标：
+
+- 让后续 LLM 学会在 ETF/指数层面结合技术面与风险状态输出仓位/风控建议（先做结构化特征与 teacher 产物，再蒸馏微调）。
+
+新增：
+
+- `scripts/build_daily_etf_features.py`
+  - 输入：`data/raw/*.parquet`
+  - 输出：`data/daily/etf_features_YYYY-MM-DD.json`
+  - 内容：技术指标（MA/动量/波动/回撤等）+ 市场 Regime（SPY/VIX 可选）+ teacher 目标仓位（含 risk_profile 约束）。
+
+接入：
+
+- `run_pipeline.bat` 增加一步生成 ETF 特征快照（在 fetch 与 LLM 推理之间）。
+- `scripts/generate_daily_report.py` 增加 `ETF Feature Summary`（若特征文件存在则展示）。
+
+## 14. Phase 5.2：豪华版 Teacher 蒸馏（DeepSeek → Qwen，2025-12-15）
+
+目标：
+
+- 用 DeepSeek 作为 Teacher 对 ETF 特征快照进行“多角色推演 + 综合”，生成高质量蒸馏样本（适配后续 LoRA 训练）。
+
+新增：
+
+- `scripts/generate_etf_teacher_dataset.py`
+  - 输入：`data/daily/etf_features_YYYY-MM-DD.json`（按日期区间扫描）
+  - 可选：读取同日 `data/daily/signals_YYYY-MM-DD.json`，提取 `regulation_crackdown` 风控摘要作为上下文
+  - 输出：`data/finetune/teacher_etf/teacher_etf.jsonl`（JSONL，支持追加）
+
+输出格式（每行一个样本）：
+
+- `output` 为单个 JSON 对象，包含：
+  - `role_aggressive` / `role_risk` / `role_quant`
+  - `synthesis`
+  - `label`（action/target_position/risk_notes/rationale）
+
+运维与安全阀：
+
+- `--resume`：按样本 id 去重断点续跑
+- `--max-output-tokens`：限制 teacher 输出长度（避免无穷烧钱）
+- `--max-retries` + `--timeout`：失败重试与超时控制
+
+配置：
+
+- 通过 env 读取：`TEACHER_API_KEY` / `TEACHER_BASE_URL` / `TEACHER_MODEL`
+  - DeepSeek OpenAI-compat 示例：`TEACHER_BASE_URL=https://api.deepseek.com`，`TEACHER_MODEL=deepseek-chat`
