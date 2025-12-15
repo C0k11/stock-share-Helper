@@ -4,6 +4,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import re
 import time
 from email.utils import parsedate_to_datetime
 from pathlib import Path
@@ -49,6 +50,43 @@ def _parse_entry_time(entry: Any) -> Optional[dt.datetime]:
                 pass
 
     return None
+
+
+def _parse_dt_guess(s: str) -> Optional[dt.datetime]:
+    if not s:
+        return None
+    s = str(s).strip()
+    if not s:
+        return None
+
+    # unix timestamp seconds
+    if s.isdigit():
+        try:
+            return dt.datetime.fromtimestamp(int(s)).astimezone()
+        except Exception:
+            return None
+
+    # common CN formats
+    fmts = [
+        "%Y-%m-%d %H:%M:%S",
+        "%Y-%m-%d %H:%M",
+        "%Y/%m/%d %H:%M:%S",
+        "%Y/%m/%d %H:%M",
+        "%Y-%m-%dT%H:%M:%S",
+    ]
+    for fmt in fmts:
+        try:
+            d = dt.datetime.strptime(s, fmt)
+            return d.replace(tzinfo=_now_local().tzinfo)
+        except Exception:
+            pass
+
+    # last resort: try RFC822
+    try:
+        d = parsedate_to_datetime(s)
+        return d.astimezone() if d.tzinfo else d.replace(tzinfo=dt.timezone.utc).astimezone()
+    except Exception:
+        return None
 
 
 def _within_hours(ts: Optional[dt.datetime], *, hours: float) -> bool:
@@ -153,6 +191,130 @@ def fetch_feed(url: str) -> List[Any]:
     return list(getattr(feed, "entries", []) or [])
 
 
+def _cn_fetch_sina_roll(*, page: int, per_page: int) -> List[Dict[str, Any]]:
+    # JSONP-ish API used in scripts/fetch_cn_news.py (more stable than RSS in many envs)
+    base = "https://feed.mix.sina.com.cn/api/roll/get?pageid=153&lid=2516&k=&num={num}&page={page}&r=0.1&callback="
+    url = base.format(num=int(per_page), page=int(page))
+    try:
+        resp = requests.get(url, timeout=15)
+        text = resp.text
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        if not m:
+            return []
+        data = json.loads(m.group())
+        items = data.get("result", {}).get("data", []) or []
+    except Exception as e:
+        logger.warning(f"CN sina roll fetch failed: {e}")
+        return []
+
+    out: List[Dict[str, Any]] = []
+    for it in items:
+        title = (it.get("title") or "").strip()
+        content = (it.get("intro") or it.get("summary") or "").strip()
+        pub = it.get("ctime") or it.get("create_time") or ""
+        if pub and str(pub).isdigit():
+            pub = str(pub)
+        out.append(
+            {
+                "title": title,
+                "content": content,
+                "url": it.get("url") or "",
+                "source": "sina_api",
+                "published_dt": _parse_dt_guess(str(pub)),
+            }
+        )
+    return out
+
+
+def _cn_fetch_eastmoney_kuaixun(*, page: int, per_page: int) -> List[Dict[str, Any]]:
+    # Example: https://newsapi.eastmoney.com/kuaixun/v1/getlist_101_ajaxResult_50_1_.html
+    url = f"https://newsapi.eastmoney.com/kuaixun/v1/getlist_101_ajaxResult_{int(per_page)}_{int(page)}_.html"
+    try:
+        resp = requests.get(url, timeout=15)
+        text = resp.text
+        m = re.search(r"var defined[^=]*=\s*(\[.*?\]);", text, re.DOTALL)
+        if not m:
+            m = re.search(r"\[.*\]", text, re.DOTALL)
+        if not m:
+            return []
+        raw = m.group(1) if m.lastindex else m.group()
+        items = json.loads(raw)
+        if not isinstance(items, list):
+            return []
+    except Exception as e:
+        logger.warning(f"CN eastmoney fetch failed: {e}")
+        return []
+
+    out: List[Dict[str, Any]] = []
+    for it in items:
+        title = (it.get("title") or "").strip()
+        content = (it.get("digest") or it.get("content") or "").strip()
+        pub = (it.get("showtime") or it.get("time") or "").strip()
+        out.append(
+            {
+                "title": title,
+                "content": content,
+                "url": it.get("url") or "",
+                "source": "eastmoney_api",
+                "published_dt": _parse_dt_guess(pub),
+            }
+        )
+    return out
+
+
+def _cn_fetch_cls_telegraph(*, limit: int) -> List[Dict[str, Any]]:
+    url = "https://www.cls.cn/nodeapi/updateTelegraphList"
+    headers = {
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        "Referer": "https://www.cls.cn/telegraph",
+    }
+    try:
+        resp = requests.get(url, headers=headers, timeout=15)
+        data = resp.json()
+        items = data.get("data", {}).get("roll_data", []) or []
+    except Exception as e:
+        logger.warning(f"CN cls telegraph fetch failed: {e}")
+        return []
+
+    out: List[Dict[str, Any]] = []
+    for it in items[: int(limit)]:
+        title = (it.get("title") or it.get("brief") or "").strip()
+        content = (it.get("content") or it.get("brief") or "").strip()
+        pub = it.get("ctime") or ""
+        pub_dt = _parse_dt_guess(str(pub))
+        out.append(
+            {
+                "title": title,
+                "content": content,
+                "url": f"https://www.cls.cn/detail/{it.get('id', '')}" if it.get("id") else "",
+                "source": "cls_telegraph",
+                "published_dt": pub_dt,
+            }
+        )
+    return out
+
+
+def fetch_cn_fallback_items(*, hours: float, max_pages: int = 3, per_page: int = 50) -> List[Dict[str, Any]]:
+    items: List[Dict[str, Any]] = []
+
+    # CLS first (usually stable)
+    items.extend(_cn_fetch_cls_telegraph(limit=120))
+
+    for page in range(1, int(max_pages) + 1):
+        items.extend(_cn_fetch_sina_roll(page=page, per_page=per_page))
+
+    for page in range(1, int(max_pages) + 1):
+        items.extend(_cn_fetch_eastmoney_kuaixun(page=page, per_page=per_page))
+
+    filtered: List[Dict[str, Any]] = []
+    for it in items:
+        pub_dt = it.get("published_dt")
+        if not _within_hours(pub_dt, hours=hours):
+            continue
+        filtered.append(it)
+    return filtered
+
+
 def main():
     parser = argparse.ArgumentParser(description="Fetch daily RSS news for US+CN markets")
     parser.add_argument("--config", default=str(CONFIG_PATH))
@@ -173,6 +335,7 @@ def main():
 
     collected: List[Dict[str, Any]] = []
     seen: set[str] = set()
+    cn_seen = 0
 
     def process_sources(sources: Iterable[Dict[str, Any]], market: str):
         nonlocal collected, seen
@@ -224,6 +387,37 @@ def main():
 
     process_sources(us_sources, "US")
     process_sources(cn_sources, "CN")
+
+    # CN fallback: if RSS sources are blocked/return HTML, use stable CN JSON APIs.
+    cn_seen = sum(1 for x in collected if x.get("market") == "CN")
+    if cn_seen == 0:
+        logger.warning("CN RSS returned 0 items; falling back to CN JSON APIs (sina/eastmoney/cls)")
+        cn_items = fetch_cn_fallback_items(hours=args.hours)
+        logger.info(f"CN fallback candidates within window: {len(cn_items)}")
+        for it in cn_items:
+            title = (it.get("title") or "").strip()
+            link = (it.get("url") or "").strip()
+            content = (it.get("content") or "").strip()
+            src = it.get("source") or "cn_api"
+            pub_dt = it.get("published_dt")
+
+            item_id = _stable_id(title=title, url=link, source=str(src), market="CN")
+            if item_id in seen:
+                continue
+            seen.add(item_id)
+            collected.append(
+                {
+                    "id": item_id,
+                    "title": title,
+                    "content": content,
+                    "url": link,
+                    "source": str(src),
+                    "market": "CN",
+                    "weight": 1.0,
+                    "published_at": _to_iso_zoned(pub_dt) if isinstance(pub_dt, dt.datetime) else out_date,
+                    "fetched_at": _to_iso_zoned(_now_local()),
+                }
+            )
 
     logger.info(f"Total news collected (last {args.hours}h): {len(collected)}")
 
