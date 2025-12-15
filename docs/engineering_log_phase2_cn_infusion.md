@@ -248,3 +248,22 @@
   - 或引入一个显式字段（如 `market`）并在训练样本中固定输出（让模型先判别市场，再判别 event_type）。
 
 - C（中）：把回归集扩展为 20-case（CN10+US10），并纳入 nightly 回归。
+
+#### 8.6.5 方向 A 验证结果：US 漂移已被推理侧隔离显著缓解
+
+我们在 `scripts/infer_llm.py` 实施 Split Brain Strategy：
+
+- 对 US：强制 US-only event_type enum（并显式禁止 CN enum）。
+- 同时将 system prompt 强化为“标准 JSON（键/字符串必须使用双引号）”，避免单引号字符串导致 `json.loads` 失败。
+
+验证（US 5-case，Base vs LoRA）：
+
+- JSON 可解析率：
+  - Base：从 4/5 修复到 5/5
+  - LoRA：保持 5/5
+- event_type 漂移：
+  - LoRA 输出已回到 US enum（`fomc_decision` / `inflation_data` / `jobs_report` / `gdp_data` / `fiscal_tariff`），未再出现 `policy_stimulus` 等 CN enum。
+
+剩余问题（待后续精修）：
+
+- CN 侧 `market_intervention` vs `policy_stimulus` 边界仍存在一次混淆，需要在提示词中加入更明确判别准则或补充对比样本。
