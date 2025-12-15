@@ -76,3 +76,23 @@ sources:
     category: market_news
     weight: 1.0
     enabled: true
+
+
+us_sources:
+  - name: "CNBC Finance"
+    url: "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664"
+    weight: 1.0
+  - name: "Investing.com Headlines"
+    url: "https://www.investing.com/rss/news.rss"
+    weight: 0.8
+  - name: "Yahoo Finance"
+    url: "https://finance.yahoo.com/news/rssindex"
+    weight: 0.8
+
+cn_sources:
+  - name: "Sina Finance (Global)"
+    url: "https://feed.mix.sina.com.cn/rss/rss/finance.xml"
+    weight: 1.0
+  - name: "WallstreetCN (Global)"
+    url: "https://www.wallstreetcn.com/rss/global"
+    weight: 1.0
