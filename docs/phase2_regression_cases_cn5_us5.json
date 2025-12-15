@@ -1,0 +1,72 @@
+[
+  {
+    "id": "cn_policy_001",
+    "market": "cn",
+    "tag": "policy_stimulus",
+    "title": "国务院发布稳增长专项方案：加大基建投资与专项债额度",
+    "content": "（合成案例）据公开信息风格改写：相关部门表示将加快重大项目开工，适度扩大专项债规模并引导金融机构加大对实体经济支持。市场预期流动性环境边际改善，稳增长信号明确。"
+  },
+  {
+    "id": "cn_reg_001",
+    "market": "cn",
+    "tag": "regulation_crackdown",
+    "title": "证监会通报：对上市公司信息披露违规立案调查，多名高管被采取监管措施",
+    "content": "（合成案例）监管部门通报某上市公司涉嫌信息披露违法违规，已启动立案调查程序，并对相关责任人采取监管措施。市场担忧合规风险与后续处罚，短期情绪偏谨慎。"
+  },
+  {
+    "id": "cn_intervention_001",
+    "market": "cn",
+    "tag": "market_intervention",
+    "title": "多家机构发声维护资本市场平稳运行：强调长期资金入市与稳定预期",
+    "content": "（合成案例）多方表态将推动中长期资金入市、加强市场稳定机制建设，并强调维护市场平稳运行。投资者预期短期波动或缓和，风险偏好回升。"
+  },
+  {
+    "id": "cn_restruct_001",
+    "market": "cn",
+    "tag": "corporate_restructuring",
+    "title": "某央企平台拟推进重大资产重组：注入优质资产并优化业务结构",
+    "content": "（合成案例）公司公告拟筹划重大资产重组，计划注入优质资产并优化主营业务结构。市场预期盈利能力与估值中枢可能上移，但仍需关注审批进度与交易细节。"
+  },
+  {
+    "id": "cn_concept_001",
+    "market": "cn",
+    "tag": "concept_hype",
+    "title": "AI 算力概念再度升温：多只概念股涨停引发资金追捧",
+    "content": "（合成案例）市场围绕“AI 算力/服务器”题材出现集中炒作，多只相关标的短期涨幅较大并出现涨停。资金博弈色彩浓，波动风险提升，偏短期投机。"
+  },
+  {
+    "id": "us_fomc_001",
+    "market": "us",
+    "tag": "fomc",
+    "title": "Fed statement signals policy may remain restrictive as inflation risks persist",
+    "content": "(Synthetic) The central bank kept rates unchanged but emphasized that inflation remains elevated. Officials noted they are prepared to maintain a restrictive stance until inflation is clearly moving toward target."
+  },
+  {
+    "id": "us_cpi_001",
+    "market": "us",
+    "tag": "cpi",
+    "title": "US CPI comes in hotter than expected, raising concerns about rate cuts timing",
+    "content": "(Synthetic) Headline and core inflation measures surprised to the upside. Markets repriced expectations for near-term rate cuts as investors weighed the implications for growth and financial conditions."
+  },
+  {
+    "id": "us_nfp_001",
+    "market": "us",
+    "tag": "nfp",
+    "title": "Nonfarm payrolls beat expectations while wage growth stays firm",
+    "content": "(Synthetic) Job gains exceeded consensus estimates and average hourly earnings remained strong. Traders debated whether resilient labor markets could keep inflation sticky and delay easing."
+  },
+  {
+    "id": "us_gdp_001",
+    "market": "us",
+    "tag": "gdp",
+    "title": "US GDP revised higher as consumer spending remains resilient",
+    "content": "(Synthetic) The growth estimate was revised up, with consumption contributing more than previously reported. Analysts discussed implications for corporate earnings and the policy outlook."
+  },
+  {
+    "id": "us_fiscal_001",
+    "market": "us",
+    "tag": "fiscal_tariff",
+    "title": "New tariff proposal raises uncertainty for supply chains and inflation outlook",
+    "content": "(Synthetic) Policymakers discussed potential tariff changes affecting imported goods. Businesses warned about supply chain adjustments, and investors evaluated impacts on prices, margins, and bond yields."
+  }
+]
