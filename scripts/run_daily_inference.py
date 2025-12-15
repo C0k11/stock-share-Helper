@@ -141,6 +141,15 @@ def _load_json_list(path: Path) -> List[Dict[str, Any]]:
     return data
 
 
+def _load_existing_signals(path: Path) -> List[Dict[str, Any]]:
+    if not path.exists():
+        return []
+    try:
+        return _load_json_list(path)
+    except Exception:
+        return []
+
+
 def _today_str() -> str:
     return dt.datetime.now().strftime("%Y-%m-%d")
 
@@ -158,6 +167,9 @@ def main():
 
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--deterministic", action="store_true", default=True)
+    parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--save-every", type=int, default=20)
+    parser.add_argument("--resume", action="store_true")
     parser.add_argument("--limit", type=int, default=0)
     parser.add_argument("--offset", type=int, default=0)
     parser.add_argument("--market", choices=["ALL", "US", "CN"], default="ALL")
@@ -200,6 +212,7 @@ def main():
 
     logger.info(f"Loading base model: {args.model}")
     tokenizer = AutoTokenizer.from_pretrained(args.model, trust_remote_code=True)
+    tokenizer.padding_side = "left"
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -233,70 +246,113 @@ def main():
         logger.info(f"Loading LoRA weights: {lora_path}")
         model = PeftModel.from_pretrained(model, str(lora_path))
 
-    ok = 0
     signals: List[Dict[str, Any]] = []
+    done_ids: set[str] = set()
+    if args.resume:
+        existing = _load_existing_signals(out_path)
+        for it in existing:
+            sid = it.get("id")
+            if isinstance(sid, str) and sid:
+                done_ids.add(sid)
+        if existing:
+            signals = existing
+        logger.info(f"Resume enabled: loaded={len(existing)} done_ids={len(done_ids)}")
+
     et_counts: Dict[str, int] = {}
     market_counts: Dict[str, int] = {"US": 0, "CN": 0}
 
-    for idx, it in enumerate(items, start=1):
-        title = (it.get("title") or "").strip()
-        content = (it.get("content") or "").strip()
-        market = (it.get("market") or "US").strip().upper()
-        if market not in ("US", "CN"):
-            market = "US"
+    pending: List[Dict[str, Any]] = []
+    for it in items:
+        sid = it.get("id")
+        if args.resume and isinstance(sid, str) and sid and sid in done_ids:
+            continue
+        pending.append(it)
 
-        url = (it.get("url") or "").strip()
-        source = (it.get("source") or "").strip()
-        published_at = it.get("published_at")
+    logger.info(f"Pending items: {len(pending)}")
 
-        messages = build_messages_news(market=market, title=title, content=content)
-        prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+    gen_kwargs: Dict[str, Any] = {
+        "max_new_tokens": args.max_new_tokens,
+        "do_sample": not args.deterministic,
+    }
+    if not args.deterministic:
+        gen_kwargs.update({"temperature": 0.7, "top_p": 0.9})
 
-        gen_kwargs: Dict[str, Any] = {
-            "max_new_tokens": args.max_new_tokens,
-            "do_sample": not args.deterministic,
-        }
-        if not args.deterministic:
-            gen_kwargs.update({"temperature": 0.7, "top_p": 0.9})
+    batch_size = max(1, int(args.batch_size))
+    save_every = max(1, int(args.save_every))
+    processed_in_run = 0
+
+    for start in range(0, len(pending), batch_size):
+        batch = pending[start : start + batch_size]
+
+        prompts: List[str] = []
+        metas: List[Dict[str, Any]] = []
+        for it in batch:
+            title = (it.get("title") or "").strip()
+            content = (it.get("content") or "").strip()
+            market = (it.get("market") or "US").strip().upper()
+            if market not in ("US", "CN"):
+                market = "US"
+
+            messages = build_messages_news(market=market, title=title, content=content)
+            prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            prompts.append(prompt)
+            metas.append(
+                {
+                    "id": it.get("id"),
+                    "market": market,
+                    "source": (it.get("source") or "").strip(),
+                    "url": (it.get("url") or "").strip(),
+                    "published_at": it.get("published_at"),
+                    "title": title,
+                    "input_chars": len(content),
+                }
+            )
+
+        inputs = tokenizer(prompts, return_tensors="pt", padding=True).to(model.device)
+        input_len = inputs["input_ids"].shape[1]
 
         with torch.no_grad():
             outputs = model.generate(**inputs, **gen_kwargs)
 
-        prompt_len = inputs["input_ids"].shape[1]
-        out_text = tokenizer.decode(outputs[0][prompt_len:], skip_special_tokens=True)
+        for i in range(len(metas)):
+            out_text = tokenizer.decode(outputs[i][input_len:], skip_special_tokens=True)
+            parse_ok, obj, raw_json = try_parse_json(out_text)
+            meta = metas[i]
 
-        parse_ok, obj, raw_json = try_parse_json(out_text)
-        ok += 1 if parse_ok else 0
+            market = meta["market"]
+            market_counts[market] = market_counts.get(market, 0) + 1
+            if parse_ok and obj:
+                et = str(obj.get("event_type") or "").strip()
+                et_counts[et] = et_counts.get(et, 0) + 1
 
-        market_counts[market] = market_counts.get(market, 0) + 1
-        if parse_ok and obj:
-            et = str(obj.get("event_type") or "").strip()
-            et_counts[et] = et_counts.get(et, 0) + 1
+            signals.append(
+                {
+                    **meta,
+                    "parse_ok": parse_ok,
+                    "signal": obj,
+                    "raw_json": raw_json,
+                }
+            )
 
-        signals.append(
-            {
-                "id": it.get("id"),
-                "market": market,
-                "source": source,
-                "url": url,
-                "published_at": published_at,
-                "title": title,
-                "input_chars": len(content),
-                "parse_ok": parse_ok,
-                "signal": obj,
-                "raw_json": raw_json,
-            }
-        )
+            sid = meta.get("id")
+            if isinstance(sid, str) and sid:
+                done_ids.add(sid)
 
-        if idx % 10 == 0 or idx == len(items):
-            logger.info(f"[{idx}/{len(items)}] parse_ok={ok}/{idx}")
+            processed_in_run += 1
 
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(signals, f, ensure_ascii=False, indent=2)
+        total_done = len(done_ids) if args.resume else processed_in_run
+        denom = (len(items) if not args.resume else len(items))
+        ok_count = sum(1 for x in signals if x.get("parse_ok"))
+        if (processed_in_run % 10 == 0) or (start + batch_size >= len(pending)):
+            logger.info(f"[{min(total_done, denom)}/{denom}] parse_ok={ok_count}/{len(signals)}")
+
+        if (processed_in_run % save_every == 0) or (start + batch_size >= len(pending)):
+            with open(out_path, "w", encoding="utf-8") as f:
+                json.dump(signals, f, ensure_ascii=False, indent=2)
 
     logger.info(f"Saved signals: {out_path}")
-    logger.info(f"Parse OK rate: {ok}/{len(items)}")
+    final_ok = sum(1 for x in signals if x.get("parse_ok"))
+    logger.info(f"Parse OK rate: {final_ok}/{len(signals)}")
     logger.info(f"Market counts: {market_counts}")
     logger.info(f"Top event_type counts: {sorted(et_counts.items(), key=lambda x: x[1], reverse=True)[:10]}")
 
