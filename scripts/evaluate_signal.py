@@ -172,6 +172,7 @@ def evaluate(
     fetch_source: str,
     align_mode: str,
     run_date: str,
+    allowed_types: Optional[set],
 ) -> int:
     if not signals_path.exists():
         logger.error(f"Signals file not found: {signals_path}")
@@ -228,6 +229,10 @@ def evaluate(
         pub_date = p["pub_date"]
         impact = int(p["impact_equity"])
 
+        et = str(p.get("event_type") or "unknown").strip() or "unknown"
+        if allowed_types is not None and et not in allowed_types:
+            continue
+
         if market == "CN":
             match_date, real = _find_tplus1_return(pub_date, cn_ret, max_lag_days=max_lag_days)
         else:
@@ -242,7 +247,6 @@ def evaluate(
         total += 1
         wins += 1 if is_win else 0
 
-        et = str(p.get("event_type") or "unknown").strip() or "unknown"
         type_stats[et]["total"] += 1
         type_stats[et]["wins"] += 1 if is_win else 0
 
@@ -319,10 +323,17 @@ def main():
     parser.add_argument("--auto-fetch", action="store_true", help="Fetch/extend market price data automatically (network)")
     parser.add_argument("--fetch-source", default="yfinance", choices=["yfinance", "akshare"], help="DataFetcher source used by --auto-fetch")
     parser.add_argument("--align-mode", default="published_at", choices=["published_at", "run_date"])
+    parser.add_argument("--types", type=str, default=None, help="Comma-separated event types to evaluate")
     args = parser.parse_args()
 
     date_str = args.date or _today_str()
     signals_path = Path(args.signals) if args.signals else Path("data/daily") / f"signals_{date_str}.json"
+
+    allowed_types = None
+    if args.types:
+        allowed_types = {t.strip() for t in str(args.types).split(",") if t.strip()}
+        if not allowed_types:
+            allowed_types = None
 
     code = evaluate(
         signals_path,
@@ -335,6 +346,7 @@ def main():
         fetch_source=str(args.fetch_source),
         align_mode=str(args.align_mode),
         run_date=str(date_str),
+        allowed_types=allowed_types,
     )
     raise SystemExit(code)
 
