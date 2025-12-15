@@ -44,6 +44,35 @@ def _md_escape(s: str) -> str:
     return (s or "").replace("\n", " ").strip()
 
 
+def _mojibake_penalty(s: str) -> int:
+    if not s:
+        return 0
+    bad = 0
+    bad += s.count("\ufffd") * 10
+    for ch in ("鍗", "鈥", "锟"):
+        bad += s.count(ch) * 3
+    return bad
+
+
+def _repair_mojibake(s: str) -> str:
+    if not s:
+        return s
+    s = str(s)
+    base = _mojibake_penalty(s)
+    best = s
+    best_pen = base
+    for enc in ("gb18030", "gbk"):
+        try:
+            repaired = s.encode(enc).decode("utf-8", errors="replace")
+        except Exception:
+            continue
+        pen = _mojibake_penalty(repaired)
+        if pen < best_pen:
+            best = repaired
+            best_pen = pen
+    return best
+
+
 def _rank_items(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     def score(it: Dict[str, Any]) -> Tuple[int, int, int]:
         sig = _get_signal(it)
@@ -89,12 +118,12 @@ def _section_top(items: List[Dict[str, Any]], *, title: str, k: int = 10) -> str
 
     for it in ranked:
         sig = _get_signal(it)
-        event_type = _md_escape(str(sig.get("event_type") or ""))
-        summary = _md_escape(str(sig.get("summary") or ""))
+        event_type = _md_escape(_repair_mojibake(str(sig.get("event_type") or "")))
+        summary = _md_escape(_repair_mojibake(str(sig.get("summary") or "")))
         impact = _impact_line(sig)
         src = _md_escape(str(it.get("source") or ""))
         url = _md_escape(str(it.get("url") or ""))
-        title_line = _md_escape(str(it.get("title") or ""))
+        title_line = _md_escape(_repair_mojibake(str(it.get("title") or "")))
         lines.append(f"- **{event_type}** ({impact}) | {src} | [{title_line}]({url})")
         if summary:
             lines.append(f"  - **summary**: {summary}")

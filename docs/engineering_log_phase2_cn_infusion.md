@@ -308,3 +308,66 @@
 - Step 3 - The Mouth：`scripts/generate_daily_report.py`
   - 输入：Step 2 的信号文件
   - 输出：Markdown/HTML 日报（分市场汇总、Top 正负面事件、风险提示、关注标的/板块）
+
+### 9.3 Step 1 修复：CN RSS 被拦截（HTML/404/invalid token）→ API fallback
+
+现象：
+
+- Sina RSS / WallstreetCN RSS 在本地环境下返回 `text/html` / 404 / bozo invalid token，导致 CN entries=0。
+
+处置：
+
+- 在 `scripts/fetch_daily_rss.py` 增加 CN fallback（当 CN RSS 为 0 时自动启用）：
+  - Sina roll JSON
+  - Eastmoney 快讯
+  - CLS 电报
+
+结果：
+
+- 近 26h 抓取总量：234（US=11, CN=223；CN 以 fallback 为主）
+
+### 9.4 Step 2 实测：全量推理 + Split Brain 生效
+
+运行：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\run_daily_inference.py --date 2025-12-14 --use-lora --load-in-4bit
+```
+
+结果：
+
+- parse_ok：234/234
+- market counts：US=11, CN=223
+- event_type（top）：
+  - concept_hype: 91
+  - regulation_crackdown: 63
+  - corporate_restructuring: 32
+  - policy_stimulus: 23
+  - market_intervention: 14
+
+备注：US/CN split-brain 枚举隔离在冒烟（US5+CN5）中验证有效，CN 分支可以稳定输出 CN enum。
+
+### 9.5 Step 3 实测：Markdown 日报生成
+
+运行：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\generate_daily_report.py --date 2025-12-14
+```
+
+产物：
+
+- `data/daily/report_2025-12-14.md`
+
+### 9.6 工程问题：CN 文本乱码（mojibake）
+
+现象：
+
+- report 中出现类似 `鍗...` / `China鈥檚` 的错码字符（常见于 UTF-8 字节被错误按 GBK/GB18030 解码或反向）。
+
+处置：
+
+- 在抓取端 `scripts/fetch_daily_rss.py` 增加：
+  - `resp.content` 显式解码（utf-8/utf-8-sig/gb18030 fallback）
+  - 基于启发式 penalty 的 `mojibake repair`（gbk/gb18030 -> utf-8 回转）
+- 在日报端 `scripts/generate_daily_report.py` 增加二次兜底 repair（防止上游残留错码）。
