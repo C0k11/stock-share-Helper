@@ -452,10 +452,21 @@ def main():
     w_cn = args.market_weight_cn
     w_us = args.market_weight_us
     if w_cn is not None or w_us is not None:
-        w_cn = 0.6 if w_cn is None else float(w_cn)
-        w_us = 0.4 if w_us is None else float(w_us)
+        w_cn = None if w_cn is None else float(w_cn)
+        w_us = None if w_us is None else float(w_us)
+        if w_cn is None and w_us is not None:
+            w_cn = 1.0 - w_us
+        if w_us is None and w_cn is not None:
+            w_us = 1.0 - w_cn
+        if w_cn is None or w_us is None:
+            raise SystemExit("market weights must be provided")
         if w_cn <= 0 or w_us <= 0:
             raise SystemExit("market weights must be > 0")
+        s = w_cn + w_us
+        if s <= 0:
+            raise SystemExit("market weights must sum to > 0")
+        w_cn = w_cn / s
+        w_us = w_us / s
         try:
             first_payload = load_json_dict(files[0])
             first_items = first_payload.get("items")
