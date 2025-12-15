@@ -497,3 +497,20 @@ Ground Truth 数据源（本地已有）：
 备注：
 
 - `--auto-fetch` 会发起外部请求（yfinance/akshare），默认关闭。
+
+### 10.4 工程问题：Beta 污染与按事件类型评估（Event-based Alpha Analysis）
+
+背景：
+
+- 若当日指数本身单边下跌/上涨（强 Beta），用“涨跌方向命中率”直接给新闻信号判卷，会把大量偏多/偏空的事件类型一刀切判错。
+
+处置：
+
+- 在 `scripts/evaluate_signal.py` 增加按 `event_type` 的分组统计（Total/Wins/Acc%），用来定位“哪类事件更接近 Alpha、哪类更像噪音”。
+
+示例（2025-12-14 signals，以 `--align-mode run_date` 对齐到 2025-12-15；510300 当日 -0.15%）：
+
+- `concept_hype`: 60 条，Acc 0.00%
+- `policy_stimulus`: 11 条，Acc 0.00%
+- `regulation_crackdown`: 15 条，Acc 100.00%
+- `market_intervention`: 11 条，Acc 9.09%
