@@ -201,3 +201,50 @@
   - 末段 loss（log）：0.5997 → 0.5967
   - `train_loss`（全程均值）：0.9075121551594406
   - 保存路径：`models\llm_qwen14b_lora_c_hybrid\lora_weights`
+
+### 8.6 训练后回归评测：CN5 + US5（Base vs LoRA, 2025-12-14）
+
+回归集（合成文本，避免版权风险）：`docs/phase2_regression_cases_cn5_us5.json`。
+
+评测工具：`scripts/infer_llm.py`（支持 `--cases` 批量推理与 `--compare-lora` Base vs LoRA 对比，并打印 `JSON_PARSE_OK_RATE`）。
+
+#### 8.6.1 JSON 可解析率
+
+- CN 5-case：
+  - Base：5/5 OK
+  - LoRA：5/5 OK
+- US 5-case：
+  - Base：5/5 OK
+  - LoRA：5/5 OK
+
+结论：Phase 1 的“strict JSON + 输入清洗”链路在 LoRA 后仍保持稳定。
+
+#### 8.6.2 CN 侧对齐效果（方向与枚举）
+
+- `policy_stimulus`（稳增长/专项债）：
+  - LoRA 输出更贴近硬规则（`impact_bond=1`），方向一致。
+- `regulation_crackdown`（立案调查/监管措施）：
+  - Base 与 LoRA 均稳定输出 `impact_equity=-1`。
+- `market_intervention`（维稳/长期资金入市）：
+  - Base 倾向输出 `market_intervention`（符合预期）。
+  - LoRA 有一次将其归类为 `policy_stimulus`，并给出 `impact_bond=1`。
+
+结论：LoRA 在“政策刺激”与“维稳干预”的边界上存在混淆；需要通过更明确的提示词约束/更多对比样本来区分。
+
+#### 8.6.3 US 侧漂移（最重要发现）
+
+观察：LoRA 在多条 US 宏观 case 上开始输出中文侧 event_type（如 `policy_stimulus` / `policy_stable`），并倾向给出 `impact_equity=1`、`impact_bond=1` 的模式化结果。
+
+风险：这意味着混合训练在当前规模下（US 284 + CN 400，且 CN 标签体系硬约束较强）可能造成“标签空间被 CN 主导”，从而影响 US case 的结构化语义保持。
+
+#### 8.6.4 下一步动作（建议优先级）
+
+- A（高）：推理侧提示词“分市场枚举”
+  - 对 US 明确 event_type enum（US 宏观/公司/风险等），避免模型自由迁移到 CN enum。
+  - 对 CN 明确 `market_intervention` 与 `policy_stimulus` 的判别准则（例如：是否包含财政/货币具体工具 vs 仅稳定预期/资金入市表态）。
+
+- B（高）：训练侧补充“反漂移锚点”
+  - 增加 US 样本量或提升 US 训练权重（例如 US:CN=70:30 或扩增 US 到 600+）。
+  - 或引入一个显式字段（如 `market`）并在训练样本中固定输出（让模型先判别市场，再判别 event_type）。
+
+- C（中）：把回归集扩展为 20-case（CN10+US10），并纳入 nightly 回归。
