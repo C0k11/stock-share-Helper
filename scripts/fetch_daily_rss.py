@@ -52,6 +52,48 @@ def _parse_entry_time(entry: Any) -> Optional[dt.datetime]:
     return None
 
 
+def _decode_http_content(content: bytes) -> str:
+    if not content:
+        return ""
+    for enc in ("utf-8", "utf-8-sig", "gb18030"):
+        try:
+            return content.decode(enc)
+        except Exception:
+            pass
+    return content.decode("utf-8", errors="replace")
+
+
+def _mojibake_penalty(s: str) -> int:
+    if not s:
+        return 0
+    bad = 0
+    bad += s.count("\ufffd") * 10
+    for ch in ("鍗", "鈥", "锟"):
+        bad += s.count(ch) * 3
+    return bad
+
+
+def _repair_mojibake(s: str) -> str:
+    if not s:
+        return s
+    s = str(s)
+    base_penalty = _mojibake_penalty(s)
+    best = s
+    best_penalty = base_penalty
+
+    for enc in ("gb18030", "gbk"):
+        try:
+            repaired = s.encode(enc).decode("utf-8", errors="replace")
+        except Exception:
+            continue
+        p = _mojibake_penalty(repaired)
+        if p < best_penalty:
+            best = repaired
+            best_penalty = p
+
+    return best
+
+
 def _parse_dt_guess(s: str) -> Optional[dt.datetime]:
     if not s:
         return None
@@ -197,7 +239,7 @@ def _cn_fetch_sina_roll(*, page: int, per_page: int) -> List[Dict[str, Any]]:
     url = base.format(num=int(per_page), page=int(page))
     try:
         resp = requests.get(url, timeout=15)
-        text = resp.text
+        text = _decode_http_content(resp.content)
         m = re.search(r"\{.*\}", text, re.DOTALL)
         if not m:
             return []
@@ -209,8 +251,8 @@ def _cn_fetch_sina_roll(*, page: int, per_page: int) -> List[Dict[str, Any]]:
 
     out: List[Dict[str, Any]] = []
     for it in items:
-        title = (it.get("title") or "").strip()
-        content = (it.get("intro") or it.get("summary") or "").strip()
+        title = _repair_mojibake((it.get("title") or "").strip())
+        content = _repair_mojibake((it.get("intro") or it.get("summary") or "").strip())
         pub = it.get("ctime") or it.get("create_time") or ""
         if pub and str(pub).isdigit():
             pub = str(pub)
@@ -231,7 +273,7 @@ def _cn_fetch_eastmoney_kuaixun(*, page: int, per_page: int) -> List[Dict[str, A
     url = f"https://newsapi.eastmoney.com/kuaixun/v1/getlist_101_ajaxResult_{int(per_page)}_{int(page)}_.html"
     try:
         resp = requests.get(url, timeout=15)
-        text = resp.text
+        text = _decode_http_content(resp.content)
         m = re.search(r"var defined[^=]*=\s*(\[.*?\]);", text, re.DOTALL)
         if not m:
             m = re.search(r"\[.*\]", text, re.DOTALL)
@@ -247,8 +289,8 @@ def _cn_fetch_eastmoney_kuaixun(*, page: int, per_page: int) -> List[Dict[str, A
 
     out: List[Dict[str, Any]] = []
     for it in items:
-        title = (it.get("title") or "").strip()
-        content = (it.get("digest") or it.get("content") or "").strip()
+        title = _repair_mojibake((it.get("title") or "").strip())
+        content = _repair_mojibake((it.get("digest") or it.get("content") or "").strip())
         pub = (it.get("showtime") or it.get("time") or "").strip()
         out.append(
             {
@@ -278,8 +320,8 @@ def _cn_fetch_cls_telegraph(*, limit: int) -> List[Dict[str, Any]]:
 
     out: List[Dict[str, Any]] = []
     for it in items[: int(limit)]:
-        title = (it.get("title") or it.get("brief") or "").strip()
-        content = (it.get("content") or it.get("brief") or "").strip()
+        title = _repair_mojibake((it.get("title") or it.get("brief") or "").strip())
+        content = _repair_mojibake((it.get("content") or it.get("brief") or "").strip())
         pub = it.get("ctime") or ""
         pub_dt = _parse_dt_guess(str(pub))
         out.append(
@@ -357,9 +399,9 @@ def main():
 
             logger.info(f"  -> entries={len(entries)}")
             for e in entries:
-                title = str(getattr(e, "title", None) or e.get("title") or "").strip()
+                title = _repair_mojibake(str(getattr(e, "title", None) or e.get("title") or "").strip())
                 link = str(getattr(e, "link", None) or e.get("link") or "").strip()
-                content = _extract_text(e).strip()
+                content = _repair_mojibake(_extract_text(e).strip())
                 published_dt = _parse_entry_time(e)
 
                 if not _within_hours(published_dt, hours=args.hours):
@@ -395,9 +437,9 @@ def main():
         cn_items = fetch_cn_fallback_items(hours=args.hours)
         logger.info(f"CN fallback candidates within window: {len(cn_items)}")
         for it in cn_items:
-            title = (it.get("title") or "").strip()
+            title = _repair_mojibake((it.get("title") or "").strip())
             link = (it.get("url") or "").strip()
-            content = (it.get("content") or "").strip()
+            content = _repair_mojibake((it.get("content") or "").strip())
             src = it.get("source") or "cn_api"
             pub_dt = it.get("published_dt")
 
