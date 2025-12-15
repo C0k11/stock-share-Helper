@@ -452,6 +452,13 @@ Ground Truth 数据源（本地已有）：
 - 默认使用 T+1（从新闻 `published_at` 的日期开始，向后找下一交易日的日收益）
 - 为避免周末/节假日，向后查找窗口默认 7 天（可调）
 
+对齐口径选项：
+
+- `--align-mode published_at`（默认）：按每条新闻的 `published_at` 日期对齐。
+  - 风险：若抓取来源混杂、或时区导致 `published_at` 跨日（例如同一批 signals 里出现 12-14/12-15），会导致样本分散且部分市场无法对齐。
+- `--align-mode run_date`：强制把所有条目的对齐基准设为 signals 文件对应的 `--date`。
+  - 用途：快速“对答案”首跑（把同一天信号集中对齐到 T+1），避免被 `published_at` 跨日影响样本量。
+
 输出：
 
 - 总体胜率（Accuracy）
@@ -479,6 +486,12 @@ Ground Truth 数据源（本地已有）：
 
 ```powershell
 .\venv311\Scripts\python.exe scripts\evaluate_signal.py --date 2025-12-14 --auto-fetch --fetch-source yfinance --sample 20
+```
+
+示例（使用 run_date 口径集中对齐）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\evaluate_signal.py --date 2025-12-14 --align-mode run_date --auto-fetch --fetch-source yfinance --sample 20
 ```
 
 备注：

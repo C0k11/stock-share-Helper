@@ -145,6 +145,20 @@ def _iter_predictions(signals: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return out
 
 
+def _apply_align_mode(preds: List[Dict[str, Any]], *, align_mode: str, run_date: str) -> List[Dict[str, Any]]:
+    mode = str(align_mode or "published_at").strip().lower()
+    if mode != "run_date":
+        return preds
+    if not run_date:
+        return preds
+    out: List[Dict[str, Any]] = []
+    for p in preds:
+        q = dict(p)
+        q["pub_date"] = run_date
+        out.append(q)
+    return out
+
+
 def evaluate(
     signals_path: Path,
     *,
@@ -155,6 +169,8 @@ def evaluate(
     max_lag_days: int,
     auto_fetch: bool,
     fetch_source: str,
+    align_mode: str,
+    run_date: str,
 ) -> int:
     if not signals_path.exists():
         logger.error(f"Signals file not found: {signals_path}")
@@ -162,6 +178,7 @@ def evaluate(
 
     signals_raw = _load_json_list(signals_path)
     preds = _iter_predictions(signals_raw)
+    preds = _apply_align_mode(preds, align_mode=align_mode, run_date=run_date)
 
     storage = DataStorage(base_path="data")
 
@@ -193,6 +210,7 @@ def evaluate(
         pub_dates = sorted({p["pub_date"] for p in preds if p.get("pub_date")})
         if pub_dates:
             logger.info(f"Signal pub_date range: {pub_dates[0]} .. {pub_dates[-1]}")
+    logger.info(f"Align mode: {align_mode} run_date={run_date}")
 
     total = 0
     wins = 0
@@ -283,6 +301,7 @@ def main():
     parser.add_argument("--max-lag-days", type=int, default=7)
     parser.add_argument("--auto-fetch", action="store_true", help="Fetch/extend market price data automatically (network)")
     parser.add_argument("--fetch-source", default="yfinance", choices=["yfinance", "akshare"], help="DataFetcher source used by --auto-fetch")
+    parser.add_argument("--align-mode", default="published_at", choices=["published_at", "run_date"])
     args = parser.parse_args()
 
     date_str = args.date or _today_str()
@@ -297,6 +316,8 @@ def main():
         max_lag_days=int(args.max_lag_days),
         auto_fetch=bool(args.auto_fetch),
         fetch_source=str(args.fetch_source),
+        align_mode=str(args.align_mode),
+        run_date=str(date_str),
     )
     raise SystemExit(code)
 
