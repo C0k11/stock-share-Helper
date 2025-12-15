@@ -54,6 +54,7 @@ def build_messages(
                 "- If event_type is market_intervention, impact_equity MUST be 1. "
                 "- If event_type is corporate_restructuring, impact_equity MUST be 1. "
                 "- If event_type is policy_stimulus, impact_equity MUST be 1 and impact_bond MUST be 1. "
+                "- If event_type is NOT policy_stimulus, impact_bond MUST be 0. "
                 "- If event_type is concept_hype, impact_equity MUST be 1 and summary MUST mention speculative/short-term nature."
             )
         else:
@@ -176,6 +177,7 @@ def main():
     parser.add_argument("--title", default=None)
     parser.add_argument("--content", default=None)
     parser.add_argument("--cases", default=None, help="Path to JSON list: [{title, content, id?, tag?}, ...]")
+    parser.add_argument("--offset", type=int, default=0, help="Offset into cases list loaded from --cases")
     parser.add_argument("--limit", type=int, default=0, help="Limit number of cases loaded from --cases (0 = no limit)")
 
     args = parser.parse_args()
@@ -217,6 +219,8 @@ def main():
             cases = json.load(open(cases_path, "r", encoding="utf-8"))
             if not isinstance(cases, list):
                 raise ValueError("--cases must be a JSON list")
+            if args.offset and args.offset > 0:
+                cases = cases[args.offset :]
             if args.limit and args.limit > 0:
                 cases = cases[: args.limit]
         else:
