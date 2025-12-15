@@ -429,3 +429,58 @@
 - 无 OOM / 无卡顿：推理顺利完成
 - parse_ok：8/8
 - 输出：`data/daily/stress_result.json`
+
+## 10. Phase 4：对答案（Backtesting/Evaluation, 2025-12-14）
+
+目标：
+
+- 将 LLM 的结构化信号（AI 预测方向）与行情数据（Ground Truth）对齐，计算胜率/覆盖率。
+
+### 10.1 判卷脚本：`scripts/evaluate_signal.py`
+
+输入：
+
+- `data/daily/signals_YYYY-MM-DD.json`
+
+Ground Truth 数据源（本地已有）：
+
+- US：`data/raw/SPY.parquet`
+- CN：`data/raw/510300.parquet`（沪深300 ETF 代理）
+
+对齐策略（粗粒度、先跑通）：
+
+- 默认使用 T+1（从新闻 `published_at` 的日期开始，向后找下一交易日的日收益）
+- 为避免周末/节假日，向后查找窗口默认 7 天（可调）
+
+输出：
+
+- 总体胜率（Accuracy）
+- 分市场胜率（US/CN）
+- 覆盖率/跳过数（因行情缺失导致无法对齐）
+
+### 10.2 常见坑：行情数据滞后导致“全跳过”
+
+现象：
+
+- 若本地 parquet 的最后交易日早于 signals 的 pub_date+1，所有样本会被判定为无行情数据，从而全部 skipped。
+
+脚本已增强诊断输出：
+
+- 打印 US/CN 行情数据的 `last_return_date`
+- 打印 signals 的 `pub_date range`
+
+### 10.3 可选增强：自动补齐行情（需要联网）
+
+为了让“判卷子”一键跑通，脚本提供 `--auto-fetch`：
+
+- 会用现有 `DataFetcher` 拉取缺失日期区间并合并回 `data/raw/*.parquet`
+
+示例（直接对 2025-12-14 signals 计算胜率）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\evaluate_signal.py --date 2025-12-14 --auto-fetch --fetch-source yfinance --sample 20
+```
+
+备注：
+
+- `--auto-fetch` 会发起外部请求（yfinance/akshare），默认关闭。
