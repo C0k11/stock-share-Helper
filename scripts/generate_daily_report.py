@@ -109,6 +109,45 @@ def _event_counts(items: List[Dict[str, Any]]) -> Dict[str, int]:
     return dict(sorted(out.items(), key=lambda x: x[1], reverse=True))
 
 
+def _section_risk_watch_cn(items: List[Dict[str, Any]], *, k: int = 10) -> str:
+    ok_items = [it for it in items if it.get("parse_ok")]
+    flagged: List[Dict[str, Any]] = []
+    for it in ok_items:
+        et = str(_get_signal(it).get("event_type") or "").strip()
+        if et == "regulation_crackdown":
+            flagged.append(it)
+
+    total_ok = len(ok_items)
+    n = len(flagged)
+    ratio = (n / total_ok * 100.0) if total_ok > 0 else 0.0
+
+    lines: List[str] = ["## Risk Watch (CN: regulation_crackdown)"]
+    lines.append(f"- **count**: {n}")
+    lines.append(f"- **share_of_cn_parse_ok**: {ratio:.2f}%")
+    lines.append("")
+    if not flagged:
+        lines.append("(none)")
+        return "\n".join(lines)
+
+    # prioritize strongest absolute equity impacts
+    def score(it: Dict[str, Any]) -> int:
+        sig = _get_signal(it)
+        return abs(_safe_int(sig.get("impact_equity"), 0))
+
+    ranked = sorted(flagged, key=score, reverse=True)[:k]
+    for it in ranked:
+        sig = _get_signal(it)
+        impact = _impact_line(sig)
+        src = _md_escape(str(it.get("source") or ""))
+        url = _md_escape(str(it.get("url") or ""))
+        title_line = _md_escape(_repair_mojibake(str(it.get("title") or "")))
+        summary = _md_escape(_repair_mojibake(str(sig.get("summary") or "")))
+        lines.append(f"- **regulation_crackdown** ({impact}) | {src} | [{title_line}]({url})")
+        if summary:
+            lines.append(f"  - **summary**: {summary}")
+    return "\n".join(lines)
+
+
 def _section_top(items: List[Dict[str, Any]], *, title: str, k: int = 10) -> str:
     ranked = _rank_items([it for it in items if it.get("parse_ok")])[:k]
     lines: List[str] = [f"## {title}"]
@@ -193,6 +232,7 @@ def main():
     parts.append(_section_top(us, title="US top signals", k=args.top))
 
     parts.append(fmt_counts("CN event_type distribution (top)", cn_counts))
+    parts.append(_section_risk_watch_cn(cn, k=min(args.top, 12)))
     parts.append(_section_top(cn, title="CN top signals", k=args.top))
 
     parts.append(_section_failures(items, k=10))
