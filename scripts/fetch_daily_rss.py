@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 import feedparser
+import requests
 import yaml
 from loguru import logger
 
@@ -111,11 +112,44 @@ def _normalize_sources(cfg: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], List[
 
 
 def fetch_feed(url: str) -> List[Any]:
-    # feedparser handles HTTP/redirects; keep it simple.
-    feed = feedparser.parse(url)
+    headers = {
+        "User-Agent": (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/121.0.0.0 Safari/537.36"
+        ),
+        "Accept": "application/rss+xml, application/xml;q=0.9, text/xml;q=0.8, */*;q=0.1",
+        "Accept-Language": "en-US,en;q=0.8,zh-CN;q=0.6,zh;q=0.4",
+        "Cache-Control": "no-cache",
+        "Pragma": "no-cache",
+    }
+
+    try:
+        resp = requests.get(url, headers=headers, timeout=20, allow_redirects=True)
+    except Exception as e:
+        logger.warning(f"HTTP fetch failed for {url}: {e}")
+        return []
+
+    ct = (resp.headers.get("content-type") or "").lower()
+    if resp.status_code >= 400:
+        logger.warning(f"HTTP {resp.status_code} for {url} content_type={ct}")
+        return []
+
+    content = resp.content or b""
+    # Some feeds include BOM or stray bytes before XML which can trigger "invalid token".
+    content = content.lstrip(b"\xef\xbb\xbf")
+    for marker in (b"<?xml", b"<rss", b"<feed"):
+        idx = content.find(marker)
+        if idx > 0:
+            content = content[idx:]
+            break
+
+    feed = feedparser.parse(content)
     if getattr(feed, "bozo", False):
-        # bozo_exception can be informative, but don't fail pipeline
-        logger.warning(f"Feed parse bozo for {url}: {getattr(feed, 'bozo_exception', None)}")
+        logger.warning(
+            f"Feed parse bozo for {url}: {getattr(feed, 'bozo_exception', None)} status={resp.status_code} content_type={ct}"
+        )
+
     return list(getattr(feed, "entries", []) or [])
 
 
