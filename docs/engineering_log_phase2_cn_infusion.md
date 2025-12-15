@@ -267,3 +267,44 @@
 剩余问题（待后续精修）：
 
 - CN 侧 `market_intervention` vs `policy_stimulus` 边界仍存在一次混淆，需要在提示词中加入更明确判别准则或补充对比样本。
+
+## 9. Phase 3：实战化 Production Pipeline（Night Ops, 2025-12-14）
+
+目标：搭起“每日自动选股/风控”的骨架（自动抓新闻 → 自动推理 → 自动出日报）。
+
+### 9.1 Step 1 - The Eyes（RSS 数据获取）
+
+工程决策：
+
+- 不覆盖现有 `config/sources.yaml` 结构。
+  - 原因：仓库已有 `version/defaults/sources`（Fed/BEA/BLS/Yahoo 等），直接覆盖会破坏历史脚本与兼容性。
+  - 方案：在文件末尾追加 Phase 3 专用字段 `us_sources` / `cn_sources`，让新脚本优先读取新字段，旧脚本仍可继续使用 `sources:`。
+
+新增/更新产物：
+
+- 配置扩展：`config/sources.yaml`
+  - 追加 `us_sources`：CNBC、Investing、Yahoo Finance news index
+  - 追加 `cn_sources`：Sina Finance、WallstreetCN
+
+- 抓取脚本：`scripts/fetch_daily_rss.py`
+  - 行为：抓取近 `--hours`（默认 26h）新闻，做去重与容错
+  - 输出：`data/daily/news_YYYY-MM-DD.json`
+  - 去重策略：`market + source + url + title` hash
+  - 时间处理：尽量解析 `published_parsed/updated_parsed`，否则使用 RFC822 字符串，缺失时间戳的条目默认保留
+
+运行方式：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\fetch_daily_rss.py
+```
+
+### 9.2 下一步（Step 2/3 规划）
+
+- Step 2 - The Brain：`scripts/run_daily_inference.py`
+  - 输入：`data/daily/news_YYYY-MM-DD.json`
+  - 加载：LoRA-C 权重（`models\llm_qwen14b_lora_c_hybrid\lora_weights`）
+  - 输出：逐条结构化信号 JSON（包含 market + event_type + impacts + summary + url/source），并统计 JSON 解析成功率
+
+- Step 3 - The Mouth：`scripts/generate_daily_report.py`
+  - 输入：Step 2 的信号文件
+  - 输出：Markdown/HTML 日报（分市场汇总、Top 正负面事件、风险提示、关注标的/板块）
