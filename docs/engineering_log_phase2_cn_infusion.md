@@ -537,3 +537,20 @@ Ground Truth 数据源（本地已有）：
 
 - 根目录新增 `run_pipeline.bat`：一键执行 `fetch_daily_rss.py` → `run_daily_inference.py` → `generate_daily_report.py`。
 - `TODAY` 由 Python 生成（避免 Windows 区域设置导致 `%date%` 切片不一致）。
+
+## 11. 新闻模块运维：每日抓取健康检查（2025-12-14）
+
+新增：
+
+- `scripts/fetch_daily_rss.py` 增加 `--health-out`：输出抓取健康检查 JSON。
+  - `--health-out auto`：写入 `data/daily/health_YYYY-MM-DD.json`
+
+健康指标包含：
+
+- `by_source[market:source]`：rss_entries / rss_in_window / rss_added / rss_errors / fallback_added
+- `cn`：rss_items / fallback_used / fallback_candidates / fallback_added
+- `totals`：rss_added / rss_errors / fallback_added / final_total
+
+本地验证（2h 窗口）：
+
+- CN RSS 0 条时自动启用 fallback，并写出 health 文件用于后续监控。
