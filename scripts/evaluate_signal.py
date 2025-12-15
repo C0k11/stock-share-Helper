@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+from collections import defaultdict
 import datetime as dt
 import json
 import sys
@@ -216,6 +217,8 @@ def evaluate(
     wins = 0
     skipped = 0
 
+    type_stats: Dict[str, Dict[str, int]] = defaultdict(lambda: {"total": 0, "wins": 0})
+
     by_market: Dict[str, Dict[str, int]] = {"US": {"total": 0, "wins": 0, "skipped": 0}, "CN": {"total": 0, "wins": 0, "skipped": 0}}
 
     rows: List[Dict[str, Any]] = []
@@ -238,6 +241,10 @@ def evaluate(
         is_win = (impact > 0 and real > 0) or (impact < 0 and real < 0)
         total += 1
         wins += 1 if is_win else 0
+
+        et = str(p.get("event_type") or "unknown").strip() or "unknown"
+        type_stats[et]["total"] += 1
+        type_stats[et]["wins"] += 1 if is_win else 0
 
         mkey = "CN" if market == "CN" else "US"
         by_market[mkey]["total"] += 1
@@ -286,6 +293,16 @@ def evaluate(
             logger.info(f"{m} accuracy: {mw}/{mt} = {mw/mt*100.0:.2f}% (skipped={ms})")
         else:
             logger.info(f"{m} accuracy: n/a (skipped={ms})")
+
+    if type_stats:
+        print("\n--- Event Type Analysis ---")
+        print(f"{'Event Type':<25} | {'Total':<6} | {'Acc':<8}")
+        print("-" * 45)
+        for et, st in sorted(type_stats.items(), key=lambda x: x[1]["total"], reverse=True):
+            t = int(st.get("total", 0))
+            w = int(st.get("wins", 0))
+            acc_et = (w / t * 100.0) if t > 0 else 0.0
+            print(f"{et:<25} | {t:<6d} | {acc_et:.2f}%")
 
     return 0
 
