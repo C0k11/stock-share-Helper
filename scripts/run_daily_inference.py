@@ -167,6 +167,7 @@ def main():
 
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--deterministic", action="store_true", default=True)
+    parser.add_argument("--max-input-chars", type=int, default=6000)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--save-every", type=int, default=20)
     parser.add_argument("--resume", action="store_true")
@@ -289,6 +290,9 @@ def main():
         for it in batch:
             title = (it.get("title") or "").strip()
             content = (it.get("content") or "").strip()
+            max_chars = max(0, int(args.max_input_chars))
+            if max_chars and len(content) > max_chars:
+                content = content[:max_chars] + "...(truncated)"
             market = (it.get("market") or "US").strip().upper()
             if market not in ("US", "CN"):
                 market = "US"
@@ -309,13 +313,15 @@ def main():
             )
 
         inputs = tokenizer(prompts, return_tensors="pt", padding=True).to(model.device)
-        input_len = inputs["input_ids"].shape[1]
+        # Per-sample prompt lengths (critical for left-padding batch decode correctness)
+        prompt_lens = inputs["attention_mask"].sum(dim=1).tolist()
 
         with torch.no_grad():
             outputs = model.generate(**inputs, **gen_kwargs)
 
         for i in range(len(metas)):
-            out_text = tokenizer.decode(outputs[i][input_len:], skip_special_tokens=True)
+            pl = int(prompt_lens[i])
+            out_text = tokenizer.decode(outputs[i][pl:], skip_special_tokens=True)
             parse_ok, obj, raw_json = try_parse_json(out_text)
             meta = metas[i]
 
