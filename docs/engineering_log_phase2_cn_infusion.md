@@ -616,3 +616,22 @@ Ground Truth 数据源（本地已有）：
 - 通过 `--variants` 支持同一（date,symbol）多视角多样本生成（用于“烧钱换质量”）。
 - 以 `2025-12-14` 为例：7 个 ETF × 6 variants = 42 行 JSONL（`failed=0`）。
 - Windows PowerShell 抽样解析注意：建议 `Get-Content ... -Encoding UTF8 | ConvertFrom-Json`，否则可能出现乱码导致解析失败。
+
+## 15. Phase 5.3：Teacher 数据扩量（20k 级别，2025-12-15）
+
+目标：
+
+- 为过夜 QLoRA 蒸馏准备 20k 级别 teacher 样本（仅靠单日数据远远不够）。
+
+新增/增强：
+
+- `scripts/build_daily_etf_features.py`
+  - 增加 `--start-date/--end-date`：按交易日批量生成 `etf_features_YYYY-MM-DD.json`
+  - 批量模式以 SPY 交易日为基准日历（缺失则退化为全标的日期并集）
+- `scripts/generate_etf_teacher_dataset.py`
+  - 增加 `--workers`：并发调用 teacher API（否则 20k 顺序调用会超时）
+  - 增加 `--cot-ratio`：抽样启用长推演（在成本与质量之间折中）
+
+建议口径：
+
+- 以 7 个 ETF、`variants=6` 为例：约 500 个交易日 ≈ 21k 样本（满足 20k 目标）。
