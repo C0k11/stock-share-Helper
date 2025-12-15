@@ -156,7 +156,13 @@ def _today_str() -> str:
 
 def main():
     parser = argparse.ArgumentParser(description="Run daily inference over fetched news and save structured signals")
-    parser.add_argument("--in", dest="in_path", default=None, help="Input news JSON (default: data/daily/news_YYYY-MM-DD.json)")
+    parser.add_argument(
+        "--in",
+        "--data",
+        dest="in_path",
+        default=None,
+        help="Input news JSON (default: data/daily/news_YYYY-MM-DD.json)",
+    )
     parser.add_argument("--out", dest="out_path", default=None, help="Output signals JSON (default: data/daily/signals_YYYY-MM-DD.json)")
     parser.add_argument("--date", default=None, help="Override date YYYY-MM-DD used for default in/out")
 
@@ -292,7 +298,11 @@ def main():
             content = (it.get("content") or "").strip()
             max_chars = max(0, int(args.max_input_chars))
             if max_chars and len(content) > max_chars:
+                orig_len = len(content)
                 content = content[:max_chars] + "...(truncated)"
+                logger.info(
+                    f"Truncated content id={it.get('id')} title={title[:60]} from {orig_len} to {max_chars} chars"
+                )
             market = (it.get("market") or "US").strip().upper()
             if market not in ("US", "CN"):
                 market = "US"
