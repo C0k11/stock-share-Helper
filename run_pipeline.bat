@@ -6,7 +6,7 @@ set VENV=.\venv311\Scripts\python.exe
 for /f %%i in ('%VENV% -c "import datetime as dt; print(dt.date.today().strftime(\"%%Y-%%m-%%d\"))"') do set TODAY=%%i
 
 echo [1/3] Fetching RSS for %TODAY%...
-%VENV% scripts\fetch_daily_rss.py --date %TODAY%
+%VENV% scripts\fetch_daily_rss.py --date %TODAY% --health-out auto
 if errorlevel 1 goto :error
 
 echo [2/3] Running Inference for %TODAY%...

@@ -364,6 +364,11 @@ def main():
     parser.add_argument("--outdir", default="data/daily")
     parser.add_argument("--sleep", type=float, default=0.2, help="Sleep seconds between feeds")
     parser.add_argument("--date", default=None, help="Override output date YYYY-MM-DD (default: today local)")
+    parser.add_argument(
+        "--health-out",
+        default=None,
+        help="Optional path to write health JSON; use 'auto' to write to outdir/health_YYYY-MM-DD.json",
+    )
     args = parser.parse_args()
 
     cfg = load_config(Path(args.config))
@@ -374,6 +379,25 @@ def main():
 
     out_date = args.date or _now_local().strftime("%Y-%m-%d")
     out_path = outdir / f"news_{out_date}.json"
+
+    health: Dict[str, Any] = {
+        "date": out_date,
+        "hours": float(args.hours),
+        "generated_at": _to_iso_zoned(_now_local()),
+        "by_source": {},
+        "cn": {
+            "rss_items": 0,
+            "fallback_used": False,
+            "fallback_candidates": 0,
+            "fallback_added": 0,
+        },
+        "totals": {
+            "rss_added": 0,
+            "rss_errors": 0,
+            "fallback_added": 0,
+            "final_total": 0,
+        },
+    }
 
     collected: List[Dict[str, Any]] = []
     seen: set[str] = set()
@@ -390,14 +414,30 @@ def main():
                 continue
             weight = float(src.get("weight") or 1.0)
 
+            key = f"{market}:{name}"
+            if key not in health["by_source"]:
+                health["by_source"][key] = {
+                    "market": market,
+                    "source": name,
+                    "rss_entries": 0,
+                    "rss_in_window": 0,
+                    "rss_added": 0,
+                    "rss_errors": 0,
+                    "fallback_candidates": 0,
+                    "fallback_added": 0,
+                }
+
             logger.info(f"Fetching {market} - {name}: {url}")
             try:
                 entries = fetch_feed(url)
             except Exception as e:
                 logger.warning(f"Failed to fetch {url}: {e}")
+                health["by_source"][key]["rss_errors"] += 1
+                health["totals"]["rss_errors"] += 1
                 continue
 
             logger.info(f"  -> entries={len(entries)}")
+            health["by_source"][key]["rss_entries"] += int(len(entries))
             for e in entries:
                 title = _repair_mojibake(str(getattr(e, "title", None) or e.get("title") or "").strip())
                 link = str(getattr(e, "link", None) or e.get("link") or "").strip()
@@ -406,6 +446,8 @@ def main():
 
                 if not _within_hours(published_dt, hours=args.hours):
                     continue
+
+                health["by_source"][key]["rss_in_window"] += 1
 
                 item_id = _stable_id(title=title, url=link, source=name, market=market)
                 if item_id in seen:
@@ -424,6 +466,9 @@ def main():
                     "fetched_at": _to_iso_zoned(_now_local()),
                 })
 
+                health["by_source"][key]["rss_added"] += 1
+                health["totals"]["rss_added"] += 1
+
             if args.sleep and args.sleep > 0:
                 time.sleep(args.sleep)
 
@@ -432,10 +477,13 @@ def main():
 
     # CN fallback: if RSS sources are blocked/return HTML, use stable CN JSON APIs.
     cn_seen = sum(1 for x in collected if x.get("market") == "CN")
+    health["cn"]["rss_items"] = int(cn_seen)
     if cn_seen == 0:
         logger.warning("CN RSS returned 0 items; falling back to CN JSON APIs (sina/eastmoney/cls)")
+        health["cn"]["fallback_used"] = True
         cn_items = fetch_cn_fallback_items(hours=args.hours)
         logger.info(f"CN fallback candidates within window: {len(cn_items)}")
+        health["cn"]["fallback_candidates"] = int(len(cn_items))
         for it in cn_items:
             title = _repair_mojibake((it.get("title") or "").strip())
             link = (it.get("url") or "").strip()
@@ -461,7 +509,51 @@ def main():
                 }
             )
 
+            health["cn"]["fallback_added"] += 1
+            health["totals"]["fallback_added"] += 1
+            key = f"CN:{str(src)}"
+            if key not in health["by_source"]:
+                health["by_source"][key] = {
+                    "market": "CN",
+                    "source": str(src),
+                    "rss_entries": 0,
+                    "rss_in_window": 0,
+                    "rss_added": 0,
+                    "rss_errors": 0,
+                    "fallback_candidates": 0,
+                    "fallback_added": 0,
+                }
+            health["by_source"][key]["fallback_candidates"] += 1
+            health["by_source"][key]["fallback_added"] += 1
+
     logger.info(f"Total news collected (last {args.hours}h): {len(collected)}")
+    health["totals"]["final_total"] = int(len(collected))
+
+    logger.info("News health summary:")
+    zero_sources: List[str] = []
+    for k, st in sorted(health["by_source"].items(), key=lambda x: (x[1].get("market"), -int(x[1].get("rss_added", 0) + x[1].get("fallback_added", 0)), x[0])):
+        added = int(st.get("rss_added", 0)) + int(st.get("fallback_added", 0))
+        rss_entries = int(st.get("rss_entries", 0))
+        rss_err = int(st.get("rss_errors", 0))
+        logger.info(
+            f"  - {st.get('market')}:{st.get('source')}: added={added} rss_entries={rss_entries} rss_in_window={int(st.get('rss_in_window', 0))} rss_errors={rss_err} fallback_added={int(st.get('fallback_added', 0))}"
+        )
+        if rss_entries == 0 and rss_err == 0 and int(st.get("fallback_added", 0)) == 0:
+            zero_sources.append(str(k))
+
+    if zero_sources:
+        logger.warning(f"Sources with 0 entries (and no errors): {zero_sources}")
+
+    if args.health_out:
+        health_out = str(args.health_out).strip()
+        if health_out.lower() == "auto":
+            health_path = outdir / f"health_{out_date}.json"
+        else:
+            health_path = Path(health_out)
+        health_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(health_path, "w", encoding="utf-8") as f:
+            json.dump(health, f, ensure_ascii=False, indent=2)
+        logger.info(f"Saved health to {health_path}")
 
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(collected, f, ensure_ascii=False, indent=2)
