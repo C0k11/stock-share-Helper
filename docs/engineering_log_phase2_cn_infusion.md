@@ -635,3 +635,7 @@ Ground Truth 数据源（本地已有）：
 建议口径：
 
 - 以 7 个 ETF、`variants=6` 为例：约 500 个交易日 ≈ 21k 样本（满足 20k 目标）。
+
+样本配比（大A:美股=60:40）：
+
+- 通过按市场分配 `variants` 实现：CN ETF（510xxx）生成更多 variants，US ETF（SPY/QQQ/TLT/GLD）生成较少 variants。

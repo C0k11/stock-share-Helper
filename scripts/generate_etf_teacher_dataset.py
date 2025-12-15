@@ -185,46 +185,96 @@ def load_json_list(path: Path) -> List[Dict[str, Any]]:
     return data
 
 
-def build_risk_watch_summary(daily_dir: Path, date_str: str) -> Dict[str, Any]:
+def build_risk_watch_summary(
+    daily_dir: Path,
+    date_str: str,
+    market_mode: str,
+    top_k: int,
+) -> Dict[str, Any]:
     sig_path = daily_dir / f"signals_{date_str}.json"
+    market_mode = (market_mode or "CN").strip().upper()
+    if market_mode not in {"CN", "US", "BOTH", "NONE"}:
+        market_mode = "CN"
     if not sig_path.exists():
-        return {"signals_path": str(sig_path), "available": False}
+        return {
+            "signals_path": str(sig_path),
+            "available": False,
+            "mode": market_mode,
+        }
 
     try:
         items = load_json_list(sig_path)
     except Exception:
-        return {"signals_path": str(sig_path), "available": False}
+        return {
+            "signals_path": str(sig_path),
+            "available": False,
+            "mode": market_mode,
+        }
 
-    cn_ok = [it for it in items if str(it.get("market") or "").upper() == "CN" and it.get("parse_ok")]
+    if market_mode == "NONE":
+        return {
+            "signals_path": str(sig_path),
+            "available": True,
+            "mode": market_mode,
+        }
 
-    rc: List[Dict[str, Any]] = []
-    for it in cn_ok:
-        sig = it.get("signal") if isinstance(it.get("signal"), dict) else {}
-        if str(sig.get("event_type") or "").strip() == "regulation_crackdown":
-            rc.append(it)
+    top_k = int(top_k)
+    if top_k <= 0:
+        top_k = 5
 
     def compact(it: Dict[str, Any]) -> Dict[str, Any]:
         sig = it.get("signal") if isinstance(it.get("signal"), dict) else {}
         return {
             "title": str(it.get("title") or "")[:120],
             "source": str(it.get("source") or ""),
+            "event_type": str(sig.get("event_type") or ""),
             "impact_equity": sig.get("impact_equity"),
-            "summary": str(sig.get("summary") or "")[:200],
+            "impact_bond": sig.get("impact_bond"),
+            "impact_gold": sig.get("impact_gold"),
+            "summary": str(sig.get("summary") or "")[:220],
         }
 
-    top = [compact(x) for x in rc[:5]]
-    total_ok = len(cn_ok)
-    n = len(rc)
-    return {
+    def impact_score(it: Dict[str, Any]) -> float:
+        sig = it.get("signal") if isinstance(it.get("signal"), dict) else {}
+        def _to_num(x: Any) -> float:
+            try:
+                return abs(float(x))
+            except Exception:
+                return 0.0
+        return _to_num(sig.get("impact_equity")) + _to_num(sig.get("impact_bond")) + _to_num(sig.get("impact_gold"))
+
+    out: Dict[str, Any] = {
         "signals_path": str(sig_path),
         "available": True,
-        "cn_parse_ok": total_ok,
-        "regulation_crackdown": {
+        "mode": market_mode,
+    }
+
+    if market_mode in {"CN", "BOTH"}:
+        cn_ok = [it for it in items if str(it.get("market") or "").upper() == "CN" and it.get("parse_ok")]
+
+        rc: List[Dict[str, Any]] = []
+        for it in cn_ok:
+            sig = it.get("signal") if isinstance(it.get("signal"), dict) else {}
+            if str(sig.get("event_type") or "").strip() == "regulation_crackdown":
+                rc.append(it)
+
+        top_cn = [compact(x) for x in rc[:top_k]]
+        total_ok = len(cn_ok)
+        n = len(rc)
+        out["cn_parse_ok"] = total_ok
+        out["cn_regulation_crackdown"] = {
             "count": n,
             "share": (n / total_ok) if total_ok > 0 else 0.0,
-            "top": top,
-        },
-    }
+            "top": top_cn,
+        }
+
+    if market_mode in {"US", "BOTH"}:
+        us_ok = [it for it in items if str(it.get("market") or "").upper() == "US" and it.get("parse_ok")]
+        us_ok_sorted = sorted(us_ok, key=impact_score, reverse=True)
+        out["us_parse_ok"] = len(us_ok)
+        out["us_top_events"] = [compact(x) for x in us_ok_sorted[:top_k]]
+
+    return out
 
 
 def build_teacher_messages(
@@ -344,6 +394,14 @@ def main():
     parser.add_argument("--max", type=int, default=0, help="Limit number of symbols across all days (0=all)")
     parser.add_argument("--variants", type=int, default=1, help="Generate N variants per (date,symbol)")
     parser.add_argument("--workers", type=int, default=1, help="Concurrent API workers (>=1)")
+    parser.add_argument("--market-weight-cn", type=float, default=None, help="Optional sample weight for CN market")
+    parser.add_argument("--market-weight-us", type=float, default=None, help="Optional sample weight for US market")
+    parser.add_argument(
+        "--risk-watch-market",
+        default="CN",
+        help="Risk watch market mode: CN|US|BOTH|NONE (default: CN)",
+    )
+    parser.add_argument("--risk-watch-top", type=int, default=5, help="Top K risk watch items (default: 5)")
     parser.add_argument(
         "--cot-ratio",
         type=float,
@@ -383,6 +441,38 @@ def main():
 
     nonlocal_skipped = [0]
 
+    def symbol_market(symbol: str) -> str:
+        s = (symbol or "").strip()
+        if s.isdigit():
+            return "CN"
+        return "US"
+
+    us_variants = max(1, int(args.variants))
+    cn_variants = us_variants
+    w_cn = args.market_weight_cn
+    w_us = args.market_weight_us
+    if w_cn is not None or w_us is not None:
+        w_cn = 0.6 if w_cn is None else float(w_cn)
+        w_us = 0.4 if w_us is None else float(w_us)
+        if w_cn <= 0 or w_us <= 0:
+            raise SystemExit("market weights must be > 0")
+        try:
+            first_payload = load_json_dict(files[0])
+            first_items = first_payload.get("items")
+            if not isinstance(first_items, list):
+                first_items = []
+        except Exception:
+            first_items = []
+        sym_list = []
+        for it in first_items:
+            if isinstance(it, dict) and it.get("symbol"):
+                sym_list.append(str(it.get("symbol")))
+        cn_count = sum(1 for s in sym_list if symbol_market(s) == "CN")
+        us_count = sum(1 for s in sym_list if symbol_market(s) == "US")
+        if cn_count > 0 and us_count > 0:
+            ratio = (w_cn / w_us) * (us_count / cn_count)
+            cn_variants = max(1, int(round(us_variants * ratio)))
+
     def should_include_cot(sample_id: str) -> bool:
         if bool(args.include_cot):
             return True
@@ -402,14 +492,21 @@ def main():
             items = payload.get("items")
             if not isinstance(items, list):
                 continue
-            risk_watch = build_risk_watch_summary(daily_dir, date_str)
+            risk_watch = build_risk_watch_summary(
+                daily_dir,
+                date_str,
+                str(args.risk_watch_market),
+                int(args.risk_watch_top),
+            )
             for it in items:
                 if not isinstance(it, dict):
                     continue
                 symbol = str(it.get("symbol") or "").strip()
                 if not symbol:
                     continue
-                for vi in range(max(1, int(args.variants))):
+                mkt = symbol_market(symbol)
+                n_variants = cn_variants if mkt == "CN" else us_variants
+                for vi in range(n_variants):
                     sid = stable_sample_id(
                         date_str,
                         symbol,
