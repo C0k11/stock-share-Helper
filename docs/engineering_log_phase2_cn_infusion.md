@@ -371,3 +371,26 @@
   - `resp.content` 显式解码（utf-8/utf-8-sig/gb18030 fallback）
   - 基于启发式 penalty 的 `mojibake repair`（gbk/gb18030 -> utf-8 回转）
 - 在日报端 `scripts/generate_daily_report.py` 增加二次兜底 repair（防止上游残留错码）。
+
+### 9.7 Step 2B：Batch 推理的“防爆阀”（OOM/尾部延迟防护）
+
+问题背景：
+
+- Batch 推理时，最长样本会决定整个 batch 的 token 长度与计算成本。
+- 如果 RSS 抓入超长正文（例如财报全文/长文 3 万字），会带来：
+  - 显存飙升（甚至 OOM）
+  - tail latency（短新闻也被长新闻拖慢）
+
+处置（工业级防护）：
+
+- 在 `scripts/run_daily_inference.py` 增加输入侧字符级硬截断：
+  - 参数：`--max-input-chars`（默认 6000）
+  - 行为：在构建 prompt 前对 `content` 执行 `content[:max] + "...(truncated)"`
+- 修复 batch decode 的边界：
+  - 使用 `attention_mask.sum()` 得到 per-sample prompt 长度
+  - decode 时按每条样本的 `prompt_len` 截断（而不是按 padding 后的统一长度），避免混入 prompt 残留影响 JSON 提取。
+
+附加增强：
+
+- 支持 `--batch-size` 提升吞吐
+- 支持 `--resume` + `--save-every` 断点续跑与增量写盘（生产更稳）
