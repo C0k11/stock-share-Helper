@@ -394,3 +394,38 @@
 
 - 支持 `--batch-size` 提升吞吐
 - 支持 `--resume` + `--save-every` 断点续跑与增量写盘（生产更稳）
+
+### 9.8 压力测试（Stress Test）：核弹样本验证防爆阀生效
+
+目的：
+
+- 验证 `--max-input-chars` 能在极端长文本（5 万字级）下防止 batch OOM 与 tail latency。
+
+步骤：
+
+1) 生成压力测试数据（1 条 50k 字 monster + 7 条正常）：
+
+```powershell
+.\venv311\Scripts\python.exe -c "import json; normal='Short news.'; huge='CRASH ' * 10000; data=[{'title':f'News {i}', 'content': huge if i==0 else normal, 'source':'Test', 'market':'US', 'url':'http://test', 'published_at':'2025-12-14'} for i in range(8)]; json.dump(data, open('data/daily/stress_test.json','w'), indent=2); print('Created stress_test.json with 1 monster entry (50k chars).')"
+```
+
+2) Batch 推理点火（batch-size=8 + max-input-chars=6000）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts/run_daily_inference.py \
+  --model Qwen/Qwen2.5-14B-Instruct \
+  --lora models/llm_qwen14b_lora_c_hybrid/lora_weights \
+  --use-lora \
+  --data data/daily/stress_test.json \
+  --load-in-4bit \
+  --batch-size 8 \
+  --max-input-chars 6000 \
+  --out data/daily/stress_result.json
+```
+
+验收结果（关键日志）：
+
+- 截断证据：`Truncated content ... from 59999 to 6000 chars`
+- 无 OOM / 无卡顿：推理顺利完成
+- parse_ok：8/8
+- 输出：`data/daily/stress_result.json`
