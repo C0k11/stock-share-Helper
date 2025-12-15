@@ -5,7 +5,7 @@ import datetime as dt
 import json
 import sys
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Set
 
 import pandas as pd
 from loguru import logger
@@ -22,6 +22,10 @@ from src.strategy.position import PositionSizer
 
 def _today_str() -> str:
     return dt.datetime.now().strftime("%Y-%m-%d")
+
+
+def _parse_date(s: str) -> dt.date:
+    return dt.datetime.strptime(s, "%Y-%m-%d").date()
 
 
 def _as_date_str(x: Any) -> str:
@@ -68,6 +72,7 @@ def _compute_one(
     *,
     symbol: str,
     df: pd.DataFrame,
+    asof_date: dt.date,
     regime_detector: RegimeDetector,
     spy_df: Optional[pd.DataFrame],
     vix_df: Optional[pd.DataFrame],
@@ -81,6 +86,11 @@ def _compute_one(
         df.index = pd.to_datetime(df.index)
 
     df = df.sort_index()
+
+    df = df[df.index.date <= asof_date]
+    if df.empty:
+        raise ValueError(f"no data on or before {asof_date} for {symbol}")
+
     last_dt = df.index[-1]
     last_date = _as_date_str(last_dt)
 
@@ -112,7 +122,13 @@ def _compute_one(
     regime_score = None
     if spy_df is not None and not spy_df.empty:
         try:
-            rr = regime_detector.get_current_regime(spy_df, vix_df)
+            spy_asof = spy_df
+            vix_asof = vix_df
+            if isinstance(spy_asof.index, pd.DatetimeIndex):
+                spy_asof = spy_asof[spy_asof.index.date <= asof_date]
+            if vix_asof is not None and isinstance(vix_asof.index, pd.DatetimeIndex):
+                vix_asof = vix_asof[vix_asof.index.date <= asof_date]
+            rr = regime_detector.get_current_regime(spy_asof, vix_asof)
             regime = rr.get("regime")
             regime_score = rr.get("score")
         except Exception:
@@ -161,6 +177,8 @@ def _compute_one(
 def main():
     parser = argparse.ArgumentParser(description="Build daily ETF/index feature snapshot (technical + regime + teacher target)")
     parser.add_argument("--date", default=None, help="Date label for output filename YYYY-MM-DD (default: today)")
+    parser.add_argument("--start-date", default=None, help="Batch mode: start date YYYY-MM-DD (inclusive)")
+    parser.add_argument("--end-date", default=None, help="Batch mode: end date YYYY-MM-DD (inclusive)")
     parser.add_argument("--outdir", default="data/daily")
     parser.add_argument("--category", default="raw", choices=["raw", "processed", "cache", "features"])
     parser.add_argument(
@@ -171,10 +189,12 @@ def main():
     parser.add_argument("--risk-profile", default="balanced", choices=["conservative", "balanced", "aggressive"])
     args = parser.parse_args()
 
+    if (args.start_date or args.end_date) and args.date:
+        raise SystemExit("Use either --date or --start-date/--end-date")
+
     date_str = args.date or _today_str()
     outdir = Path(args.outdir)
     outdir.mkdir(parents=True, exist_ok=True)
-    out_path = outdir / f"etf_features_{date_str}.json"
 
     symbols = [s.strip() for s in str(args.symbols).split(",") if s.strip()]
     storage = DataStorage(base_path="data")
@@ -184,40 +204,78 @@ def main():
     vix_df = storage.load_price_data("VIX", category=args.category)
     regime_detector = RegimeDetector()
 
-    results: List[Dict[str, Any]] = []
-    errors: List[Dict[str, Any]] = []
-
+    price_map: Dict[str, pd.DataFrame] = {}
+    all_dates: Set[dt.date] = set()
     for sym in symbols:
-        try:
-            df = storage.load_price_data(sym, category=args.category)
-            if df is None or df.empty:
-                raise ValueError(f"missing parquet for {sym} under data/{args.category}")
-            rec = _compute_one(
-                symbol=sym,
-                df=df,
-                regime_detector=regime_detector,
-                spy_df=spy_df,
-                vix_df=vix_df,
-                risk_profile=str(args.risk_profile),
-            )
-            results.append(rec)
-        except Exception as e:
-            logger.warning(f"Failed to build features for {sym}: {e}")
-            errors.append({"symbol": sym, "error": str(e)})
+        df = storage.load_price_data(sym, category=args.category)
+        if df is None or df.empty:
+            logger.warning(f"Missing parquet for {sym} under data/{args.category}")
+            continue
+        if not isinstance(df.index, pd.DatetimeIndex):
+            df = df.copy()
+            df.index = pd.to_datetime(df.index)
+        df = df.sort_index()
+        price_map[sym] = df
+        all_dates.update(set(df.index.date))
 
-    payload = {
-        "date": date_str,
-        "generated_at": dt.datetime.now().astimezone().isoformat(),
-        "category": str(args.category),
-        "symbols": symbols,
-        "items": results,
-        "errors": errors,
-    }
+    base_calendar_dates: Set[dt.date] = set()
+    spy_base = price_map.get("SPY")
+    if spy_base is not None and not spy_base.empty and isinstance(spy_base.index, pd.DatetimeIndex):
+        base_calendar_dates = set(spy_base.index.date)
+    else:
+        base_calendar_dates = set(all_dates)
 
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+    if args.start_date or args.end_date:
+        if not args.start_date or not args.end_date:
+            raise SystemExit("Batch mode requires both --start-date and --end-date")
+        start_d = _parse_date(str(args.start_date))
+        end_d = _parse_date(str(args.end_date))
+        if start_d > end_d:
+            raise SystemExit("start-date must be <= end-date")
+        target_dates = sorted([d for d in base_calendar_dates if start_d <= d <= end_d])
+        if not target_dates:
+            logger.warning(f"No trading dates found in range {start_d}..{end_d}")
+            return
+    else:
+        target_dates = [_parse_date(date_str)]
 
-    logger.info(f"Saved ETF features: {out_path} items={len(results)} errors={len(errors)}")
+    for td in target_dates:
+        out_path = outdir / f"etf_features_{td.strftime('%Y-%m-%d')}.json"
+        results: List[Dict[str, Any]] = []
+        errors: List[Dict[str, Any]] = []
+
+        for sym in symbols:
+            try:
+                df = price_map.get(sym)
+                if df is None or df.empty:
+                    raise ValueError(f"missing parquet for {sym} under data/{args.category}")
+                rec = _compute_one(
+                    symbol=sym,
+                    df=df,
+                    asof_date=td,
+                    regime_detector=regime_detector,
+                    spy_df=spy_df,
+                    vix_df=vix_df,
+                    risk_profile=str(args.risk_profile),
+                )
+                results.append(rec)
+            except Exception as e:
+                logger.warning(f"Failed to build features for {sym} at {td}: {e}")
+                errors.append({"symbol": sym, "error": str(e)})
+
+        payload = {
+            "date": td.strftime("%Y-%m-%d"),
+            "generated_at": dt.datetime.now().astimezone().isoformat(),
+            "category": str(args.category),
+            "symbols": symbols,
+            "items": results,
+            "errors": errors,
+        }
+
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+
+        logger.info(f"Saved ETF features: {out_path} items={len(results)} errors={len(errors)}")
 
 
 if __name__ == "__main__":
