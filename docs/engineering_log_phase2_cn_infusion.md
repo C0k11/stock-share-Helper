@@ -843,17 +843,17 @@ Mermaid（分层数据流）：
 
 ```mermaid
 flowchart LR
-  A[RSS/Raw News] --> B[News LoRA: run_daily_inference.py]
-  B --> C[data/daily/signals_YYYY-MM-DD.json]
-  D[data/daily/etf_features_YYYY-MM-DD.json] --> E[Trading LoRA: run_trading_inference.py]
+  A[RSS/Raw News] --> B[News LoRA]
+  B --> C[signals.json]
+  D[etf_features.json] --> E[Trading LoRA]
   C --> E
-  F[RAG: MarketRAG.retrieve] --> E
-  E --> G[Proposed Decision (JSON)]
-  G --> H[RiskGate.adjudicate (deterministic)]
+  F[RAG] --> E
+  E --> G[Proposed Decision]
+  G --> H[RiskGate]
   H --> I[Final Decision]
-  I --> J[Execution Planner (planned)]
-  J --> K[Backtest Engine / IBKR (planned for live)]
-  K --> L[Monitoring: drift/quality dashboard (planned)]
+  I --> J[Execution Planner]
+  J --> K[Backtest/IBKR]
+  K --> L[Monitoring]
 ```
 
 代码与产物映射（当前已落地 vs 未来）：
