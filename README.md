@@ -46,25 +46,40 @@ Stock/
 ├── README.md                 # This file
 ├── requirements.txt          # Python dependencies
 ├── .gitignore
+├── run_pipeline.bat          # One-click daily pipeline (Windows)
 ├── config/                   # Configuration files
 │   ├── settings.yaml         # Global settings
 │   ├── symbols.yaml          # Symbol pool config
 │   ├── risk_profiles.yaml    # Risk profile config
-│   └── sources.yaml          # News sources (RSS) config
+│   └── sources.yaml          # News sources (RSS/API) config
 ├── data/                     # Data directory (not in git)
+│   ├── daily/                # Daily outputs (news/signals/reports/features)
+│   ├── raw/                  # Raw price data (parquet)
+│   └── finetune/             # Fine-tuning datasets
 ├── src/                      # Source code
-│   ├── data/                 # Data layer (fetcher/calendar/storage)
+│   ├── data/                 # Data layer (fetcher/calendar/rag)
 │   ├── features/             # Features (technical/regime/news)
 │   ├── strategy/             # Strategy (signals/position/rules)
-│   ├── risk/                 # Risk management (drawdown/vol/alerts)
+│   ├── risk/                 # Risk management (drawdown/vol/gate)
 │   ├── backtest/             # Backtesting (engine/costs/metrics)
 │   ├── llm/                  # LLM (news_parser/explainer/finetune)
+│   ├── utils/                # Utilities (llm_tools/json repair)
 │   └── api/                  # FastAPI interface
 ├── scripts/                  # Scripts
-│   ├── download_data.py      # Download historical data
-│   ├── daily_update.py       # Daily update
-│   └── run_backtest.py       # Run backtest
+│   ├── fetch_daily_rss.py            # Fetch news (RSS + API fallback)
+│   ├── build_daily_etf_features.py   # Generate ETF feature snapshots
+│   ├── run_daily_inference.py        # News structuring (Qwen + LoRA)
+│   ├── run_trading_inference.py      # Trading decisions (RAG + RiskGate)
+│   ├── generate_daily_report.py      # Generate Markdown report
+│   ├── generate_etf_teacher_dataset.py # Teacher distillation (DeepSeek)
+│   ├── process_rag_data.py           # Process training data with denoising
+│   ├── finetune_llm.py               # LoRA/QLoRA fine-tuning
+│   ├── evaluate_signal.py            # Signal evaluation (T+1 alignment)
+│   ├── backtest_engine.py            # Backtesting engine
+│   └── dashboard.py                  # Streamlit visualization
 ├── models/                   # Model files (not in git)
+├── docs/                     # Documentation
+│   └── engineering_log_phase2_cn_infusion.md  # Engineering log
 └── tests/                    # Unit tests
 ```
 
@@ -387,25 +402,40 @@ Stock/
 ├── README.md                 # 本文件
 ├── requirements.txt          # Python依赖
 ├── .gitignore
+├── run_pipeline.bat          # 一键运行每日流水线（Windows）
 ├── config/                   # 配置文件
 │   ├── settings.yaml         # 全局配置
 │   ├── symbols.yaml          # 标的池配置
 │   ├── risk_profiles.yaml    # 风险档位配置
-│   └── sources.yaml          # 新闻源（RSS）配置
+│   └── sources.yaml          # 新闻源（RSS/API）配置
 ├── data/                     # 数据目录（不提交到git）
+│   ├── daily/                # 每日输出（新闻/信号/日报/特征）
+│   ├── raw/                  # 原始价格数据（parquet）
+│   └── finetune/             # 微调数据集
 ├── src/                      # 源代码
-│   ├── data/                 # 数据层（fetcher/calendar/storage）
+│   ├── data/                 # 数据层（fetcher/calendar/rag）
 │   ├── features/             # 特征工程（technical/regime/news）
 │   ├── strategy/             # 策略模块（signals/position/rules）
-│   ├── risk/                 # 风控模块（drawdown/volatility/alerts）
+│   ├── risk/                 # 风控模块（drawdown/vol/gate）
 │   ├── backtest/             # 回测模块（engine/costs/metrics）
 │   ├── llm/                  # LLM模块（news_parser/explainer/finetune）
+│   ├── utils/                # 工具模块（llm_tools/JSON修复）
 │   └── api/                  # API接口
 ├── scripts/                  # 脚本
-│   ├── download_data.py      # 下载历史数据
-│   ├── daily_update.py       # 每日更新
-│   └── run_backtest.py       # 运行回测
+│   ├── fetch_daily_rss.py            # 抓取新闻（RSS + API兜底）
+│   ├── build_daily_etf_features.py   # 生成ETF特征快照
+│   ├── run_daily_inference.py        # 新闻结构化（Qwen + LoRA）
+│   ├── run_trading_inference.py      # 交易决策（RAG + RiskGate）
+│   ├── generate_daily_report.py      # 生成Markdown日报
+│   ├── generate_etf_teacher_dataset.py # Teacher蒸馏（DeepSeek）
+│   ├── process_rag_data.py           # 处理训练数据（含降噪）
+│   ├── finetune_llm.py               # LoRA/QLoRA微调
+│   ├── evaluate_signal.py            # 信号评测（T+1对齐）
+│   ├── backtest_engine.py            # 回测引擎
+│   └── dashboard.py                  # Streamlit可视化
 ├── models/                   # 模型文件（不提交到git）
+├── docs/                     # 文档
+│   └── engineering_log_phase2_cn_infusion.md  # 工程日志
 └── tests/                    # 单元测试
 ```
 
