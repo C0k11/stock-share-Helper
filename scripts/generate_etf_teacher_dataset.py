@@ -18,6 +18,8 @@ from loguru import logger
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
+from src.risk.gate import RiskGate
+
 
 _DATE_RE = re.compile(r"^etf_features_(\d{4}-\d{2}-\d{2})\.json$", re.IGNORECASE)
 
@@ -283,6 +285,8 @@ def build_teacher_messages(
     date_str: str,
     etf_item: Dict[str, Any],
     risk_watch: Dict[str, Any],
+    history: Optional[List[Dict[str, Any]]],
+    risk_constraints: Optional[List[str]],
     include_cot: bool,
     variant_index: int,
 ) -> List[Dict[str, str]]:
@@ -327,16 +331,34 @@ def build_teacher_messages(
         "Do not include any other keys."
     )
 
+    history_context = history if isinstance(history, list) else []
+    risk_trace = [str(x) for x in (risk_constraints or []) if str(x).strip()]
+
+    history_lines = []
+    for h in history_context[:3]:
+        if not isinstance(h, dict):
+            continue
+        history_lines.append(
+            f"- {h.get('date')} ({h.get('ticker')}): {h.get('summary')} dist={h.get('distance')}"
+        )
+    history_text = "\n".join(history_lines) if history_lines else "- (none)"
+
+    risk_text = "\n".join([f"- {t}" for t in risk_trace]) if risk_trace else "- (none)"
+
     user_payload = {
         "date": date_str,
         "symbol": symbol,
         "etf_features": etf_item,
         "risk_watch": risk_watch,
+        "rag_history_top3": history_context[:3],
+        "risk_constraints_trace": risk_trace,
         "variant": {"index": vi, "nudge": variant_nudge},
     }
 
     user = (
         f"{role_spec}\n{cot}\n{variant_nudge}\n{label_schema}\n\n"
+        f"HISTORICAL_CONTEXT_TOP3:\n{history_text}\n\n"
+        f"RISK_CONSTRAINTS_TRACE:\n{risk_text}\n\n"
         f"INPUT_JSON={json.dumps(user_payload, ensure_ascii=False)}"
     )
 
@@ -388,6 +410,12 @@ def main():
 
     parser.add_argument("--out", default="data/finetune/teacher_etf/teacher_etf.jsonl")
     parser.add_argument("--resume", action="store_true")
+    parser.add_argument(
+        "--target-total",
+        type=int,
+        default=0,
+        help="Stop when output JSONL reaches this total number of rows (0=all tasks). Use with --resume for exact backfill to N.",
+    )
 
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--sleep", type=float, default=0.2)
@@ -413,22 +441,119 @@ def main():
     parser.add_argument("--max-output-tokens", type=int, default=2200)
     parser.add_argument("--temperature", type=float, default=0.2)
     parser.add_argument("--include-cot", action="store_true")
+    parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
     try_load_dotenv()
 
     api_key = os.getenv(args.teacher_api_key_env, "").strip()
-    if not api_key:
+    if not api_key and not bool(args.dry_run):
         raise SystemExit(f"Missing API key env var: {args.teacher_api_key_env}")
 
     daily_dir = Path(args.daily_dir)
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
+    risk_gate = RiskGate()
+    market_rag = None
+    try:
+        from src.data.rag import MarketRAG
+
+        market_rag = MarketRAG(data_dir=str(daily_dir))
+        logger.info("RAG enabled: MarketRAG index built")
+    except Exception as e:
+        logger.warning(f"RAG disabled: {e}")
+
+    def _extract_features(obj: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(obj, dict):
+            return {}
+        feats = obj.get("features")
+        base = feats if isinstance(feats, dict) else obj
+
+        tech = base.get("technical") if isinstance(base.get("technical"), dict) else {}
+
+        def _to_float(x: Any) -> float:
+            try:
+                return float(x)
+            except Exception:
+                return 0.0
+
+        def _to_pct(x: Any) -> float:
+            v = _to_float(x)
+            if abs(v) <= 2.5:
+                return v * 100.0
+            return v
+
+        change_5d = base.get("change_5d_pct")
+        if change_5d is None:
+            change_5d = base.get("return_5d")
+        if change_5d is None:
+            change_5d = tech.get("return_5d")
+
+        vol = base.get("volatility_ann_pct")
+        if vol is None:
+            vol = base.get("volatility_20d")
+        if vol is None:
+            vol = tech.get("volatility_20d")
+
+        dd = base.get("drawdown_20d_pct")
+        if dd is None:
+            dd = base.get("max_drawdown_20d")
+        if dd is None:
+            dd = tech.get("max_drawdown_20d")
+        if dd is None:
+            dd = base.get("drawdown")
+        if dd is None:
+            dd = tech.get("drawdown")
+
+        merged = dict(base)
+        merged["change_5d_pct"] = _to_pct(change_5d)
+        merged["volatility_ann_pct"] = _to_pct(vol)
+        merged["drawdown_20d_pct"] = _to_pct(dd)
+        return merged
+
+    def _extract_news_signals(rw: Dict[str, Any]) -> List[Dict[str, Any]]:
+        out: List[Dict[str, Any]] = []
+        if not isinstance(rw, dict):
+            return out
+        us_top = rw.get("us_top_events") if isinstance(rw.get("us_top_events"), list) else []
+        for it in us_top:
+            if not isinstance(it, dict):
+                continue
+            et = str(it.get("event_type") or "").strip()
+            if not et:
+                continue
+            out.append({"event_type": et, "impact_equity": it.get("impact_equity")})
+
+        cn_rc = rw.get("cn_regulation_crackdown") if isinstance(rw.get("cn_regulation_crackdown"), dict) else {}
+        cn_top = cn_rc.get("top") if isinstance(cn_rc.get("top"), list) else []
+        for it in cn_top:
+            if not isinstance(it, dict):
+                continue
+            et = str(it.get("event_type") or "").strip()
+            if not et:
+                continue
+            out.append({"event_type": et, "impact_equity": it.get("impact_equity")})
+        return out
+
     existing_ids: Set[str] = set()
+    existing_total = 0
     if args.resume:
         existing_ids = load_existing_ids_jsonl(out_path)
+        existing_total = len(existing_ids)
         logger.info(f"Resume enabled: existing_ids={len(existing_ids)}")
+
+    target_total = int(args.target_total)
+    target_new = 0
+    if target_total > 0:
+        if not args.resume and out_path.exists():
+            logger.warning(
+                "--target-total is set but --resume is not enabled. Consider adding --resume to avoid writing duplicates."
+            )
+        target_new = max(0, target_total - existing_total)
+        if target_new <= 0:
+            logger.info(f"Target already met: target_total={target_total} existing={existing_total}")
+            return
 
     files = iter_etf_feature_files(daily_dir, args.start_date, args.end_date)
     if not files:
@@ -541,12 +666,29 @@ def main():
         vi = int(task["variant_index"])
         sid = str(task["id"])
 
+        feats = _extract_features(task.get("etf_item") if isinstance(task.get("etf_item"), dict) else {})
+        news_signals = _extract_news_signals(task.get("risk_watch") if isinstance(task.get("risk_watch"), dict) else {})
+
+        similar_days: List[Dict[str, Any]] = []
+        if market_rag is not None:
+            try:
+                similar_days = market_rag.retrieve(feats, k=3, ticker=symbol, exclude_date=date_str)
+            except Exception:
+                similar_days = []
+
+        try:
+            _, _, risk_trace = risk_gate.adjudicate(feats, news_signals, "BUY", 1.0)
+        except Exception:
+            risk_trace = []
+
         local_include_cot = should_include_cot(sid)
         messages = build_teacher_messages(
             symbol=symbol,
             date_str=date_str,
             etf_item=task["etf_item"],
             risk_watch=task["risk_watch"],
+            history=similar_days,
+            risk_constraints=risk_trace,
             include_cot=local_include_cot,
             variant_index=vi,
         )
@@ -616,6 +758,52 @@ def main():
         return out_obj
 
     try:
+        if bool(args.dry_run):
+            tasks_iter = iter_tasks()
+            try:
+                task = next(tasks_iter)
+            except StopIteration:
+                logger.warning("No tasks available for dry-run")
+                return
+
+            sid = str(task["id"])
+            feats = _extract_features(task.get("etf_item") if isinstance(task.get("etf_item"), dict) else {})
+            news_signals = _extract_news_signals(task.get("risk_watch") if isinstance(task.get("risk_watch"), dict) else {})
+
+            similar_days: List[Dict[str, Any]] = []
+            if market_rag is not None:
+                try:
+                    similar_days = market_rag.retrieve(
+                        feats,
+                        k=3,
+                        ticker=str(task.get("symbol") or ""),
+                        exclude_date=str(task.get("date") or ""),
+                    )
+                except Exception:
+                    similar_days = []
+
+            try:
+                _, _, risk_trace = risk_gate.adjudicate(feats, news_signals, "BUY", 1.0)
+            except Exception:
+                risk_trace = []
+
+            messages = build_teacher_messages(
+                symbol=str(task.get("symbol") or ""),
+                date_str=str(task.get("date") or ""),
+                etf_item=task.get("etf_item") if isinstance(task.get("etf_item"), dict) else {},
+                risk_watch=task.get("risk_watch") if isinstance(task.get("risk_watch"), dict) else {},
+                history=similar_days,
+                risk_constraints=risk_trace,
+                include_cot=should_include_cot(sid),
+                variant_index=int(task.get("variant_index") or 0),
+            )
+            print("=== DRY RUN: MESSAGES ===")
+            for m in messages:
+                role = m.get("role")
+                content = m.get("content")
+                print(f"\n--- {role} ---\n{content}")
+            return
+
         with open(out_path, "a", encoding="utf-8") as fout:
             tasks_iter = iter_tasks()
 
@@ -631,6 +819,8 @@ def main():
                 fout.flush()
 
             max_tasks = int(args.max) if int(args.max) > 0 else 0
+            if target_total > 0:
+                max_tasks = int(target_new)
 
             if int(args.workers) <= 1:
                 for i, task in enumerate(tasks_iter, start=1):
@@ -680,8 +870,19 @@ def main():
             f"Interrupted by user. Partial results saved: {out_path} ok={written} failed={failed} skipped={skipped}"
         )
         return
+    except Exception as e:
+        skipped = int(nonlocal_skipped[0])
+        logger.exception(f"Teacher generation crashed: {e}")
+        raise
 
     skipped = int(nonlocal_skipped[0])
+
+    if target_total > 0 and (existing_total + int(written)) < target_total:
+        logger.warning(
+            "Target not reached because tasks were exhausted (not a crash). "
+            f"target_total={target_total} existing={existing_total} written={written} total_now={existing_total + int(written)}. "
+            "Consider increasing --variants, expanding --start-date/--end-date, or adding more symbols in daily ETF features."
+        )
 
     logger.info(f"Saved teacher dataset: {out_path} ok={written} failed={failed} skipped={skipped}")
 

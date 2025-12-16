@@ -9,9 +9,10 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from loguru import logger
 
-
 PROJECT_ROOT = Path(__file__).parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
+
+from src.utils.llm_tools import extract_json_text, repair_and_parse_json
 
 
 CN_EVENT_TYPES = [
@@ -20,6 +21,9 @@ CN_EVENT_TYPES = [
     "market_intervention",
     "concept_hype",
     "corporate_restructuring",
+    "corporate_earnings",
+    "market_sentiment",
+    "other_cn",
 ]
 
 US_EVENT_TYPES = [
@@ -34,6 +38,165 @@ US_EVENT_TYPES = [
     "commodity_shock",
     "other_us",
 ]
+
+
+def post_process_cn_signals(item: Dict[str, Any]) -> Dict[str, Any]:
+    signal = item.get("signal") if isinstance(item.get("signal"), dict) else None
+    market = str(item.get("market") or "").strip().upper()
+    if market != "CN" or signal is None:
+        return item
+
+    if str(signal.get("event_type") or "").strip() != "concept_hype":
+        return item
+
+    title = str(item.get("title") or "")
+    summary = str(signal.get("summary") or "")
+    text = (title + "\n" + summary).strip()
+    text_l = text.lower()
+
+    hype_keywords = [
+        "涨停",
+        "跌停",
+        "连板",
+        "龙虎榜",
+        "游资",
+        "席位",
+        "概念",
+        "题材",
+        "拉升",
+        "跳水",
+        "爆炒",
+        "妖股",
+        "主力",
+        "封板",
+        "炸板",
+        "跨年行情",
+    ]
+    report_keywords = [
+        "研报",
+        "策略",
+        "分析",
+        "维持",
+        "买入评级",
+        "增持",
+        "年报",
+        "业绩",
+        "预告",
+        "供需",
+        "基本面",
+        "逻辑",
+        "中信",
+        "金工",
+        "财报",
+        "earnings",
+    ]
+
+    def _hit(keywords: List[str]) -> bool:
+        return any(str(kw).lower() in text_l for kw in keywords)
+
+    if _hit(report_keywords):
+        if any(kw in text_l for kw in ["年报", "业绩", "财报", "earnings"]):
+            signal["event_type"] = "corporate_earnings"
+        else:
+            signal["event_type"] = "market_sentiment"
+
+        try:
+            sign = 1.0 if float(signal.get("impact_equity", 0.0)) >= 0 else -1.0
+        except Exception:
+            sign = 1.0
+        signal["impact_equity"] = 0.2 * sign
+        signal["impact_bond"] = 0
+        signal["impact_gold"] = 0
+        item["signal"] = signal
+        return item
+
+    if _hit(hype_keywords):
+        try:
+            orig = float(signal.get("impact_equity", 0.0))
+        except Exception:
+            orig = 0.0
+        new_impact = orig * 0.5
+        if new_impact > 0.5:
+            new_impact = 0.5
+        if new_impact < -0.5:
+            new_impact = -0.5
+        signal["impact_equity"] = new_impact
+        item["signal"] = signal
+        return item
+
+    signal["event_type"] = "other_cn"
+    signal["impact_equity"] = 0
+    signal["impact_bond"] = 0
+    signal["impact_gold"] = 0
+    item["signal"] = signal
+    return item
+
+
+def _cn_hype_strength(item: Dict[str, Any]) -> int:
+    signal = item.get("signal") if isinstance(item.get("signal"), dict) else None
+    if signal is None:
+        return 0
+    title = str(item.get("title") or "")
+    summary = str(signal.get("summary") or "")
+    text = (title + "\n" + summary).strip().lower()
+
+    strong = ["涨停", "跌停", "连板"]
+    medium = ["龙虎榜", "游资", "席位", "封板", "炸板"]
+    weak = ["概念", "题材", "拉升", "跳水", "爆炒", "妖股", "主力", "跨年行情"]
+
+    score = 0
+    for kw in strong:
+        if kw in text:
+            score += 3
+    for kw in medium:
+        if kw in text:
+            score += 2
+    for kw in weak:
+        if kw in text:
+            score += 1
+    return score
+
+
+def prepare_signals_for_save(signals: List[Dict[str, Any]], cn_hype_cap: int) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    for it in signals:
+        cp = dict(it)
+        sig = cp.get("signal")
+        if isinstance(sig, dict):
+            cp["signal"] = dict(sig)
+        out.append(cp)
+
+    cap = int(cn_hype_cap)
+    if cap <= 0:
+        return out
+
+    hype: List[Tuple[int, int]] = []
+    for idx, it in enumerate(out):
+        market = str(it.get("market") or "").strip().upper()
+        sig = it.get("signal") if isinstance(it.get("signal"), dict) else None
+        if market != "CN" or sig is None:
+            continue
+        if str(sig.get("event_type") or "").strip() != "concept_hype":
+            continue
+        hype.append((idx, _cn_hype_strength(it)))
+
+    if len(hype) <= cap:
+        return out
+
+    hype_sorted = sorted(hype, key=lambda x: x[1], reverse=True)
+    keep = {idx for idx, _ in hype_sorted[:cap]}
+    for idx, _score in hype_sorted[cap:]:
+        it = out[idx]
+        sig = it.get("signal") if isinstance(it.get("signal"), dict) else None
+        if sig is None:
+            continue
+        sig["event_type"] = "other_cn"
+        sig["impact_equity"] = 0
+        sig["impact_bond"] = 0
+        sig["impact_gold"] = 0
+        it["signal"] = sig
+
+    return out
 
 
 def sanitize_input_text(s: str) -> str:
@@ -74,13 +237,14 @@ def extract_first_json(text: str) -> str | None:
 
 
 def try_parse_json(text: str) -> Tuple[bool, Optional[Dict[str, Any]], Optional[str]]:
-    js = extract_first_json(text)
-    if js is None:
+    raw_json = extract_json_text(text)
+    if raw_json is None:
         return False, None, None
-    try:
-        return True, json.loads(js), js
-    except Exception:
-        return False, None, js
+
+    obj = repair_and_parse_json(text)
+    if isinstance(obj, dict):
+        return True, obj, raw_json
+    return False, None, raw_json
 
 
 def build_messages_news(*, market: str, title: str, content: str) -> List[Dict[str, str]]:
@@ -182,6 +346,7 @@ def main():
     parser.add_argument("--market", choices=["ALL", "US", "CN"], default="ALL")
     parser.add_argument("--sample-us", type=int, default=0, help="Take first N US items (overrides --offset/--limit selection)")
     parser.add_argument("--sample-cn", type=int, default=0, help="Take first N CN items (overrides --offset/--limit selection)")
+    parser.add_argument("--cn-hype-cap", type=int, default=30)
 
     args = parser.parse_args()
 
@@ -337,18 +502,20 @@ def main():
 
             market = meta["market"]
             market_counts[market] = market_counts.get(market, 0) + 1
-            if parse_ok and obj:
-                et = str(obj.get("event_type") or "").strip()
+            record = {
+                **meta,
+                "parse_ok": parse_ok,
+                "signal": obj,
+                "raw_json": raw_json,
+            }
+            record = post_process_cn_signals(record)
+
+            sig = record.get("signal") if isinstance(record.get("signal"), dict) else None
+            if parse_ok and sig:
+                et = str(sig.get("event_type") or "").strip()
                 et_counts[et] = et_counts.get(et, 0) + 1
 
-            signals.append(
-                {
-                    **meta,
-                    "parse_ok": parse_ok,
-                    "signal": obj,
-                    "raw_json": raw_json,
-                }
-            )
+            signals.append(record)
 
             sid = meta.get("id")
             if isinstance(sid, str) and sid:
@@ -364,7 +531,7 @@ def main():
 
         if (processed_in_run % save_every == 0) or (start + batch_size >= len(pending)):
             with open(out_path, "w", encoding="utf-8") as f:
-                json.dump(signals, f, ensure_ascii=False, indent=2)
+                json.dump(prepare_signals_for_save(signals, int(args.cn_hype_cap)), f, ensure_ascii=False, indent=2)
 
     logger.info(f"Saved signals: {out_path}")
     final_ok = sum(1 for x in signals if x.get("parse_ok"))

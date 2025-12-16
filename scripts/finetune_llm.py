@@ -25,6 +25,7 @@ sys.path.insert(0, str(project_root))
 def main():
     parser = argparse.ArgumentParser(description="LLM LoRA fine-tuning runner")
     parser.add_argument("--data", default="data/finetune/train.json", help="训练数据JSON路径")
+    parser.add_argument("--eval-data", default=None, help="验证数据JSON路径（可选）")
     parser.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct", help="基础模型名称")
     parser.add_argument("--outdir", default="models/llm", help="输出目录（含checkpoints与lora权重）")
     parser.add_argument("--epochs", type=int, default=1)
@@ -44,6 +45,9 @@ def main():
     parser.add_argument("--smoke", action="store_true", help="冒烟测试：更小batch+更少步数")
 
     args = parser.parse_args()
+
+    if isinstance(args.model, str):
+        args.model = args.model.replace("\\", "/")
 
     if args.smoke:
         args.epochs = 1
@@ -87,6 +91,7 @@ def main():
 
     trainer.train(
         train_data_path=args.data,
+        eval_data_path=args.eval_data,
         num_epochs=args.epochs,
         batch_size=args.batch_size,
         learning_rate=args.lr,

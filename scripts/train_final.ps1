@@ -1,0 +1,11 @@
+.\venv311\Scripts\python.exe scripts\finetune_llm.py `
+  --data data/finetune/teacher_etf/train_rag_final.json `
+  --eval-data data/finetune/teacher_etf/val_rag_final.json `
+  --model Qwen/Qwen2.5-14B-Instruct `
+  --outdir models/llm_etf_trading_qwen25_14b_rag_final `
+  --epochs 2 `
+  --batch-size 2 `
+  --grad-acc 16 `
+  --lr 1e-4 `
+  --max-seq-len 4096 `
+  --qlora

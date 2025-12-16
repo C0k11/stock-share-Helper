@@ -639,3 +639,693 @@ Ground Truth 数据源（本地已有）：
 样本配比（美股:大A=60:40）：
 
 - 通过按市场分配 `variants` 实现：US ETF（SPY/QQQ/TLT/GLD）生成更多 variants，CN ETF（510xxx）生成较少 variants。
+
+双模型架构（参谋长 vs 指挥官）：
+
+- 新闻 LoRA（情报参谋）：将新闻噪音结构化为 `signals_*.json`（每日情报简报）。
+- 交易模型/LoRA（现场指挥官）：综合 `signals_*.json`（risk_watch）与 `etf_features_*.json`（技术面/仓位目标），输出最终动作与目标仓位。
+
+未来架构蓝图（planned，用于防偏离）：
+
+- 证据/检索层（RAG）：检索新闻原文片段、宏观数据、历史相似案例，为决策提供证据。
+- 风控裁决层（确定性）：硬约束最大仓位/回撤/杠杆/风格切换，把交易模型输出当作“建议”再裁决。
+- 执行规划层：将目标仓位转成下单计划（阈值再平衡、分批、交易限制）。
+- 评估与监控：回测、A/B、漂移监控、每日质量看板。
+- 多 Adapter 管理：尽量维持一个 base，多套 LoRA（新闻/交易等），按任务路由。
+
+## 16. Phase 5.4：RAG+RiskGate 闭环准备（25k 数据 + 回测 + 发射按钮，2025-12-15）
+
+目标：
+
+- 将 ETF teacher 蒸馏扩展到 2.5 万级别（带 RAG 历史 Top3 + 风控约束 trace）。
+- 在数据生成进行时，提前准备好：
+  - 可训练数据清洗/格式化脚本
+  - 最终版微调命令（含验证集）
+  - 实战推理脚本（复刻训练 prompt + RAG + 风控裁决）
+  - 离线回测引擎骨架（验证策略输出的资金曲线）
+
+### 16.1 风控与检索模块（确定性组件）
+
+新增：
+
+- `src/risk/gate.py`
+  - 风控裁决 `RiskGate.adjudicate(features, news_signals, proposed_action, proposed_pos)`
+  - 关键规则：
+    - 最大回撤熔断（`drawdown_20d_pct < -8%` -> FORCE CLEAR）
+    - 单品种仓位封顶（默认 0.5）
+    - 关键事件黑名单触发减仓（如 `regulation_crackdown/war_breakout/...`）
+    - 高波动惩罚（`volatility_ann_pct > 30%` -> scale down）
+
+- `src/data/rag.py`
+  - `MarketRAG`：基于 FAISS 的 ETF 历史相似日检索
+  - 向量：`[change_5d_pct, volatility_ann_pct, drawdown_20d_pct]`
+  - 关键防泄漏：检索时支持 `exclude_date` 排除同日样本
+
+### 16.2 Teacher 数据生成：RAG + RiskGate prompt 注入
+
+增强：
+
+- `scripts/generate_etf_teacher_dataset.py`
+  - 引入 `MarketRAG` 检索历史相似 Top3（写入 user prompt 的 `HISTORICAL_CONTEXT_TOP3`）
+  - 引入 `RiskGate` 生成风险约束 trace（写入 `RISK_CONSTRAINTS_TRACE`）
+  - `build_teacher_messages()` 统一构建 prompt（训练/推理将复用该函数）
+  - 支持 `--dry-run`：打印 prompt 验证注入是否生效
+  - 并发能力：`--workers N`
+  - 断点续跑：`--resume`（按样本 id 去重）
+  - 扩量停止条件：`--target-total 25000`
+
+运行（2.5w 版本，建议后台运行并记录 log）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\generate_etf_teacher_dataset.py `
+  --target-total 25000 `
+  --workers 10 `
+  --risk-watch-market BOTH `
+  --risk-watch-top 3 `
+  --start-date 2024-01-01 `
+  --end-date 2025-12-14 `
+  --out data/finetune/teacher_etf/teacher_etf_rag_enhanced_25000.jsonl `
+  --resume
+```
+
+监控（0.1 秒刷新，追写入进度）：
+
+```powershell
+$log = "logs\teacher_rag_25000.err.log"
+while ($true) {
+  $line = Get-Content $log -Tail 1
+  $m = [regex]::Match($line, 'written=(\d+)\s+failed=(\d+)\s+skipped=(\d+)')
+  Clear-Host
+  if ($m.Success) {
+    $w = $m.Groups[1].Value; $f = $m.Groups[2].Value; $s = $m.Groups[3].Value
+    $ts = Get-Date -Format "HH:mm:ss.fff"
+    Write-Host "$ts  written=$w  failed=$f  skipped=$s"
+  } else {
+    Write-Host $line
+  }
+  Start-Sleep -Milliseconds 100
+}
+```
+
+运维备注：
+
+- 若出现大量 `429 Too Many Requests`，可将 `--workers` 从 10 降到 6，并继续 `--resume`。
+
+### 16.3 预处理：重构 prompt（减小 JSONL 体积 + 保持训练输入一致）
+
+新增：
+
+- `scripts/process_rag_data.py`
+  - 输入：`teacher_etf_rag_enhanced_25000.jsonl`
+  - 清洗：丢弃无法解析/teacher 未完成/label schema 不合法的行
+  - 关键工程决策：
+    - 由于原始 JSONL 仅存 `input`/`output` 核心字段，不存 prompt 文本、也不存 rag/risk trace
+    - 在预处理阶段重新调用 `MarketRAG.retrieve()` + `RiskGate.adjudicate()`
+    - 并复用 `build_teacher_messages()` 重建与 teacher 一致的 user prompt
+  - 输出：
+    - `data/finetune/teacher_etf/train_rag_final.json`
+    - `data/finetune/teacher_etf/val_rag_final.json`
+  - 切分：95% train / 5% val
+  - 数据字段对齐：输出包含 `conversations`（训练器读取），同时保留 `messages` 兼容字段
+
+抽样验证（生成中也可先跑小批验证 determinism）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\process_rag_data.py --max-rows 2000 --val-ratio 0.05
+```
+
+### 16.4 最终版训练“发射按钮”：训练脚本参数与验证集对齐
+
+增强：
+
+- `src/llm/finetune/train.py`
+  - `FineTuner.train()` 增加 `eval_data_path` 支持
+  - 当提供验证集时启用 evaluation（`evaluation_strategy=steps`，`eval_steps=save_steps`）
+
+- `scripts/finetune_llm.py`
+  - CLI 增加 `--eval-data`
+  - 备注：学习率参数为 `--lr`（不是 `--learning-rate`）
+
+新增：
+
+- `scripts/train_final.ps1`
+  - 最终版训练命令模板（2.5w + max-seq-len 4096 + QLoRA）
+
+### 16.5 实战推理“战备切换开关”：复刻训练 prompt + RAG + 风控裁决
+
+新增：
+
+- `scripts/run_trading_inference.py`
+  - 输入：`--date YYYY-MM-DD` + `data/daily/etf_features_YYYY-MM-DD.json`
+  - 复用 `build_teacher_messages()` 构建 prompt（与训练一致）
+  - 实时注入：`MarketRAG.retrieve()` + `RiskGate.adjudicate()` 生成约束
+  - 输出解析：使用 `src/utils/llm_tools.py` 的 `extract_json_text()` / `repair_and_parse_json()` + `validate_label()`
+  - 最终裁决：对模型输出的 `label.action/target_position` 再走一次 `RiskGate` 输出 `final`
+  - 兼容性：`--adapter` 既可传训练 outdir，也可传 `lora_weights/`，脚本会自动识别
+
+### 16.6 离线回测引擎骨架（逐日调仓 + 风控裁决 + 曲线输出）
+
+新增：
+
+- `scripts/backtest_engine.py`
+  - 逐日读取 `data/daily/etf_features_YYYY-MM-DD.json`
+  - 占位策略产生 `proposed_pos`，并强制过 `RiskGate`
+  - 执行调仓（阈值再平衡），输出净值曲线、最大回撤，并保存 CSV/PNG
+
+### 16.7 未来架构蓝图（planned，用于防偏离）：分层数据流（The Blueprint in Action）
+
+目标：把系统拆成可替换、可审计、可运维的层，每一层职责单一，避免“把一切都塞进一个模型”导致不可控。
+
+- 多 Adapter 管理：尽量维持一个 Base，多套 LoRA（新闻/交易等），按任务路由。
+- 证据/检索层（RAG）：检索新闻原文片段、宏观数据、历史相似案例，为决策提供证据。
+- 风控裁决层（确定性）：硬约束最大仓位/回撤/杠杆/风格切换，把交易模型输出当作“建议”再裁决。
+- 执行规划层：将目标仓位转成下单计划（阈值再平衡、分批、交易限制）。
+- 评估与监控：回测、A/B、漂移监控、每日质量看板。
+
+Mermaid（分层数据流）：
+
+```mermaid
+flowchart LR
+  A[RSS/Raw News] --> B[News LoRA: run_daily_inference.py]
+  B --> C[data/daily/signals_YYYY-MM-DD.json]
+  D[data/daily/etf_features_YYYY-MM-DD.json] --> E[Trading LoRA: run_trading_inference.py]
+  C --> E
+  F[RAG: MarketRAG.retrieve] --> E
+  E --> G[Proposed Decision (JSON)]
+  G --> H[RiskGate.adjudicate (deterministic)]
+  H --> I[Final Decision]
+  I --> J[Execution Planner (planned)]
+  J --> K[Backtest Engine / IBKR (planned for live)]
+  K --> L[Monitoring: drift/quality dashboard (planned)]
+```
+
+代码与产物映射（当前已落地 vs 未来）：
+
+- 感知层（News LoRA）
+  - 抓取：`scripts/fetch_daily_rss.py` -> `data/daily/news_YYYY-MM-DD.json` + `data/daily/health_YYYY-MM-DD.json`
+  - 结构化信号：`scripts/run_daily_inference.py` -> `data/daily/signals_YYYY-MM-DD.json`
+  - 日报：`scripts/generate_daily_report.py` -> `data/daily/report_YYYY-MM-DD.md`
+
+- 证据/检索层（RAG）
+  - `src/data/rag.py` (`MarketRAG.retrieve()`)
+  - 现阶段主要用于 ETF/trader 侧的历史相似日证据注入（避免“只凭感觉”）
+
+- 决策层（Trading LoRA）
+  - `scripts/run_trading_inference.py`
+  - 输入：`data/daily/etf_features_YYYY-MM-DD.json` + （由 `build_risk_watch_summary()` 汇总的 risk_watch，基于 `signals_YYYY-MM-DD.json`）
+  - 输出：建议与裁决结果（可落盘到 `data/daily/trading_decision_YYYY-MM-DD.json`）
+
+- 风控裁决层（确定性）
+  - `src/risk/gate.py` (`RiskGate.adjudicate()`)
+  - 目标：把模型输出当作“建议”，最终输出必须是可审计、可解释、可复现的裁决结果
+
+- 执行规划层（planned）
+  - 目标：把目标仓位转成可执行的订单计划（阈值再平衡、分批、限制条件、成本模型）
+
+- 评估与监控（部分已落地，持续完善）
+  - 回测骨架：`scripts/backtest_engine.py`
+  - 运维目标：A/B、漂移监控、每日质量看板（planned）
+
+### 16.8 模拟盘（Paper Trading）实战演练：B vs C（记录一次非严格控制变量对照，2025-12-15）
+
+目的：验证“4 棒接力”是否具备最小闭环可运行性，并对新闻 LoRA 的两套权重做一次快速对照观察。
+
+本次链路（两次都跑全套）：
+
+- `fetch_daily_rss.py` -> `news_2025-12-15.json`
+- `build_daily_etf_features.py` -> `etf_features_2025-12-15.json`
+- `run_daily_inference.py` -> `signals_2025-12-15.json`
+- `generate_daily_report.py` -> `report_2025-12-15.md`
+- `run_trading_inference.py` -> `trading_decision_2025-12-15.json`
+- `paper_trade_sim.py` -> `paper_trades_2025-12-15.csv` / `paper_nav.csv` / `account_state.json`
+
+试验 A（B 组 LoRA，注意：当时新闻推理为 resume 模式，混入历史累积）：
+
+- News LoRA：`models/llm_qwen14b_B_seq512_8h/lora_weights`
+- 日内结果：
+  - `Parse OK rate`: 431/431
+  - 交易建议：7 个标的均为 `REDUCE 0.1`
+  - 模拟盘净值：100000.00 -> 99979.00（主要为交易成本）
+- 快照目录：`data/experiments/news_paper_B_2025-12-15/`
+
+试验 B（C/hybrid LoRA，新闻推理强制 NEWS_RESUME=0，重新生成 signals）：
+
+- News LoRA：`models/llm_qwen14b_lora_c_hybrid/lora_weights`
+- 日内结果：
+  - `Parse OK rate`: 336/336
+  - 交易建议：同为 `REDUCE`，但 target_position 在 0.1x 档有分化
+  - 模拟盘净值：100000.00 -> 99979.00（主要为交易成本）
+- 快照目录：`data/experiments/news_paper_C_2025-12-15/`
+
+结论（仅限本次非严格控制变量对照）：
+
+- 两次 paper 结果在当前实现下几乎一致，收益差异未体现，原因是单日模拟盘主要反映“调仓成本”，而非跨日收益。
+- B vs C 的 signals 计数差异很大，且 B 当时为 resume 累积，C 为强制重跑，不能直接把数字当作“模型强弱”。
+
+下一步（planned）：
+
+- 引入跨日盯市（T+1 close mark-to-market）作为最小收益评估（paper 输出增加 `value_mtm` / `pnl_mtm`）。
+- 使用控制变量开关（`DATE_OVERRIDE` + `SKIP_FETCH=1` + `SKIP_FEATURES=1` + `NEWS_RESUME=0`）做公平的 B vs C 回放对照。
+
+### 16.9 公平对照：ab_B_mtm vs ab_C_mtm（全套交接棒 + 过程快照，2025-12-15）
+
+目的：在“全套交接棒”跑通的基础上，尝试做一次更接近控制变量的 B vs C 对照，并把过程数据固定落盘，便于后续 trader 升级前/后回放。
+
+运行方式（两次都为全套交接棒）：
+
+- `DATE_OVERRIDE=2025-12-15`
+- `NEWS_RESUME=0`（强制当日重新推理，避免 resume 累积污染）
+- `RUN_PAPER=1` + `PAPER_MTM_NEXT_DAY=1`
+- `EXP_OUTDIR=...`（自动快照：`run_config.json` + news/health/features/signals/report/trading_decision + log）
+
+产物目录：
+
+- B：`data/experiments/ab_B_mtm_2025-12-15/`
+- C：`data/experiments/ab_C_mtm_2025-12-15/`
+
+结果摘要（当前仅能评估“调仓成本”，MTM 尚未生效）：
+
+- B（NEWS_LORA=B_seq512_8h）
+  - `Parse OK rate`（news）: 336/337
+  - `value_after`: ~99979.00
+  - trades: 7（fee_sum=7.00）
+- C（NEWS_LORA=lora_c_hybrid）
+  - `Parse OK rate`（news）: 338/338
+  - `value_after`: ~99982.00
+  - trades: 6（fee_sum=6.00）
+  - 异常：trader 对 `SPY` 出现 `PARSE_ERROR schema mismatch`（导致少一次调仓，成本更低；该优势不可视为“更聪明”，属于失败模式）
+
+关键限制（必须记录）：
+
+- `PAPER_MTM_NEXT_DAY=1` 仍未计算出 `settle_date/value_mtm/pnl_mtm`，原因是当前 `data/raw/SPY.parquet` 等行情数据只覆盖到 2025-12-12，缺少 2025-12-15 及其后交易日。
+- 因此本轮只能比较“当日调仓成本/交易笔数”，无法比较“跨日收益/回撤”，也不能据此断言 B 或 C 谁更强。
+
+下一步（planned）：
+
+- 先补齐 `data/raw/*.parquet` 到覆盖 2025-12-15 之后至少一个交易日，再用 `paper_trade_sim.py --skip-trade --settle-date` 对已有 B/C 账户状态做 MTM 结算（无需重跑模型）。
+- 或者把对照日期切回 raw 覆盖范围内（例如 2025-12-11），先验证 MTM 链路闭环，再扩展到最新日期。
+
+补充（2025-12-15 夜间执行，已实现 T+0 日终盯市）：
+
+- 行情更新：修复 `DataFetcher` 默认 `end_date`（yfinance end-exclusive），并重新运行 `scripts/daily_update.py`，确认 `data/raw/SPY.parquet` 等 max date 已覆盖到 `2025-12-15`。
+- 结算方式：对两组实验账户均使用 `paper_trade_sim.py --skip-trade 1 --settle-date 2025-12-15`，不重放交易，仅做当日 close 盯市估值。
+- 估值修复：`paper_trade_sim.py` 在 MTM 取价时，若某 symbol 在 `settle-date` 当天无数据（如部分 CN ETF 停在 12-12），改为回退使用 `<= settle-date` 的最近一个交易日 close，避免被按 0 估值导致虚假大幅回撤。
+
+T+0 MTM 结果（settle_date=2025-12-15）：
+
+- B：`pv_after=99979.00` → `pv_mtm=99929.69`，`pnl_mtm=-49.32`
+- C：`pv_after=99982.00` → `pv_mtm=99947.79`，`pnl_mtm=-34.22`
+
+结论（仅限本轮 T+0 日终盯市口径）：
+
+- C 组当日盯市亏损更少（-34.22 vs -49.32），优势约 15.10。
+- 但仍需强调：C 轮存在 trader 对 SPY 的 `PARSE_ERROR` 导致少一次调仓，属于失败模式，可能对收益/回撤有方向性影响，后续需要在 trader 输出层加 schema 强约束以提高可比性。
+
+### 16.10 路线图口径定稿（SFT→DPO→Online RL）：先让 Model D“本科毕业”，再谈强化学习
+
+背景：当前讨论的“蒸馏/监督微调（SFT）”与“偏好对齐/强化学习（DPO/RL）”不应混为一谈。工程上必须保证策略基座（base policy）足够稳定后，才启动偏好学习。
+
+统一口径（最终确认）：
+
+- SFT（蒸馏）= 本科教育
+  - 目标：产出 Trading Model D（`rag_final`），具备稳定可用的基础交易能力。
+  - 方式：使用 DeepSeek+RAG+RiskGate teacher 生成的 JSONL 作为监督数据，完成 LoRA SFT。
+  - 备注：SFT 阶段 student 的上限受 teacher 约束，但能快速获得“可用基座”。
+
+- DPO（偏好对齐）= 博士预科/轻量 RL
+  - 启动时机：Model D 上线并完成约一周“实战演习”后。
+  - 数据构造：同一输入生成多个候选决策，放入回测/模拟盘，按结果打分；
+    - 赢者标记为 `chosen`
+    - 输者标记为 `rejected`
+  - 本质：让模型开始听“市场（PnL/回撤/夏普）”而不是只听 teacher，从而有机会超越 teacher。
+
+- Online RL / PPO（远期）
+  - 启动时机：资金规模变大且环境/奖励足够稳定。
+  - 风险：reward hacking/训练崩溃概率高，必须以稳定工程环境为前提。
+
+Day 7+ 自动化飞轮（planned）：
+
+- 每日推理：Model D 产生日志与决策落盘。
+- 自动判卷：T+5 回看（例如回看 5 天前的决策），用 MTM/回撤等指标评估。
+- 自动归档：赚钱 case 进入“高分题库”，亏钱 case 进入“错题本”。
+- 周末重修：混合题库触发一次再训练（SFT re-finetune），形成半自主进化闭环。
+
+ 当前进度（必须记录，便于后续排期）：
+ 
+ - teacher 文件：`data/finetune/teacher_etf/teacher_etf_rag_enhanced_25000.jsonl`
+ - 当前累计：12,268 行（可解析且 unique id=12,268）
+ - 目标：25,000（仍需补齐 12,732）
+ - 最近一次生成进程已结束（PID 已退出）；上一轮吞吐估算约 2,900 条/小时，剩余补齐 ETA 约 4-6 小时（受 429 限流影响波动）。
+
+### 16.11 新闻侧鲁棒性加固 + News C 质量体检（2025-12-16）
+
+背景：在 B/C 对照中出现 trader `PARSE_ERROR` 失败模式；同时观察到 News C 的 `concept_hype` 占比异常偏高（需区分“输入源太脏” vs “模型过敏/桶化”）。因此本轮优先做两件高性价比工程：
+
+- 加固层：新增 JSON 安全网（强力修复器）
+- 质检层：新增新闻质量扫描 + 病理切片抽样
+
+#### 16.11.1 运维动作：暂停 07:30 新闻流水线（避免无意义消耗算力）
+
+- 定位到 Windows 计划任务实际名称：`\Stock-NewsOps-7Days`
+- 执行禁用（Disabled），确认 `Next Run Time: N/A`
+- 目的：等待 Trading Model D（`rag_final`）训练完成后再恢复日更跑数
+
+#### 16.11.2 加固层：LLM JSON 强力修复器（避免因为烂格式导致全链路崩溃）
+
+- 新增：`src/utils/llm_tools.py`
+  - `extract_json_text()`：从 LLM 输出中提取 JSON 主体（兼容 Markdown code fence / 前后废话）
+  - `repair_and_parse_json()`：多策略修复并解析（`json.loads` -> 常见脏字符修复 -> `ast.literal_eval`）
+  - 安全性：使用 `ast.literal_eval`，避免 `eval` 带来的 prompt injection 风险
+
+- 接入：
+  - `scripts/run_daily_inference.py`：解析逻辑改为走 `repair_and_parse_json`，并保留 `raw_json`
+  - `scripts/run_trading_inference.py`：解析逻辑改为走 `repair_and_parse_json` + `validate_label`，降低 `PARSE_ERROR` 概率
+
+#### 16.11.3 质检层：News C 健康体检（扫描历史 signals）
+
+- 新增：`scripts/eval_news_quality.py`
+  - 统计：event_type 分布、impact 分布、parse_ok、每日信号数波动
+  - 输出：`data/daily/news_quality_report.json`
+- 修复：按日期去重（同日优先 `signals_full_YYYY-MM-DD.json`，否则 `signals_YYYY-MM-DD.json`），避免统计被重复计数污染
+
+体检快照（仅当前数据资产，样本较小）：
+
+- 本地 `data/daily` 下可用信号文件仅 2 天：
+  - `signals_full_2025-12-14.json`
+  - `signals_2025-12-15.json`
+- 体检摘要（去重后）：
+  - `concept_hype` 占比约 45%（红色警报，需进一步取证）
+  - `impact_equity` 明显偏正（+1 占比高）
+  - `parse_ok` 统计为 100%（加固层目标达成）
+
+#### 16.11.4 病理切片：抽样 20 条 concept_hype 案例（确认是输入噪音还是模型桶化）
+
+- 新增：`scripts/dump_concept_hype_cases.py`
+  - 作用：扫描去重后的 signals 文件，随机抽样 N 条 `concept_hype`，打印 `date/source/title/summary/impact`
+  - 示例运行：`python scripts/dump_concept_hype_cases.py --n 20 --seed 42`
+
+初步发现：
+
+- “垃圾源”并不明显：样本来源主要集中在 `eastmoney_api / sina_api / cls_telegraph`（主流 A 股资讯快讯风格）
+- 大量 case 本质为“题材/游资/板块快讯”真实噪音（如涨停、龙虎榜、短线拉升、IPO 认购等），属于交易端应该降权/限流的信号类别
+- 同时存在“模型过敏/桶化”迹象：部分较中性的研报/商品供需/公司回购类信息也被模板化归入 `concept_hype`
+
+下一步建议（待落地）：
+
+- 对 `concept_hype` 做二次判定 + Top-K 限流（防止 RiskGate 被噪音淹没）
+- 或扩展 CN event_type 枚举（新增 macro/industry/sentiment 桶），降低 `concept_hype` 兜底压力
+
+#### 16.11.5 主线进度同步：Trading Model D teacher 数据生成
+
+- teacher 文件：`data/finetune/teacher_etf/teacher_etf_rag_enhanced_25000.jsonl`
+- 最新计数：17,232 / 25,000
+- 剩余：7,768
+
+#### 16.11.6 源头治理：CN `concept_hype` 后处理降噪（run_daily_inference.py）
+
+动机：`concept_hype` 过高时会污染历史 signals 库，并使 RiskGate/risk_watch 被题材噪音淹没；优先在 News 推理落盘前做清洗，而不是在交易端兜底。
+
+实现：
+
+- `scripts/run_daily_inference.py`
+  - CN event_type 枚举新增：`market_sentiment` / `other_cn`
+  - 新增 `post_process_cn_signals()`：
+    - 若 `concept_hype` 命中研报/基本面关键词：改判为 `market_sentiment` 或 `corporate_earnings`（impact 设为 ±0.2，且 bond/gold=0）
+    - 若为真题材（命中强投机关键词）：保留 `concept_hype`，但对 `impact_equity` 限制在 [-0.5, 0.5]
+    - 若两者都不命中：降级为 `other_cn`（impact 全置 0）
+  - 新增 `--cn-hype-cap`（默认 30）+ `prepare_signals_for_save()`：对 CN `concept_hype` 做 Top-K 限流（按关键词强度），超出部分降级为 `other_cn`
+
+快速验证（不改写历史文件，仅对 2025-12-15 的 signals 进行函数级别对比统计）：
+
+- BEFORE：`concept_hype=142`
+- AFTER（仅 post_process）：`concept_hype=109`，新增 `other_cn=23`，`market_sentiment=7`
+- AFTER + CAP30：`concept_hype=30`，`other_cn=102`
+
+#### 16.11.7 一致性风险修复：训练预处理同步注入同款清洗（process_rag_data.py）
+
+动机：线上推理落盘已引入 `concept_hype` 清洗 + cap 限流；若训练集仍使用“未清洗 risk_watch”，会造成 train/inference distribution shift（student 在噪音环境学习，上线后处于安静环境可能迟钝）。
+
+实现：
+
+- `scripts/process_rag_data.py`
+  - 预处理阶段优先从 `data/daily/signals_YYYY-MM-DD.json` 读取当日 signals
+  - 对 signals 逐条应用 `post_process_cn_signals()`，并用 `prepare_signals_for_save(..., --cn-hype-cap)` 做限流降级
+  - 基于清洗后的 signals 重建 risk_watch（结构对齐线上 `build_risk_watch_summary`），再用于 prompt 重建
+  - 若缺少当日 `signals_*.json`，则回退使用 teacher JSONL 自带的 `input.risk_watch`，确保预处理稳健
+  - 新增 CLI 参数：`--risk-watch-market` / `--risk-watch-top` / `--cn-hype-cap`
+
+冒烟验证（2025-12-16 夜间）：
+
+- `process_rag_data.py` 新增 `--dry-run`（不写 train/val 输出）与 `[Rebuild]/[Fallback]` 诊断日志，用于快速验证“混合数据源动态回退与重构”逻辑。
+- dry-run（100 条，早期日期缺 signals）：成功触发多次 `[Fallback] date=... signals_file_exists=False`，`Dropped=0`。
+- 为命中存在 signals 的日期新增 `--skip-lines`，并在 2025-12-14 附近触发 `[Rebuild] date=2025-12-14 ...`。
+- 12-15 压力位确认（强制走外部 signals 重建路径，验证清洗+cap 生效）：
+  - `[Rebuild] date=2025-12-15 signals=338 cn_concept_hype 142->109->30`（cap=30）
+
+### 16.12 Model D 发射日（2025-12-16）
+
+#### 16.12.1 运维清理：删除 Discord 通知代码
+
+问题诊断：
+- Discord Webhook 返回 HTTP 403
+- 进一步诊断发现 Cloudflare error code 1010（IP 被拦截）
+- 判断：网络层问题，非代码问题
+
+决策：做减法，删除报错的通知代码，给主线任务让路
+
+删除文件：
+- `scripts/notify.py`
+- `scripts/_diag_discord.py`（临时诊断脚本）
+- `generate_etf_teacher_dataset.py` 中的 `notify()` 函数及所有调用
+
+#### 16.12.2 Teacher 数据生成完工
+
+- 文件：`data/finetune/teacher_etf/teacher_etf_rag_enhanced_25000.jsonl`
+- 最终行数：**25,000**（目标达成）
+- 生成速度：约 44 条/分钟（10 workers 并发）
+
+#### 16.12.3 训练数据预处理
+
+执行命令：
+```powershell
+.\venv311\Scripts\python.exe scripts/process_rag_data.py `
+  --cn-hype-cap 30 --risk-watch-market BOTH --risk-watch-top 3
+```
+
+输出：
+- Train: **23,729** 条 → `data/finetune/teacher_etf/train_rag_final.json`
+- Val: **1,249** 条 → `data/finetune/teacher_etf/val_rag_final.json`
+- Dropped: 22 条（质量过滤）
+
+#### 16.12.4 兼容性修复：transformers 库参数名变更
+
+问题：`TrainingArguments.__init__() got an unexpected keyword argument 'evaluation_strategy'`
+
+原因：新版 `transformers` 将 `evaluation_strategy` 重命名为 `eval_strategy`
+
+修复：`src/llm/finetune/train.py` 中两处 `evaluation_strategy` → `eval_strategy`
+
+#### 16.12.5 显存优化：14B 模型 OOM 处理
+
+问题：首次训练启动后 CUDA OOM（显存不足）
+
+第一轮调整：`--batch-size 1 --grad-acc 32 --max-seq-len 2048`
+- 仍然 OOM（激活值占用过大）
+
+第二轮调整：开启梯度检查点
+- 设置环境变量：`$env:PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True"`
+- 添加参数：`--grad-ckpt`
+
+原理：梯度检查点选择"不记中间结果，需要时重算"，牺牲约 20% 计算速度换取 60% 显存节省。对 4090 跑 14B 是必选项。
+
+#### 16.12.6 Model D 训练启动
+
+执行命令：
+```powershell
+$env:PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True"
+.\venv311\Scripts\python.exe scripts/finetune_llm.py `
+  --data data/finetune/teacher_etf/train_rag_final.json `
+  --eval-data data/finetune/teacher_etf/val_rag_final.json `
+  --model Qwen/Qwen2.5-14B-Instruct `
+  --outdir models/llm_etf_trading_qwen25_14b_rag_final `
+  --epochs 2 --batch-size 1 --grad-acc 32 --lr 1e-4 --max-seq-len 2048 --qlora --grad-ckpt
+```
+
+训练配置：
+- 基座模型：Qwen/Qwen2.5-14B-Instruct
+- LoRA 可训练参数：12.6M / 8.2B（0.15%）
+- 总步数：1,484（2 epochs × 23,729 samples / 32 effective batch）
+- 输出目录：`models/llm_etf_trading_qwen25_14b_rag_final/`
+
+状态：14B 训练过慢（24min/step，显存爆满触发 swap），已终止。
+
+#### 16.12.7 切换至 7B 模型
+
+问题诊断：
+- 14B + batch=1 + seq=2048 + grad-ckpt：每步 24 分钟（1426s/it）
+- 日志显示 `expandable_segments not supported on this platform`
+- 实际是显存爆满后使用共享内存（System RAM）swap，变成"伪训练"
+
+决策：切换至 Qwen2.5-7B-Instruct
+
+理由：
+- 7B 在 24GB 显存下更稳定
+- 可保持较长上下文（seq=2048+），对 RAG 任务至关重要
+- Qwen2.5-7B 性能强悍，配合高质量数据足以承载交易任务
+
+最终训练配置：
+```powershell
+.\venv311\Scripts\python.exe scripts/finetune_llm.py `
+  --data data/finetune/teacher_etf/train_rag_final.json `
+  --eval-data data/finetune/teacher_etf/val_rag_final.json `
+  --model Qwen/Qwen2.5-7B-Instruct `
+  --outdir models/llm_etf_trading_qwen25_7b_rag_final `
+  --epochs 2 --batch-size 2 --grad-acc 16 --lr 2e-4 --max-seq-len 2048 --qlora --grad-ckpt
+```
+
+训练状态：
+- 速度：~42s/step（vs 14B 的 1426s/step）
+- GPU：99%，显存 21.2 GB / 23 GB
+- 总步数：1,484
+- 预计耗时：~17 小时
+
+#### 16.12.8 计划对照检查
+
+| 路线图计划（16.10节） | 实际执行 | 状态 |
+|----------------------|---------|------|
+| Teacher 数据 25,000 条 | 25,000 条 | ✅ |
+| process_rag_data.py 清洗 + 降噪 | cn-hype-cap=30, risk-watch-top=3 | ✅ |
+| LoRA SFT (Qwen2.5 + QLoRA) | 7B 训练中（14B OOM 已放弃） | 🔄 |
+| Model D 产出目录 | `models/llm_etf_trading_qwen25_7b_rag_final/` | 🔄 |
+
+下一步（待训练完成后）：
+- 验证 Model D vs Trading v1（固定日期回放/模拟盘）
+- 恢复 07:30 新闻流水线（`\Stock-NewsOps-7Days`）
+- 启动 DPO 数据收集（T+5 回看 + preference pairs）
+
+## 17. Phase 6 蓝图：News C 微调 + 双塔架构（规划中）
+
+### 17.1 现状与目标
+
+**当前 News C**：
+- 架构：提示词工程（Prompt Engineering）
+- 问题：偶尔"懂装懂"（把普通新闻当炒作），格式偶有不稳定
+- 补丁：Python 降噪脚本 + 关键词规则
+
+**目标 News C**：
+- 架构：SFT 微调（知识蒸馏）
+- 效果：看一眼标题就能精准分类，输出格式 100% 稳定
+- 速度：极速推理（1.5B/3B 可达 10 秒扫完当日新闻）
+
+### 17.2 微调路径（复刻 Trader D 流程）
+
+1. **数据积累**：等系统运行 1 个月，积累 10,000+ 条 `signals_*.json`
+2. **Teacher 打标**：用 DeepSeek-V3/GPT-4o 清洗标签，输出标准 JSON
+3. **Student 训练**：微调 Qwen2.5-3B 或 7B
+
+### 17.3 模型尺寸选型
+
+| 维度 | 3B | 7B |
+|------|-----|-----|
+| 任务匹配 | 信息提取任务，3B 已溢出 | 稍有"人才浪费" |
+| 显存占用 | ~2.5 GB (4-bit) | ~6 GB (4-bit) |
+| 推理速度 | 100-150 tok/s | 50-80 tok/s |
+| 双塔共存 | News 3B + Trader 7B ≈ 15GB ✅ | News 7B + Trader 7B ≈ 22GB（极限） |
+
+**结论**：
+- 追求极致效率/并发 → 选 3B
+- 追求省心/理解力上限 → 选 7B
+- 当前阶段（只看 ETF）：7B 也可接受
+
+### 17.4 双塔架构愿景
+
+```
+┌─────────────────┐    ┌─────────────────┐
+│   左塔 (News)    │    │  右塔 (Trader)   │
+│  Qwen2.5-3B/7B  │───▶│   Qwen2.5-7B    │
+│   小、快、准     │    │   深、稳、狠     │
+└─────────────────┘    └─────────────────┘
+        ▲                      │
+        │                      ▼
+    海量新闻              交易决策输出
+```
+
+### 17.5 启动条件
+
+- [ ] Trader D 训练完成并验证
+- [ ] 系统稳定运行 1 个月
+- [ ] 新闻数据积累 10,000+ 条
+- [ ] 降噪规则稳定（无新的高频误判模式）
+
+**优先级**：低（当前 80 分方案够用）
+
+## 18. Phase 7 蓝图：全市场多资产扩张（远期愿景）
+
+### 18.1 目标市场
+
+| 市场 | 资产类型 | 语言 |
+|------|----------|------|
+| A股 | 股票/ETF | 中文 |
+| 美股 | 股票/ETF | 英文 |
+| 加股 | 股票/ETF | 英文 |
+| 大宗商品 | 黄金/原油 | 英文为主 |
+| 基金 | 公募/私募 | 中英混合 |
+
+### 18.2 核心模型选型：坚持 Qwen-2.5-7B
+
+理由：
+- **双语能力**：目前开源界最懂中文金融黑话，英文能力与 Llama-3 同一梯队
+- **跨市场理解**：能处理"美联储加息（英文）→ 影响A股黄金板块（中文）"的中英混合逻辑
+
+### 18.3 架构设计：一个 Base + 多个 LoRA
+
+```
+┌────────────────────────────────────────┐
+│      Qwen-2.5-7B-Instruct (4-bit)      │  ← 底座常驻（~5GB）
+└────────────────────────────────────────┘
+         ▲         ▲         ▲
+    ┌────┴────┐┌───┴───┐┌────┴────┐
+    │Adapter A││Adapter B││Adapter C│  ← 可插拔（各~100MB）
+    │CN_Trader││Global  ││Macro_   │
+    │         ││Trader  ││Gold     │
+    └─────────┘└────────┘└─────────┘
+```
+
+| Adapter | 专长 | 训练数据 |
+|---------|------|----------|
+| CN_Trader | 政策解读、情绪博弈、短线题材 | A股研报、雪球、龙虎榜 |
+| Global_Trader | 基本面、宏观经济 | WSJ、美联储纪要、美股财报 |
+| Macro_Gold | 避险逻辑、利率敏感性 | 高盛大宗报告、地缘政治 |
+
+### 18.4 漏斗筛选策略（4090 跑全市场）
+
+```
+10,000+ 标的
+    │ Python 硬指标海选（1秒）
+    ▼
+  500 只
+    │ Qwen-3B News C 初筛（10分钟）
+    ▼
+   50 只
+    │ Qwen-7B Trader D 深度推演（30分钟）
+    ▼
+  交易计划
+```
+
+### 18.5 资产特殊调教
+
+| 资产 | 重点 | 特殊处理 |
+|------|------|----------|
+| A股 | 政策与情绪 | 财联社电报、龙虎榜、concept_hype 识别 |
+| 黄金/大宗 | 宏观数据 | RAG 必须包含 DXY、US10Y、VIX |
+| 基金/ETF | 持仓穿透 | 喂成分股新闻，而非 ETF 本身新闻 |
+
+### 18.6 扩张路径
+
+1.  ETF Trader (7B) 完成训练并验证
+2.  收集 A 股数据，训练 CN_Trader LoRA
+3.  复用代码框架，低成本扩张到 A 股市场
+4.  逐步增加 Global_Trader、Macro_Gold Adapters
+
+**当前任务**：专注完成 Phase 5（7B ETF Trader 训练），它跑通后扩张只是"复制粘贴"。
+

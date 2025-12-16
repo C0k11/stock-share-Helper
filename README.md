@@ -93,18 +93,33 @@ Stock/
 - [x] News structuring inference (base vs LoRA)
 - [x] Decision explanation generation (base vs LoRA)
 
-### Phase 4: Product Integration
-- [ ] User risk profile configuration
-- [ ] Daily recommendation pipeline
-- [ ] Simulated portfolio tracking
-- [ ] API endpoints
-- [ ] Simple web UI
+### Phase 4: Production Pipeline 
+- [x] Daily news pipeline (fetch → infer → report)
+- [x] Signal evaluation (T+1 alignment, event-type analysis)
+- [x] Health monitoring & fallback (CN RSS → JSON API)
+- [x] Windows Task Scheduler integration
 
-### Phase 5: Enhancements (Future)
-- [ ] Intraday signals & triggers
-- [ ] HK ETF support
-- [ ] ML prediction models
-- [ ] A-share ETF support
+### Phase 5: ETF Trader + RAG + RiskGate (Current)
+- [x] ETF feature snapshot (`build_daily_etf_features.py`)
+- [x] Teacher distillation dataset (DeepSeek, 25k samples)
+- [x] RAG retrieval (FAISS-based similar history)
+- [x] RiskGate deterministic constraints
+- [x] Trading inference pipeline (`run_trading_inference.py`)
+- [x] CN concept_hype post-filter & denoising
+- [ ] **Model D training (Qwen2.5-7B, in progress)**
+- [ ] Model D validation vs Trading v1
+
+### Phase 6: News C Fine-tuning (Planned)
+- [ ] Accumulate 10,000+ news samples
+- [ ] Teacher labeling with DeepSeek/GPT-4o
+- [ ] Fine-tune Qwen2.5-3B/7B for news classification
+- [ ] Dual-tower architecture (News 3B + Trader 7B)
+
+### Phase 7: Multi-Market Expansion (Future)
+- [ ] A-share support (CN_Trader LoRA)
+- [ ] Canadian stocks (CA ETFs)
+- [ ] Gold/Commodities (Macro_Gold LoRA)
+- [ ] Funnel filtering (Python → 3B → 7B)
 
 ---
 
@@ -280,6 +295,19 @@ For 14B + LoRA inference, 4-bit loading is recommended to avoid CPU/disk offload
 
 This repo supports generating a high-quality teacher dataset from daily ETF feature snapshots using an OpenAI-compatible API (e.g., DeepSeek).
 
+Dual-model architecture (Staff Officer vs. Field Commander):
+
+- News LoRA (intelligence staff): turns noisy news into structured `signals_*.json` (a daily intel brief).
+- Trading model/LoRA (field commander): reads both the intel brief (`signals_*.json` / `risk_watch`) and the battlefield map (`etf_features_*.json`), then outputs the final action + target position.
+
+Future architecture (planned):
+
+- Evidence/RAG layer: retrieve original news snippets, macro items, and similar historical cases to reduce hallucinations.
+- Risk gate (deterministic): hard constraints on max position, drawdown, leverage, regime overrides; treat trading LoRA output as a proposal.
+- Execution planner: convert target position into orders (rebalance threshold, slicing, constraints).
+- Evaluation & monitoring: backtest, A/B, drift detection, daily QA dashboards.
+- Multi-adapter management: keep one base model with multiple LoRA adapters (news/trading/etc.), route by task.
+
 Environment variables:
 
 - `TEACHER_API_KEY`
@@ -406,18 +434,33 @@ Stock/
 - [x] 新闻结构化推理（base vs LoRA）
 - [x] 决策解释生成（base vs LoRA）
 
-### Phase 4: 产品集成
-- [ ] 用户风险档位配置
-- [ ] 每日建议生成流程
-- [ ] 模拟组合跟踪
-- [ ] API接口
-- [ ] 简单Web展示
+### Phase 4: 生产流水线 
+- [x] 每日新闻流水线（抓取 → 推理 → 日报）
+- [x] 信号评测（T+1 对齐，按事件类型分析）
+- [x] 健康监控与兜底（CN RSS → JSON API fallback）
+- [x] Windows 任务计划程序集成
 
-### Phase 5: 增强（后续）
-- [ ] 盘中信号与触发器
-- [ ] 港股ETF支持
-- [ ] ML预测模型（LightGBM）
-- [ ] A股ETF支持
+### Phase 5: ETF 交易模型 + RAG + RiskGate（当前阶段）
+- [x] ETF 特征快照（`build_daily_etf_features.py`）
+- [x] Teacher 蒸馏数据集（DeepSeek，25k 样本）
+- [x] RAG 检索（FAISS 相似历史）
+- [x] RiskGate 确定性约束
+- [x] 交易推理流水线（`run_trading_inference.py`）
+- [x] CN concept_hype 后处理与降噪
+- [ ] **Model D 训练中（Qwen2.5-7B）**
+- [ ] Model D 验证 vs Trading v1
+
+### Phase 6: News C 微调（规划中）
+- [ ] 积累 10,000+ 条新闻数据
+- [ ] DeepSeek/GPT-4o Teacher 打标
+- [ ] 微调 Qwen2.5-3B/7B 用于新闻分类
+- [ ] 双塔架构（News 3B + Trader 7B）
+
+### Phase 7: 全市场扩张（远期）
+- [ ] A股支持（CN_Trader LoRA）
+- [ ] 加股（CA ETFs）
+- [ ] 黄金/大宗商品（Macro_Gold LoRA）
+- [ ] 漏斗筛选（Python → 3B → 7B）
 
 ---
 
@@ -590,6 +633,19 @@ schtasks /Create /TN "QuantAI_DailyPipeline" /SC DAILY /ST 07:30 /RL HIGHEST /F 
 ### 5) Teacher 蒸馏数据集（DeepSeek，ETF）
 
 支持从每日 ETF 特征快照生成高质量 teacher 数据集（OpenAI-compat API，例如 DeepSeek），用于后续 LoRA 蒸馏训练。
+
+双模型架构（参谋长 vs 指挥官）：
+
+- 新闻 LoRA（情报参谋）：把海量新闻噪音结构化成 `signals_*.json`（每日情报简报）。
+- 交易模型/LoRA（现场指挥官）：同时读取情报简报（`signals_*.json` / `risk_watch`）与战场地图（`etf_features_*.json`），输出最终动作与目标仓位。
+
+未来架构蓝图（planned）：
+
+- 证据/检索层（RAG）：检索新闻原文片段、宏观数据、历史相似案例，降低幻觉。
+- 风控裁决层（确定性）：硬约束最大仓位/回撤/杠杆/切换风格等，把交易 LoRA 产出当作“建议”再裁决。
+- 执行规划层：把目标仓位转成下单计划（阈值再平衡、分批、交易限制）。
+- 评估与监控：回测、A/B、漂移监控、每日质量看板。
+- 多 Adapter 管理：尽量维持一个 base，多套 LoRA（新闻/交易等），按任务路由。
 
 环境变量：
 
