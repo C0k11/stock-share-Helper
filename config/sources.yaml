@@ -82,6 +82,9 @@ us_sources:
   - name: "CNBC Finance"
     url: "https://search.cnbc.com/rs/search/combinedcms/view.xml?partnerId=wrss01&id=10000664"
     weight: 1.0
+  - name: "Google News Canada Finance"
+    url: "https://news.google.com/rss/search?q=finance+canada+economy&hl=en-CA&gl=CA&ceid=CA:en"
+    weight: 0.6
   - name: "Investing.com Headlines"
     url: "https://www.investing.com/rss/news.rss"
     weight: 0.8

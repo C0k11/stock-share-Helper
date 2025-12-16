@@ -172,7 +172,7 @@ def daily_update(
     report_path.mkdir(parents=True, exist_ok=True)
     
     with open(report_path / f"daily_{today}.json", "w", encoding="utf-8") as f:
-        json.dump(report, f, ensure_ascii=False, indent=2)
+        json.dump(report, f, ensure_ascii=False, indent=2, default=lambda o: o.item() if hasattr(o, "item") else str(o))
     
     logger.info(f"Report saved to data/reports/daily_{today}.json")
     

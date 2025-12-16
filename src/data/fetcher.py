@@ -41,7 +41,7 @@ class DataFetcher:
             Dict[symbol, DataFrame]，每个DataFrame包含 open, high, low, close, volume, adj_close
         """
         if end_date is None:
-            end_date = datetime.now().strftime("%Y-%m-%d")
+            end_date = (datetime.now() + timedelta(days=1)).strftime("%Y-%m-%d")
         
         result = {}
         

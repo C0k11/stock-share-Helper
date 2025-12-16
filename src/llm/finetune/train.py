@@ -124,6 +124,7 @@ class FineTuner:
     def train(
         self,
         train_data_path: str,
+        eval_data_path: Optional[str] = None,
         num_epochs: int = 3,
         batch_size: int = 4,
         learning_rate: float = 2e-4,
@@ -156,7 +157,17 @@ class FineTuner:
             from transformers import TrainingArguments, Trainer, DataCollatorForLanguageModeling
             
             # 加载数据集
-            dataset = load_dataset("json", data_files=train_data_path)["train"]
+            eval_path = str(eval_data_path) if eval_data_path else None
+            if eval_path:
+                ds_dict = load_dataset(
+                    "json",
+                    data_files={"train": train_data_path, "validation": eval_path},
+                )
+                train_dataset = ds_dict["train"]
+                eval_dataset = ds_dict["validation"]
+            else:
+                train_dataset = load_dataset("json", data_files=train_data_path)["train"]
+                eval_dataset = None
             
             # 预处理函数
             def preprocess(examples):
@@ -176,11 +187,19 @@ class FineTuner:
                     padding="max_length"
                 )
             
-            tokenized_dataset = dataset.map(
+            tokenized_train = train_dataset.map(
                 preprocess,
                 batched=True,
-                remove_columns=dataset.column_names
+                remove_columns=train_dataset.column_names
             )
+
+            tokenized_eval = None
+            if eval_dataset is not None:
+                tokenized_eval = eval_dataset.map(
+                    preprocess,
+                    batched=True,
+                    remove_columns=eval_dataset.column_names
+                )
             
             # 训练参数
             use_bf16 = bool(torch.cuda.is_available())
@@ -200,6 +219,8 @@ class FineTuner:
                     bf16=use_bf16,
                     optim=optim,
                     gradient_checkpointing=self.gradient_checkpointing,
+                    eval_strategy="steps" if tokenized_eval is not None else "no",
+                    eval_steps=save_steps if tokenized_eval is not None else None,
                     report_to="none",
                 )
             except ValueError:
@@ -217,6 +238,8 @@ class FineTuner:
                     bf16=use_bf16,
                     optim="adamw_torch",
                     gradient_checkpointing=self.gradient_checkpointing,
+                    eval_strategy="steps" if tokenized_eval is not None else "no",
+                    eval_steps=save_steps if tokenized_eval is not None else None,
                     report_to="none",
                 )
             
@@ -230,8 +253,9 @@ class FineTuner:
             trainer = Trainer(
                 model=self.model,
                 args=training_args,
-                train_dataset=tokenized_dataset,
-                data_collator=data_collator
+                train_dataset=tokenized_train,
+                eval_dataset=tokenized_eval,
+                data_collator=data_collator,
             )
             
             # 开始训练
