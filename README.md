@@ -2,7 +2,22 @@
 
 > A multimodal AI-powered personal securities investment assistant providing ETF portfolio strategy recommendations, risk alerts, and explainable decisions.
 
-[中文版](#quantai---智能量化投顾助手-1)
+[中文版](#quantai---智能量化投顾助手) | [Engineering Log](docs/engineering_log_phase2_cn_infusion.md)
+
+---
+
+## Milestone Overview
+
+| Phase | Name | Status |
+|-------|------|--------|
+| 1 | Bulletproof JSON Pipeline | Done |
+| 2 | Teacher Data Generation (CN/US) | Done |
+| 3 | LLM Fine-tuning (News LoRA) | Done |
+| 4 | Production Pipeline (Daily Automation) | Done |
+| 5 | ETF Trader + RAG + RiskGate | In Progress |
+| 6 | News C Fine-tuning + Dual Tower | Planned |
+| 7 | Multi-Market Expansion | Planned |
+| 8 | RL (Reinforcement Learning) | Future |
 
 ---
 
@@ -358,7 +373,22 @@ MIT License
 
 > 基于多模态AI的个人证券投资助手，提供ETF组合策略建议、风险预警与可解释决策。
 
-[English Version](#quantai---intelligent-quantitative-investment-assistant)
+[English Version](#quantai---intelligent-quantitative-investment-assistant) | [工程日志](docs/engineering_log_phase2_cn_infusion.md)
+
+---
+
+## 里程碑总览
+
+| Phase | 名称 | 状态 |
+|-------|------|------|
+| 1 | JSON Pipeline 稳定性 | 完成 |
+| 2 | Teacher 数据生成 (CN/US) | 完成 |
+| 3 | LLM 微调 (News LoRA) | 完成 |
+| 4 | 生产流水线 (日更自动化) | 完成 |
+| 5 | ETF Trader + RAG + RiskGate | 进行中 |
+| 6 | News C 微调 + 双塔架构 | 规划中 |
+| 7 | 全市场多资产扩张 | 规划中 |
+| 8 | RL 强化学习 | 远期 |
 
 ---
 
