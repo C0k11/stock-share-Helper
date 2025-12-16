@@ -1,7 +1,38 @@
-# A-Share LLM Logic Infusion 工程日志（Phase 1-2）
+# QuantAI 工程日志
 
-> 本文用于记录：我们在“注入 A 股灵魂”过程中遇到的问题、讨论结论、工程实现方案、产物清单与后续规划。
-> 重要原则：任何 API Key/Token **不得**写入仓库；只允许通过环境变量或本地 `.env.local`（已在 `.gitignore` 忽略）管理。
+> 本文档记录项目从 Phase 1 到 Phase 8 的完整工程历程，包括问题诊断、技术决策、实现方案、产物清单与未来规划。
+>
+> **安全原则**：任何 API Key/Token 不得写入仓库，只允许通过环境变量或本地 `.env.local`（已在 `.gitignore` 忽略）管理。
+
+---
+
+## 里程碑总览
+
+| Phase | 名称 | 状态 | 完成时间 |
+|-------|------|------|----------|
+| 1 | Bulletproof JSON Pipeline | 完成 | 2025-12 |
+| 2 | Teacher 数据生成 (CN/US) | 完成 | 2025-12 |
+| 3 | LLM 微调 (News LoRA) | 完成 | 2025-12 |
+| 4 | 生产流水线 (日更自动化) | 完成 | 2025-12 |
+| 5 | ETF Trader + RAG + RiskGate | 进行中 | - |
+| 6 | News C 微调 + 双塔架构 | 规划中 | - |
+| 7 | 全市场多资产扩张 | 规划中 | - |
+| 8 | RL 强化学习 | 远期 | - |
+
+---
+
+## 目录
+
+- [里程碑总览](#里程碑总览)
+- [Phase 1-2: JSON Pipeline + Teacher 数据](#1-目标与范围)
+- [Phase 3: LLM 微调](#9-phase-3实战化-production-pipelinenight-ops-2025-12-14)
+- [Phase 4: 生产流水线](#10-phase-4对答案backtestingevaluation-2025-12-14)
+- [Phase 5: ETF Trader + RAG + RiskGate](#16-phase-54ragriskg闭环准备25k-数据--回测--发射按钮2025-12-15)
+- [Phase 6: News C 微调蓝图](#17-phase-6-蓝图news-c-微调--双塔架构规划中)
+- [Phase 7: 全市场扩张蓝图](#18-phase-7-蓝图全市场多资产扩张远期愿景)
+- [Phase 8: 架构演进路线图](#19-架构演进路线图2024-12-16-记录)
+
+---
 
 ## 1. 目标与范围
 
@@ -429,6 +460,12 @@
 - 无 OOM / 无卡顿：推理顺利完成
 - parse_ok：8/8
 - 输出：`data/daily/stress_result.json`
+
+---
+
+**前置依赖**：[Phase 3](#9-phase-3实战化-production-pipelinenight-ops-2025-12-14) 已完成日更流水线
+
+---
 
 ## 10. Phase 4：对答案（Backtesting/Evaluation, 2025-12-14）
 
@@ -1193,15 +1230,21 @@ $env:PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True"
 
 | 路线图计划（16.10节） | 实际执行 | 状态 |
 |----------------------|---------|------|
-| Teacher 数据 25,000 条 | 25,000 条 | ✅ |
-| process_rag_data.py 清洗 + 降噪 | cn-hype-cap=30, risk-watch-top=3 | ✅ |
-| LoRA SFT (Qwen2.5 + QLoRA) | 7B 训练中（14B OOM 已放弃） | 🔄 |
-| Model D 产出目录 | `models/llm_etf_trading_qwen25_7b_rag_final/` | 🔄 |
+| Teacher 数据 25,000 条 | 25,000 条 | 完成 |
+| process_rag_data.py 清洗 + 降噪 | cn-hype-cap=30, risk-watch-top=3 | 完成 |
+| LoRA SFT (Qwen2.5 + QLoRA) | 7B 训练中（14B OOM 已放弃） | 进行中 |
+| Model D 产出目录 | `models/llm_etf_trading_qwen25_7b_rag_final/` | 进行中 |
 
 下一步（待训练完成后）：
 - 验证 Model D vs Trading v1（固定日期回放/模拟盘）
 - 恢复 07:30 新闻流水线（`\Stock-NewsOps-7Days`）
 - 启动 DPO 数据收集（T+5 回看 + preference pairs）
+
+---
+
+**前置依赖**：[Phase 5](#16-phase-54ragriskg闭环准备25k-数据--回测--发射按钮2025-12-15) Model D 训练完成并验证
+
+---
 
 ## 17. Phase 6 蓝图：News C 微调 + 双塔架构（规划中）
 
@@ -1258,6 +1301,12 @@ $env:PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True"
 - [ ] 降噪规则稳定（无新的高频误判模式）
 
 **优先级**：低（当前 80 分方案够用）
+
+---
+
+**前置依赖**：[Phase 6](#17-phase-6-蓝图news-c-微调--双塔架构规划中) News C 微调完成
+
+---
 
 ## 18. Phase 7 蓝图：全市场多资产扩张（远期愿景）
 
@@ -1328,4 +1377,307 @@ $env:PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True"
 4.  逐步增加 Global_Trader、Macro_Gold Adapters
 
 **当前任务**：专注完成 Phase 5（7B ETF Trader 训练），它跑通后扩张只是"复制粘贴"。
+
+---
+
+## §19 架构演进路线图（2024-12-16 记录）
+
+### 19.1 架构对比：串行 vs 双塔 vs 更高级
+
+#### Level 0: 串行 Pipeline（Phase 3-4，已完成）
+
+```
+新闻 → News LoRA → signals → 日报
+```
+
+- 单模型单任务
+- 无风控、无历史参考
+- 简单但能力有限
+
+#### Level 1: 双塔架构（Phase 5-6，当前目标）
+
+```
+新闻 ──→ News C (3B) ──→ signals
+                            │
+ETF特征 ─────────────────────┼──→ Trader D (7B) → RiskGate → 决策
+                            │
+RAG历史 ────────────────────┘
+```
+
+- 情报/决策分离
+- RAG 降幻觉
+- RiskGate 硬约束
+
+#### Level 2: Multi-Agent 协作（更高级）
+
+```
+                    ┌─────────────┐
+                    │ Orchestrator│ ← 调度员
+                    └──────┬──────┘
+           ┌───────────────┼───────────────┐
+           ▼               ▼               ▼
+    ┌────────────┐  ┌────────────┐  ┌────────────┐
+    │ News Agent │  │Quant Agent │  │ Risk Agent │
+    │  (情报员)   │  │ (量化员)   │  │ (风控官)   │
+    └────────────┘  └────────────┘  └────────────┘
+           │               │               │
+           └───────────────┼───────────────┘
+                           ▼
+                    ┌─────────────┐
+                    │ Synthesizer │ ← 综合决策
+                    └─────────────┘
+```
+
+**特点**：
+- 每个 Agent 独立思考，互相质疑
+- Orchestrator 分配任务、汇总意见
+- 可以加入更多专家（宏观分析师、技术派、基本面派）
+- 类似 AutoGPT / CrewAI 模式
+
+**缺点**：
+- Token 消耗巨大（多轮对话）
+- 延迟高（串行调用多个模型）
+- 4090 难以承载
+
+#### Level 3: Mixture of Experts (MoE) 架构
+
+```
+Input → Router → [Expert 1: News]
+                 [Expert 2: Technical]
+                 [Expert 3: Macro]
+                 [Expert 4: Risk]
+      → Aggregator → Output
+```
+
+**特点**：
+- 单次前向传播，Router 动态选择专家
+- 稀疏激活，效率高
+- Mixtral、DeepSeek-V2 采用此架构
+
+**缺点**：
+- 需要从头预训练或用现成 MoE 模型
+- 本地 4090 跑 MoE 受显存限制
+
+#### Level 4: Self-Reflective / Tree-of-Thought
+
+```
+问题 → 生成多个候选方案 → 自我评估打分 → 选择最优 → 反思修正 → 最终答案
+```
+
+**特点**：
+- LLM 自己生成、评估、修正
+- 类似 AlphaGo 的 MCTS 搜索
+- 适合复杂推理任务
+
+**缺点**：
+- 需要多次调用（贵+慢）
+- 需要好的评估函数
+
+### 19.2 我们的选择：务实的双塔 + 轻量 Multi-Agent
+
+考虑到 **单卡 4090 + 个人项目** 的约束：
+
+| 架构 | 可行性 | 性价比 |
+|------|--------|--------|
+| 双塔 (News + Trader) | 完全可行 | 最高 |
+| 轻量 Multi-Agent (3角色辩论) | 可行（Teacher 已用） | 高 |
+| 完整 Multi-Agent | 需要 API | 中 |
+| MoE | 需预训练 | 低 |
+| Tree-of-Thought | 慢 | 低 |
+
+**最佳路径**：
+1. **Phase 5-6**：双塔架构（News 3B + Trader 7B），本地可跑
+2. **Teacher 生成**：用 DeepSeek API 跑 3 角色辩论（已实现）
+3. **未来增强**：对关键决策加 Self-Reflection（一次额外推理校验）
+
+### 19.3 比双塔更厉害的实战招式
+
+即使不改架构，以下技巧可显著提升效果：
+
+| 技巧 | 描述 | 复杂度 |
+|------|------|--------|
+| **Ensemble** | 多个 LoRA 投票（News A + News B） | 低 |
+| **Confidence Calibration** | 输出置信度，低信心时拒绝决策 | 低 |
+| **RAG + Reranker** | 检索后用小模型重排序 | 中 |
+| **Self-Consistency** | 多次采样取多数答案 | 中 |
+| **Retrieval-Augmented Generation** | 强化历史案例检索 | 中 |
+| **Human-in-the-Loop** | 关键决策人工审核 | 低 |
+| **Active Learning** | 收集错误案例迭代训练 | 高 |
+
+### 19.4 高级架构详解
+
+#### Level 3: 混合专家模型 (MoE)
+
+双塔是把任务分成了"看新闻"和"做交易"两块。而 MoE 是把"做交易"这件事本身拆得更细。
+
+**原理**：
+- 模型内部不是一个巨大的神经网络，而是由 **8 个或更多的小网络（Experts）**组成
+- Expert A：专精半导体板块
+- Expert B：专精大宗商品逻辑
+- Expert C：专精暴跌时的防御操作
+- **门控网络 (Router)**：根据当前情况，决定激活哪 2 个专家来回答问题
+
+**为什么比双塔强？**
+- **知识不打架**：在普通模型里，学了"大宗商品暴涨"可能会干扰"科技股估值"的逻辑。MoE 把它们存在不同脑区，互不干扰
+- **推理极快**：虽然总参数可能有 50B，但每次只激活 7B，速度和 7B 一样快，智商却是 50B 的
+
+**4090 能跑吗？**
+- 能。Mixtral 8x7B 或 DeepSeek-MoE，通过 4-bit 量化可跑
+- 这是双塔之后的最自然升级
+
+---
+
+#### Level 4: 强化学习 (RLHF / PPO)
+
+当前的 Trader D 是 SFT（监督微调），本质是**"模仿"**。如果老师（Teacher）本身就错了呢？学生也会跟着错。
+
+**原理**：
+- 不再喂"标准答案"
+- 直接让模型**模拟交易**
+- 赚钱了 → 给个奖励 (Reward +1)
+- 亏钱了 → 电击惩罚 (Reward -1)
+- 模型会在千万次自我博弈中，发现人类都没发现的 **Alpha（超额收益）**
+
+**为什么比双塔强？**
+- 它能**突破人类（Teacher）的天花板**
+- AlphaGo 就是靠这个战胜人类的
+
+**代价**：
+- 极难训练，RL 非常不稳定
+- 很容易训练出"为了不亏钱就空仓装死"的摆烂模型
+- 需要极强的数学功底设计 Reward Function
+
+---
+
+#### Level 5: 世界模型 (World Model / System 2 Reasoning)
+
+这是目前 AI 领域的最前沿（OpenAI o1, Sora 背后的逻辑）。
+
+**原理**：
+- 普通 Trader：看到信号 → 预测涨跌（直觉）
+- 世界模型：看到信号 → **在脑子里生成 10 种可能的未来平行宇宙** → 评估每种宇宙的概率 → 选择最优路径
+- 它不是在预测"下一个词"，而是在**模拟市场环境**
+
+**为什么比双塔强？**
+- 具备**反事实推理**（Counterfactual Reasoning）能力："如果美联储不降息，会发生什么？"
+- 可以做极其复杂的**多步推演**（Tree of Thoughts）
+
+**4090 能跑吗？**
+- 推理可以，训练不行
+- 可以用 OpenAI o1 或 DeepSeek-R1 作为老师，把思维链（CoT）蒸馏给 7B 模型
+
+---
+
+### 19.5 务实的进化路线图
+
+基于 **4090 单卡**现状的升级路线：
+
+| 阶段 | 架构名称 | 核心特征 | 状态 |
+|------|----------|----------|------|
+| Phase 5 | 双塔 (Dual Tower) | News 3B + Trader 7B (SFT) | 当前目标 |
+| Phase 6 | MoE 适配器 | 保持 7B 底座，训练多个 LoRA，代码做 Router | 4090 完美适配 |
+| Phase 7 | CoT 蒸馏 | 用 o1/R1 生成深思熟虑的交易计划，喂给 7B 学会"慢思考" | 低成本高回报 |
+| Phase 8 | RL 强化 | 模型在模拟盘跑，用 PnL 曲线微调 (DPO 算法) | 终极挑战 |
+
+---
+
+### 19.6 终极形态：全市场多资产覆盖
+
+#### 资产覆盖与权重规划
+
+```
+                    ┌─────────────────────────────────────┐
+                    │         Qwen-7B Base Model          │
+                    └─────────────────────────────────────┘
+                                     │
+        ┌────────────────────────────┼────────────────────────────┐
+        │                            │                            │
+        ▼                            ▼                            ▼
+┌───────────────┐          ┌───────────────┐          ┌───────────────┐
+│  US_Trader    │          │  CN_Trader    │          │  CA_Trader    │
+│    LoRA       │          │    LoRA       │          │    LoRA       │
+│   权重 50%    │          │   权重 25%    │          │   权重 10%    │
+└───────────────┘          └───────────────┘          └───────────────┘
+        │                            │                            │
+        ▼                            ▼                            ▼
+  SPY/QQQ/TLT              沪深300/创业板              TSX/XIU
+  GLD/SLV/IEF              上证50/中证500              加股ETF
+  美股个股                  A股个股                    
+        │                            │                            │
+        └────────────────────────────┴────────────────────────────┘
+                                     │
+                                     ▼
+                          ┌───────────────┐
+                          │  Macro_Gold   │
+                          │    LoRA       │
+                          │   权重 15%    │
+                          └───────────────┘
+                                     │
+                                     ▼
+                            黄金/白银/大宗
+                            DXY/US10Y/VIX
+```
+
+#### 各市场 LoRA 详细规划
+
+| LoRA 名称 | 覆盖资产 | 数据来源 | 优先级 | 特殊处理 |
+|-----------|----------|----------|--------|----------|
+| US_Trader | SPY/QQQ/TLT/GLD/IEF/美股 | yfinance + Reuters/Bloomberg RSS | P0 最高 | 标普权重股财报、Fed 决议 |
+| CN_Trader | 沪深300/创业板/A股 | 东方财富/同花顺 + 财联社电报 | P1 | 政策敏感、龙虎榜、concept_hype |
+| CA_Trader | TSX/XIU/加股 | Yahoo CA + Globe and Mail | P2 | 能源/矿业占比高 |
+| Macro_Gold | GLD/SLV/原油/铜 | 宏观数据 + 央行动态 | P1 | RAG 必含 DXY/US10Y/VIX |
+| Fund_Analyst | ETF/基金 | 持仓穿透 + 成分股新闻 | P2 | 不喂 ETF 本身新闻，喂成分股 |
+
+#### 训练顺序（按重要性）
+
+```
+Phase 5 (当前)
+    │
+    ▼
+US_Trader (ETF) ──────────────── 当前训练中
+    │
+    ▼
+Phase 6.1: US_Trader 扩展到美股个股
+    │
+    ▼
+Phase 6.2: Macro_Gold (黄金/大宗)
+    │
+    ▼
+Phase 6.3: CN_Trader (A股)
+    │
+    ▼
+Phase 6.4: CA_Trader (加股)
+    │
+    ▼
+Phase 6.5: Fund_Analyst (基金穿透)
+```
+
+#### 代码 Router 逻辑
+
+```python
+def select_adapter(symbol: str, market: str) -> str:
+    """根据标的选择对应的 LoRA 适配器"""
+    if market == "US":
+        if symbol in ["GLD", "SLV", "USO", "UNG"]:
+            return "macro_gold"
+        return "us_trader"
+    elif market == "CN":
+        return "cn_trader"
+    elif market == "CA":
+        return "ca_trader"
+    elif is_fund_or_etf(symbol):
+        return "fund_analyst"
+    else:
+        return "us_trader"  # 默认回退到美股
+```
+
+### 19.6 结论
+
+> **双塔是当前最务实的选择**。比它更厉害的架构（MoE、RL、World Model）要么太贵、要么太难、要么需要从头训练。
+>
+> **数据质量决定下限，架构决定上限**。现在的任务是把 News C 和 Trader D 的数据管道打磨到极致。
+>
+> 等数据足够好了，你会发现：**一个吃透了优质数据的 7B 模型，吊打一个吃垃圾数据的 MoE 模型**。
+>
+> 现在的 7B 正在疯狂学习，我们先把它练出来！
 
