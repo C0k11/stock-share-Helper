@@ -1273,7 +1273,7 @@ $env:PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True"
 | 任务匹配 | 信息提取任务，3B 已溢出 | 稍有"人才浪费" |
 | 显存占用 | ~2.5 GB (4-bit) | ~6 GB (4-bit) |
 | 推理速度 | 100-150 tok/s | 50-80 tok/s |
-| 双塔共存 | News 3B + Trader 7B ≈ 15GB ✅ | News 7B + Trader 7B ≈ 22GB（极限） |
+| 双塔共存 | News 3B + Trader 7B ≈ 15GB (可行) | News 7B + Trader 7B ≈ 22GB（极限） |
 
 **结论**：
 - 追求极致效率/并发 → 选 3B
