@@ -49,6 +49,34 @@ def to_iso8601(ts: Any) -> str:
         return ""
 
 
+def parse_yahoo_news_item(it: Dict[str, Any]) -> Tuple[str, str, str, str]:
+    """Return (url, title, publisher, published_at). Empty url if not found."""
+    c = it.get("content") if isinstance(it.get("content"), dict) else {}
+    if not isinstance(c, dict):
+        c = {}
+
+    def _get_url(d: Dict[str, Any], k: str) -> str:
+        v = d.get(k)
+        if isinstance(v, dict):
+            return str(v.get("url") or "").strip()
+        return str(v or "").strip()
+
+    url = _get_url(c, "canonicalUrl") or _get_url(c, "clickThroughUrl") or str(it.get("link") or it.get("url") or "").strip()
+    title = str(c.get("title") or it.get("title") or "").strip()
+
+    provider = c.get("provider") if isinstance(c.get("provider"), dict) else {}
+    if not isinstance(provider, dict):
+        provider = {}
+    publisher = str(provider.get("displayName") or c.get("publisher") or it.get("publisher") or "").strip()
+
+    pub = str(c.get("pubDate") or c.get("displayTime") or "").strip()
+    published_at = pub
+    if not published_at:
+        published_at = to_iso8601(it.get("providerPublishTime"))
+
+    return url, title, publisher, published_at
+
+
 def fetch_article_text(url: str, timeout: int) -> Tuple[str, str]:
     """Return (text, title). Empty text on failure."""
     try:
@@ -208,7 +236,7 @@ def main() -> None:
             if not isinstance(it, dict):
                 continue
 
-            url = str(it.get("link") or it.get("url") or "").strip()
+            url, title, publisher, published_at = parse_yahoo_news_item(it)
             if not url:
                 continue
             if url in existing_urls:
@@ -216,10 +244,6 @@ def main() -> None:
                 continue
 
             links_seen += 1
-
-            title = str(it.get("title") or "").strip()
-            publisher = str(it.get("publisher") or it.get("provider") or "").strip()
-            published_at = to_iso8601(it.get("providerPublishTime"))
 
             text, parsed_title = fetch_article_text(url, timeout=int(args.timeout))
             if not title and parsed_title:
