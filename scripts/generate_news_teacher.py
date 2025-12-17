@@ -420,6 +420,12 @@ def main() -> None:
     parser.add_argument("--out-train", default=None)
     parser.add_argument("--out-val", default=None)
     parser.add_argument("--val-ratio", type=float, default=0.05)
+    parser.add_argument(
+        "--min-content-len",
+        type=int,
+        default=0,
+        help="Skip items with content shorter than this length (0 disables)",
+    )
 
     parser.add_argument("--teacher-base-url", default=os.getenv("TEACHER_BASE_URL", "https://api.deepseek.com"))
     parser.add_argument("--teacher-model", default=os.getenv("TEACHER_MODEL", "deepseek-chat"))
@@ -459,6 +465,14 @@ def main() -> None:
     items = load_news_items(inp_path, max_items=int(args.max) if int(args.max) > 0 else 0)
     if not items:
         raise SystemExit(f"No items loaded from: {inp_path}")
+
+    min_content_len = int(args.min_content_len)
+    if min_content_len > 0:
+        before_n = len(items)
+        items = [it for it in items if len((it.content or "").strip()) >= min_content_len]
+        logger.info(f"Filtered by min_content_len={min_content_len}: {before_n} -> {len(items)}")
+        if not items:
+            raise SystemExit(f"No items left after min_content_len filter: {min_content_len}")
 
     existing_ids = iter_existing_ids(out_jsonl) if bool(args.resume) else set()
     if existing_ids:
