@@ -10,6 +10,8 @@ numpy>=1.24.0             # 数值计算
 pyarrow>=14.0.0           # 高效数据存储
 requests>=2.31.0          # HTTP请求
 feedparser>=6.0.0         # RSS解析
+newspaper3k>=0.2.8        # 新闻正文抽取（可选：历史新闻抓取）
+lxml_html_clean>=0.4.1    # newspaper3k 依赖（HTML清洗）
 
 # ====================
 # 技术分析与特征
