@@ -198,7 +198,7 @@ class SimpleNewsRAG:
         return out
 
 
-def load_news_items(path: Path, max_items: int = 0) -> List[NewsItem]:
+def load_news_items(path: Path, max_read_items: int = 0) -> List[NewsItem]:
     items: List[Dict[str, Any]] = []
 
     if path.suffix.lower() == ".jsonl":
@@ -213,7 +213,7 @@ def load_news_items(path: Path, max_items: int = 0) -> List[NewsItem]:
                     continue
                 if isinstance(obj, dict):
                     items.append(obj)
-                if max_items and len(items) >= int(max_items):
+                if max_read_items and len(items) >= int(max_read_items):
                     break
     else:
         with open(path, "r", encoding="utf-8") as f:
@@ -245,9 +245,6 @@ def load_news_items(path: Path, max_items: int = 0) -> List[NewsItem]:
                 url=url,
             )
         )
-
-        if max_items and len(out) >= int(max_items):
-            break
 
         _ = i
 
@@ -434,7 +431,18 @@ def main() -> None:
     parser.add_argument("--temperature", type=float, default=0.0)
     parser.add_argument("--max-output-tokens", type=int, default=800)
     parser.add_argument("--sleep", type=float, default=0.2)
-    parser.add_argument("--max", type=int, default=0)
+    parser.add_argument(
+        "--max",
+        type=int,
+        default=0,
+        help="Maximum number of NEW items to generate in this run (0 = no limit). Works with --resume.",
+    )
+    parser.add_argument(
+        "--max-read",
+        type=int,
+        default=0,
+        help="Optional: only read first N raw items (debug). 0 disables.",
+    )
 
     parser.add_argument("--rag-top-k", type=int, default=3)
     parser.add_argument("--no-rag", action="store_true")
@@ -462,7 +470,7 @@ def main() -> None:
     out_train.parent.mkdir(parents=True, exist_ok=True)
     out_val.parent.mkdir(parents=True, exist_ok=True)
 
-    items = load_news_items(inp_path, max_items=int(args.max) if int(args.max) > 0 else 0)
+    items = load_news_items(inp_path, max_read_items=int(args.max_read) if int(args.max_read) > 0 else 0)
     if not items:
         raise SystemExit(f"No items loaded from: {inp_path}")
 
@@ -478,6 +486,14 @@ def main() -> None:
     if existing_ids:
         logger.info(f"Resume enabled: found {len(existing_ids)} existing ids in {out_jsonl}")
 
+    candidates = [it for it in items if it.id not in existing_ids] if existing_ids else list(items)
+    max_new = int(args.max)
+    if max_new > 0:
+        candidates = candidates[:max_new]
+    if not candidates:
+        logger.info("No new items to process (all ids already exist).")
+        return
+
     rag = None
     if not bool(args.no_rag):
         rag = SimpleNewsRAG(items)
@@ -486,9 +502,7 @@ def main() -> None:
     written_fail = 0
 
     with open(out_jsonl, "a", encoding="utf-8") as fout:
-        for idx, item in enumerate(items, start=1):
-            if item.id in existing_ids:
-                continue
+        for idx, item in enumerate(candidates, start=1):
 
             ctx = []
             if rag is not None:
@@ -582,7 +596,7 @@ def main() -> None:
             fout.flush()
 
             logger.info(
-                f"[{idx}/{len(items)}] {item.id} {status} ok={written_ok} fail={written_fail} missing={missing} extra={extra} err={err[:120]}"
+                f"[{idx}/{len(candidates)}] {item.id} {status} ok={written_ok} fail={written_fail} missing={missing} extra={extra} err={err[:120]}"
             )
 
             if args.sleep and float(args.sleep) > 0:
