@@ -21,6 +21,29 @@ def stable_id(*parts: str) -> str:
     return h.hexdigest()[:24]
 
 
+def normalize_ticker(x: str) -> str:
+    s = str(x or "").strip().upper()
+    if not s:
+        return ""
+    return s.replace(".", "-")
+
+
+def load_tickers_from_file(path: str) -> List[str]:
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"tickers-file not found: {p}")
+    out: List[str] = []
+    with open(p, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            t = normalize_ticker(line)
+            if t:
+                out.append(t)
+    return sorted(list(dict.fromkeys(out)))
+
+
 def load_existing_urls(out_path: Path) -> Set[str]:
     if not out_path.exists():
         return set()
@@ -100,10 +123,20 @@ def fetch_article_text(url: str, timeout: int) -> Tuple[str, str]:
         return "", ""
 
 
-def iter_tickers(args_tickers: Optional[str]) -> List[str]:
+def iter_tickers(args_tickers: Optional[str], tickers_file: Optional[str]) -> List[str]:
+    if tickers_file:
+        base = load_tickers_from_file(str(tickers_file))
+    else:
+        base = []
+
     if args_tickers:
-        raw = [x.strip().upper() for x in str(args_tickers).split(",") if x.strip()]
-        return sorted(list(dict.fromkeys(raw)))
+        extra = [normalize_ticker(x) for x in str(args_tickers).split(",") if str(x).strip()]
+        extra = [x for x in extra if x]
+    else:
+        extra = []
+
+    if base or extra:
+        return sorted(list(dict.fromkeys(base + extra)))
 
     return [
         "SPY",
@@ -200,6 +233,11 @@ def main() -> None:
         default=None,
         help="Comma-separated tickers, e.g. SPY,QQQ,NVDA. If empty, uses a default list.",
     )
+    parser.add_argument(
+        "--tickers-file",
+        default=None,
+        help="Path to a text file containing tickers (one per line). Lines starting with # are ignored.",
+    )
     parser.add_argument("--max-items-per-ticker", type=int, default=20)
     parser.add_argument("--min-content-len", type=int, default=200)
     parser.add_argument("--timeout", type=int, default=30)
@@ -221,9 +259,11 @@ def main() -> None:
             "Missing dependency yfinance. Install with: pip install yfinance"
         ) from e
 
-    tickers = iter_tickers(args.tickers)
+    tickers = iter_tickers(args.tickers, args.tickers_file)
     max_items = int(max(1, args.max_items_per_ticker))
     min_len = int(max(0, args.min_content_len))
+
+    logger.info(f"Tickers loaded: {len(tickers)}")
 
     links_seen = 0
     skipped_existing = 0
