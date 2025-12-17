@@ -8,6 +8,7 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
+from urllib.parse import urlparse
 
 from loguru import logger
 from tqdm import tqdm
@@ -72,8 +73,8 @@ def to_iso8601(ts: Any) -> str:
         return ""
 
 
-def parse_yahoo_news_item(it: Dict[str, Any]) -> Tuple[str, str, str, str]:
-    """Return (url, title, publisher, published_at). Empty url if not found."""
+def parse_yahoo_news_item(it: Dict[str, Any]) -> Tuple[str, str, str, str, str, bool]:
+    """Return (url, title, publisher, published_at, summary, is_hosted). Empty url if not found."""
     c = it.get("content") if isinstance(it.get("content"), dict) else {}
     if not isinstance(c, dict):
         c = {}
@@ -97,7 +98,23 @@ def parse_yahoo_news_item(it: Dict[str, Any]) -> Tuple[str, str, str, str]:
     if not published_at:
         published_at = to_iso8601(it.get("providerPublishTime"))
 
-    return url, title, publisher, published_at
+    summary = str(c.get("summary") or it.get("summary") or "").strip()
+    is_hosted = bool(c.get("isHosted"))
+
+    return url, title, publisher, published_at, summary, is_hosted
+
+
+def is_blocked_url(url: str, blocked_domains: List[str]) -> bool:
+    try:
+        host = (urlparse(url).netloc or "").lower()
+    except Exception:
+        host = ""
+    if not host:
+        return False
+    for d in blocked_domains:
+        if d and d in host:
+            return True
+    return False
 
 
 def fetch_article_text(url: str, timeout: int) -> Tuple[str, str]:
@@ -243,6 +260,14 @@ def main() -> None:
     parser.add_argument("--timeout", type=int, default=30)
     parser.add_argument("--sleep", type=float, default=0.3)
     parser.add_argument("--append", action="store_true")
+    parser.add_argument(
+        "--blocked-domains",
+        default="wsj.com,barrons.com,bloomberg.com,investors.com,seekingalpha.com,fool.com,247wallst.com,marketwatch.com,tipranks.com,zacks.com,barchart.com",
+        help="Comma-separated domain substrings to skip (paywall/anti-bot)",
+    )
+    parser.add_argument("--prefer-hosted", action="store_true", help="Prefer Yahoo-hosted news items first")
+    parser.add_argument("--allow-summary-fallback", action="store_true", help="If full text fails, fall back to Yahoo summary when available")
+    parser.add_argument("--min-summary-len", type=int, default=80)
 
     args = parser.parse_args()
 
@@ -265,11 +290,16 @@ def main() -> None:
 
     logger.info(f"Tickers loaded: {len(tickers)}")
 
+    blocked_domains = [x.strip().lower() for x in str(args.blocked_domains).split(",") if x.strip()]
+    min_summary_len = int(max(0, args.min_summary_len))
+
     links_seen = 0
     skipped_existing = 0
+    skipped_blocked = 0
     parse_failed = 0
     too_short = 0
     saved = 0
+    saved_summary = 0
 
     new_items: List[Dict[str, Any]] = []
 
@@ -286,12 +316,36 @@ def main() -> None:
         if not isinstance(news, list):
             continue
 
-        taken = 0
+        parsed_news: List[Dict[str, Any]] = []
         for it in news:
             if not isinstance(it, dict):
                 continue
+            url, title, publisher, published_at, summary, is_hosted = parse_yahoo_news_item(it)
+            if not url:
+                continue
+            parsed_news.append(
+                {
+                    "url": url,
+                    "title": title,
+                    "publisher": publisher,
+                    "published_at": published_at,
+                    "summary": summary,
+                    "is_hosted": is_hosted,
+                }
+            )
 
-            url, title, publisher, published_at = parse_yahoo_news_item(it)
+        if bool(args.prefer_hosted):
+            parsed_news.sort(key=lambda x: (not bool(x.get("is_hosted")), x.get("url", "")))
+
+        taken = 0
+        for it in parsed_news:
+            url = str(it.get("url") or "").strip()
+            title = str(it.get("title") or "").strip()
+            publisher = str(it.get("publisher") or "").strip()
+            published_at = str(it.get("published_at") or "").strip()
+            summary = str(it.get("summary") or "").strip()
+            is_hosted = bool(it.get("is_hosted"))
+
             if not url:
                 continue
             if url in existing_urls:
@@ -300,16 +354,26 @@ def main() -> None:
 
             links_seen += 1
 
+            blocked = is_blocked_url(url, blocked_domains)
+            if blocked and not (bool(args.allow_summary_fallback) and len(summary) >= min_summary_len):
+                skipped_blocked += 1
+                continue
+
             text, parsed_title = fetch_article_text(url, timeout=int(args.timeout))
             if not title and parsed_title:
                 title = parsed_title
 
+            used_summary = False
             if len(text) < min_len:
-                if len(text) == 0:
-                    parse_failed += 1
+                if bool(args.allow_summary_fallback) and len(summary) >= min_summary_len:
+                    text = summary
+                    used_summary = True
                 else:
-                    too_short += 1
-                continue
+                    if len(text) == 0:
+                        parse_failed += 1
+                    else:
+                        too_short += 1
+                    continue
 
             obj: Dict[str, Any] = {
                 "id": stable_id(url, title, published_at),
@@ -320,12 +384,16 @@ def main() -> None:
                 "url": url,
                 "market": "US",
                 "related_ticker": sym,
+                "is_hosted": bool(is_hosted),
+                "is_summary": bool(used_summary),
             }
 
             new_items.append(obj)
             existing_urls.add(url)
             taken += 1
             saved += 1
+            if used_summary:
+                saved_summary += 1
 
             if args.sleep and float(args.sleep) > 0:
                 time.sleep(float(args.sleep))
@@ -340,8 +408,9 @@ def main() -> None:
 
     logger.info(
         "summary "
-        f"tickers={len(tickers)} links_seen={links_seen} saved={saved} "
-        f"skipped_existing={skipped_existing} parse_failed={parse_failed} too_short={too_short} "
+        f"tickers={len(tickers)} links_seen={links_seen} saved={saved} saved_summary={saved_summary} "
+        f"skipped_existing={skipped_existing} skipped_blocked={skipped_blocked} "
+        f"parse_failed={parse_failed} too_short={too_short} "
         f"out={out_path}"
     )
 
