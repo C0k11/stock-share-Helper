@@ -278,8 +278,8 @@ def validate_schema_v1(obj: Dict[str, Any]) -> Tuple[List[str], List[str]]:
         missing.append("event_type(enum)")
 
     sa = obj.get("subject_assets")
-    if not isinstance(sa, list) or not sa:
-        missing.append("subject_assets(non-empty array)")
+    if not isinstance(sa, list):
+        missing.append("subject_assets(array)")
     else:
         for x in sa[:10]:
             if not isinstance(x, str) or not x.strip():
@@ -358,18 +358,22 @@ def build_teacher_messages(*, item: NewsItem, context_items: Sequence[NewsItem])
         "Output exactly ONE JSON object with keys: market, event_type, subject_assets, sentiment_score, confidence, summary, reasoning, rag_evidence_ids. "
         "market MUST be 'US'. "
         "event_type MUST be one of the predefined enums. "
-        "subject_assets MUST be an array of uppercase tickers (e.g., ['SPY','QQQ']). "
+        "subject_assets MUST be an array of uppercase tickers (e.g., ['SPY','QQQ']); it MAY be an empty array if the news has no clear tradable target. "
         "sentiment_score MUST be a float between -1 and 1. "
         "confidence MUST be a float between 0 and 1. "
         "rag_evidence_ids MUST be an array of ids from the provided historical context (or empty array). "
         "Do not include any additional keys."
     )
 
+    note = (
+        "If the news is non-financial, off-topic, or contains insufficient information, set event_type='noise' and use subject_assets=[] with low confidence."
+    )
+
     user = (
         f"US_EVENT_TYPE_ENUMS: {enum_text}\n\n"
         f"HISTORICAL_CONTEXT_TOP3_JSONL:\n{ctx_block}\n\n"
         f"CURRENT_NEWS_JSON={json.dumps(user_payload, ensure_ascii=False)}\n\n"
-        f"{schema}"
+        f"{schema}\n{note}"
     )
 
     return [
