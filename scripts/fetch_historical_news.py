@@ -355,25 +355,30 @@ def main() -> None:
             links_seen += 1
 
             blocked = is_blocked_url(url, blocked_domains)
-            if blocked and not (bool(args.allow_summary_fallback) and len(summary) >= min_summary_len):
-                skipped_blocked += 1
-                continue
-
-            text, parsed_title = fetch_article_text(url, timeout=int(args.timeout))
-            if not title and parsed_title:
-                title = parsed_title
-
             used_summary = False
-            if len(text) < min_len:
+
+            if blocked:
                 if bool(args.allow_summary_fallback) and len(summary) >= min_summary_len:
                     text = summary
                     used_summary = True
                 else:
-                    if len(text) == 0:
-                        parse_failed += 1
-                    else:
-                        too_short += 1
+                    skipped_blocked += 1
                     continue
+            else:
+                text, parsed_title = fetch_article_text(url, timeout=int(args.timeout))
+                if not title and parsed_title:
+                    title = parsed_title
+
+                if len(text) < min_len:
+                    if bool(args.allow_summary_fallback) and len(summary) >= min_summary_len:
+                        text = summary
+                        used_summary = True
+                    else:
+                        if len(text) == 0:
+                            parse_failed += 1
+                        else:
+                            too_short += 1
+                        continue
 
             obj: Dict[str, Any] = {
                 "id": stable_id(url, title, published_at),
