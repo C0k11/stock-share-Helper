@@ -52,16 +52,22 @@ def to_iso8601(ts: Any) -> str:
 def fetch_article_text(url: str, timeout: int) -> Tuple[str, str]:
     """Return (text, title). Empty text on failure."""
     try:
-        from newspaper import Article  # type: ignore
+        from newspaper import Article, Config  # type: ignore
 
-        a = Article(url)
+        config = Config()
+        config.browser_user_agent = (
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+            "AppleWebKit/537.36 (KHTML, like Gecko) "
+            "Chrome/120.0.0.0 Safari/537.36"
+        )
+        config.request_timeout = int(timeout)
+        a = Article(url, config=config)
         a.download()
         a.parse()
         text = (a.text or "").strip()
         title = (a.title or "").strip()
         return text, title
     except Exception as e:
-        _ = timeout
         logger.debug(f"article_parse_failed url={url} err={e}")
         return "", ""
 
@@ -176,6 +182,12 @@ def main() -> None:
     max_items = int(max(1, args.max_items_per_ticker))
     min_len = int(max(0, args.min_content_len))
 
+    links_seen = 0
+    skipped_existing = 0
+    parse_failed = 0
+    too_short = 0
+    saved = 0
+
     new_items: List[Dict[str, Any]] = []
 
     pbar = tqdm(tickers, desc="tickers")
@@ -200,7 +212,10 @@ def main() -> None:
             if not url:
                 continue
             if url in existing_urls:
+                skipped_existing += 1
                 continue
+
+            links_seen += 1
 
             title = str(it.get("title") or "").strip()
             publisher = str(it.get("publisher") or it.get("provider") or "").strip()
@@ -211,6 +226,10 @@ def main() -> None:
                 title = parsed_title
 
             if len(text) < min_len:
+                if len(text) == 0:
+                    parse_failed += 1
+                else:
+                    too_short += 1
                 continue
 
             obj: Dict[str, Any] = {
@@ -227,6 +246,7 @@ def main() -> None:
             new_items.append(obj)
             existing_urls.add(url)
             taken += 1
+            saved += 1
 
             if args.sleep and float(args.sleep) > 0:
                 time.sleep(float(args.sleep))
@@ -239,7 +259,12 @@ def main() -> None:
         for obj in new_items:
             f.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
-    logger.info(f"Saved to {out_path} new_items={len(new_items)}")
+    logger.info(
+        "summary "
+        f"tickers={len(tickers)} links_seen={links_seen} saved={saved} "
+        f"skipped_existing={skipped_existing} parse_failed={parse_failed} too_short={too_short} "
+        f"out={out_path}"
+    )
 
 
 if __name__ == "__main__":
