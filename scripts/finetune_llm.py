@@ -30,9 +30,12 @@ def main():
     parser.add_argument("--outdir", default="models/llm", help="输出目录（含checkpoints与lora权重）")
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=1)
+    parser.add_argument("--eval-batch-size", type=int, default=0, help="验证 batch size（0 表示与训练一致）")
     parser.add_argument("--grad-acc", type=int, default=8)
     parser.add_argument("--lr", type=float, default=2e-4)
     parser.add_argument("--save-steps", type=int, default=50)
+    parser.add_argument("--eval-steps", type=int, default=0, help="验证间隔 steps（0 表示与 save-steps 一致；<0 表示禁用 eval）")
+    parser.add_argument("--eval-max-samples", type=int, default=0, help="验证集最多取前 N 条（0 表示全量）")
     parser.add_argument("--save-total-limit", type=int, default=3)
     parser.add_argument("--max-seq-len", type=int, default=1024, help="最大序列长度（7B建议 512/1024）")
     parser.add_argument("--grad-ckpt", action="store_true", help="启用梯度检查点以节省显存")
@@ -94,9 +97,12 @@ def main():
         eval_data_path=args.eval_data,
         num_epochs=args.epochs,
         batch_size=args.batch_size,
+        eval_batch_size=args.eval_batch_size,
         learning_rate=args.lr,
         gradient_accumulation_steps=args.grad_acc,
         save_steps=args.save_steps,
+        eval_steps=args.eval_steps,
+        eval_max_samples=args.eval_max_samples,
         save_total_limit=args.save_total_limit,
         resume_from_checkpoint=resolve_resume_path(args.resume, args.outdir),
     )

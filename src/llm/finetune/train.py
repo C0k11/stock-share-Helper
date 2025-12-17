@@ -127,10 +127,13 @@ class FineTuner:
         eval_data_path: Optional[str] = None,
         num_epochs: int = 3,
         batch_size: int = 4,
+        eval_batch_size: int = 0,
         learning_rate: float = 2e-4,
         gradient_accumulation_steps: int = 4,
         warmup_ratio: float = 0.03,
         save_steps: int = 100,
+        eval_steps: int = 0,
+        eval_max_samples: int = 0,
         save_total_limit: int = 3,
         resume_from_checkpoint: Optional[str] = None
     ):
@@ -200,15 +203,36 @@ class FineTuner:
                     batched=True,
                     remove_columns=eval_dataset.column_names
                 )
+
+                if int(eval_max_samples) > 0:
+                    try:
+                        n = len(tokenized_eval)
+                        k = min(int(eval_max_samples), int(n))
+                        tokenized_eval = tokenized_eval.select(range(k))
+                    except Exception:
+                        pass
             
             # 训练参数
             use_bf16 = bool(torch.cuda.is_available())
             optim = "paged_adamw_8bit" if self.load_in_4bit else "adamw_torch"
+
+            if int(eval_steps) < 0:
+                enable_eval = False
+            else:
+                enable_eval = tokenized_eval is not None
+
+            if int(eval_steps) == 0:
+                effective_eval_steps = save_steps
+            else:
+                effective_eval_steps = int(eval_steps)
+
+            per_device_eval_bs = int(eval_batch_size) if int(eval_batch_size) > 0 else int(batch_size)
             try:
                 training_args = TrainingArguments(
                     output_dir=str(self.output_dir / "checkpoints"),
                     num_train_epochs=num_epochs,
                     per_device_train_batch_size=batch_size,
+                    per_device_eval_batch_size=per_device_eval_bs,
                     gradient_accumulation_steps=gradient_accumulation_steps,
                     learning_rate=learning_rate,
                     warmup_ratio=warmup_ratio,
@@ -219,8 +243,8 @@ class FineTuner:
                     bf16=use_bf16,
                     optim=optim,
                     gradient_checkpointing=self.gradient_checkpointing,
-                    eval_strategy="steps" if tokenized_eval is not None else "no",
-                    eval_steps=save_steps if tokenized_eval is not None else None,
+                    eval_strategy="steps" if enable_eval else "no",
+                    eval_steps=effective_eval_steps if enable_eval else None,
                     report_to="none",
                 )
             except ValueError:
@@ -228,6 +252,7 @@ class FineTuner:
                     output_dir=str(self.output_dir / "checkpoints"),
                     num_train_epochs=num_epochs,
                     per_device_train_batch_size=batch_size,
+                    per_device_eval_batch_size=per_device_eval_bs,
                     gradient_accumulation_steps=gradient_accumulation_steps,
                     learning_rate=learning_rate,
                     warmup_ratio=warmup_ratio,
@@ -238,8 +263,8 @@ class FineTuner:
                     bf16=use_bf16,
                     optim="adamw_torch",
                     gradient_checkpointing=self.gradient_checkpointing,
-                    eval_strategy="steps" if tokenized_eval is not None else "no",
-                    eval_steps=save_steps if tokenized_eval is not None else None,
+                    eval_strategy="steps" if enable_eval else "no",
+                    eval_steps=effective_eval_steps if enable_eval else None,
                     report_to="none",
                 )
             
