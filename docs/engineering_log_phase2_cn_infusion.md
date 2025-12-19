@@ -2072,3 +2072,24 @@ def select_adapter(symbol: str, market: str) -> str:
   - `Reverse-Confirm-Days`：2
   - `Min-Hold-Days`：0
 - **Status**：Phase 7 回测阶段收官；受限于数据时效（价格数据只能覆盖到当下可获得范围），更长窗口回测暂停，进入 Phase 8（Paper Trading / Forward Testing）准备。
+
+## 2025-12-19 Phase 8 Milestone: Paper Trading Automation
+**目标**：构建支持每日滚动运行、状态持久化与自动订单生成的模拟盘系统。
+
+**核心交付**：
+1. **Execution Engine Upgrade**
+  - `src/strategy/execution.py` 增加序列化/反序列化支持。
+  - 增加 `force_flat` 接口以支持 Risk Gate（CLEAR）信号。
+2. **Paper Trading Script**
+  - 新增 `scripts/run_paper_trading.py`。
+  - 实现 Mock 信号与 Real Inference 信号的兼容适配。
+  - 实现每日状态接力（State Handover）与幂等性保护。
+3. **Validation (Rolling Drill)**
+  - Scenario：12-18（Init）-> 12-19（Hold/ForceFlat）-> 12-20（Pending Reverse）-> 12-21（Confirm Flip）。
+  - Result：
+    - 状态接力正确（Days Held 递增）。
+    - Risk Gate 正确触发强制平仓。
+    - Confirm=2 机制成功在 Day 3 抑制反向，在 Day 4 执行反转。
+    - Flip 交易金额正确计算（2x Trade Dollar）。
+
+**状态**：System Ready for Deployment.
