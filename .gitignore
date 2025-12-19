@@ -55,6 +55,13 @@ env/
 !/data/.gitkeep
 
 # ====================
+# 回测/结果产物（不提交）
+# ====================
+/results/
+backtest_result.csv
+backtest_result.png
+
+# ====================
 # 模型文件（不提交）
 # ====================
 models/

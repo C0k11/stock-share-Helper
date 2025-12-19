@@ -24,6 +24,7 @@ CN_EVENT_TYPES = [
     "corporate_earnings",
     "market_sentiment",
     "other_cn",
+    "noise",
 ]
 
 US_EVENT_TYPES = [
@@ -37,6 +38,7 @@ US_EVENT_TYPES = [
     "financial_stability",
     "commodity_shock",
     "other_us",
+    "noise",
 ]
 
 
@@ -260,6 +262,7 @@ def build_messages_news(*, market: str, title: str, content: str) -> List[Dict[s
             "Do NOT use single quotes to delimit JSON strings. Do NOT include quote characters inside string values. "
             "You MUST choose event_type from this enum: "
             f"{CN_EVENT_TYPES}. "
+            "If the content is non-financial, off-topic, or has no tradable market impact, choose event_type noise and set impacts to 0. "
             "Tagging Rules (decision logic): "
             "- If the news mentions concrete monetary/fiscal tools (e.g., RRR cut, interest rate cut, special bonds, white list, debt swap), choose policy_stimulus. "
             "- If the news is about National Team buying, stabilizing market expectations, long-term funds entering market, or curbing short-selling, choose market_intervention. "
@@ -282,6 +285,7 @@ def build_messages_news(*, market: str, title: str, content: str) -> List[Dict[s
             "You MUST choose event_type from this US-only enum: "
             f"{US_EVENT_TYPES}. "
             "Do NOT output any China/A-share event types (forbidden examples: policy_stimulus, regulation_crackdown, market_intervention, concept_hype, corporate_restructuring). "
+            "If the content is non-financial, off-topic, or has no tradable market impact, choose event_type noise and set impacts to 0. "
             "If you are unsure, use other_us."
         )
 
@@ -338,6 +342,7 @@ def main():
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--deterministic", action="store_true", default=True)
     parser.add_argument("--max-input-chars", type=int, default=6000)
+    parser.add_argument("--min-content-chars", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=1)
     parser.add_argument("--save-every", type=int, default=20)
     parser.add_argument("--resume", action="store_true")
@@ -432,6 +437,8 @@ def main():
 
     et_counts: Dict[str, int] = {}
     market_counts: Dict[str, int] = {"US": 0, "CN": 0}
+    skipped_noise = 0
+    skipped_empty_content = 0
 
     pending: List[Dict[str, Any]] = []
     for it in items:
@@ -462,6 +469,40 @@ def main():
             title = (it.get("title") or "").strip()
             content = (it.get("content") or "").strip()
             max_chars = max(0, int(args.max_input_chars))
+
+            min_chars = max(0, int(args.min_content_chars))
+            if min_chars and len(content) < min_chars:
+                skipped_empty_content += 1
+
+                market = (it.get("market") or "US").strip().upper()
+                if market not in ("US", "CN"):
+                    market = "US"
+
+                market_counts[market] = market_counts.get(market, 0) + 1
+                meta = {
+                    "id": it.get("id"),
+                    "market": market,
+                    "source": (it.get("source") or "").strip(),
+                    "url": (it.get("url") or "").strip(),
+                    "published_at": it.get("published_at"),
+                    "title": title,
+                    "input_chars": len(content),
+                }
+                record = {
+                    **meta,
+                    "parse_ok": False,
+                    "signal": None,
+                    "raw_json": None,
+                }
+                signals.append(record)
+
+                sid = meta.get("id")
+                if isinstance(sid, str) and sid:
+                    done_ids.add(sid)
+
+                processed_in_run += 1
+                continue
+
             if max_chars and len(content) > max_chars:
                 orig_len = len(content)
                 content = content[:max_chars] + "...(truncated)"
@@ -486,6 +527,21 @@ def main():
                     "input_chars": len(content),
                 }
             )
+
+        if not prompts:
+            total_done = len(done_ids) if args.resume else processed_in_run
+            denom = (len(items) if not args.resume else len(items))
+            ok_count = sum(1 for x in signals if x.get("parse_ok"))
+            if (processed_in_run % 10 == 0) or (start + batch_size >= len(pending)):
+                logger.info(
+                    f"[{min(total_done, denom)}/{denom}] parse_ok={ok_count}/{len(signals)} "
+                    f"skipped_noise={skipped_noise} skipped_empty_content={skipped_empty_content}"
+                )
+
+            if (processed_in_run % save_every == 0) or (start + batch_size >= len(pending)):
+                with open(out_path, "w", encoding="utf-8") as f:
+                    json.dump(prepare_signals_for_save(signals, int(args.cn_hype_cap)), f, ensure_ascii=False, indent=2)
+            continue
 
         inputs = tokenizer(prompts, return_tensors="pt", padding=True).to(model.device)
         # Per-sample prompt lengths (critical for left-padding batch decode correctness)
@@ -513,7 +569,12 @@ def main():
             sig = record.get("signal") if isinstance(record.get("signal"), dict) else None
             if parse_ok and sig:
                 et = str(sig.get("event_type") or "").strip()
-                et_counts[et] = et_counts.get(et, 0) + 1
+                if et == "noise":
+                    skipped_noise += 1
+                    record["parse_ok"] = False
+                    record["signal"] = None
+                else:
+                    et_counts[et] = et_counts.get(et, 0) + 1
 
             signals.append(record)
 
@@ -527,7 +588,10 @@ def main():
         denom = (len(items) if not args.resume else len(items))
         ok_count = sum(1 for x in signals if x.get("parse_ok"))
         if (processed_in_run % 10 == 0) or (start + batch_size >= len(pending)):
-            logger.info(f"[{min(total_done, denom)}/{denom}] parse_ok={ok_count}/{len(signals)}")
+            logger.info(
+                f"[{min(total_done, denom)}/{denom}] parse_ok={ok_count}/{len(signals)} "
+                f"skipped_noise={skipped_noise} skipped_empty_content={skipped_empty_content}"
+            )
 
         if (processed_in_run % save_every == 0) or (start + batch_size >= len(pending)):
             with open(out_path, "w", encoding="utf-8") as f:
@@ -536,6 +600,8 @@ def main():
     logger.info(f"Saved signals: {out_path}")
     final_ok = sum(1 for x in signals if x.get("parse_ok"))
     logger.info(f"Parse OK rate: {final_ok}/{len(signals)}")
+    logger.info(f"Skipped noise items: {skipped_noise}")
+    logger.info(f"Skipped empty content items: {skipped_empty_content}")
     logger.info(f"Market counts: {market_counts}")
     logger.info(f"Top event_type counts: {sorted(et_counts.items(), key=lambda x: x[1], reverse=True)[:10]}")
 
