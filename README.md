@@ -8,16 +8,18 @@
 
 ## Milestone Overview
 
-| Phase | Name | Status |
-|-------|------|--------|
-| 1 | Bulletproof JSON Pipeline | Done |
-| 2 | Teacher Data Generation (CN/US) | Done |
-| 3 | LLM Fine-tuning (News LoRA) | Done |
-| 4 | Production Pipeline (Daily Automation) | Done |
-| 5 | ETF Trader + RAG + RiskGate | Done |
-| 6 | Stock Trader v1.1 (Tech + News) + Dual Tower | Done |
-| 7 | Simulation / Backtest (Paper Trading) | In Progress |
-| 8 | RL (Reinforcement Learning) | Future |
+| Phase | Topic | Status | Description |
+| :--- | :--- | :--- | :--- |
+| 1 | Bulletproof JSON Pipeline | ✅ Done | Strict JSON repair + schema validation.
+| 2 | Teacher Data Generation (CN/US) | ✅ Done | Multi-market teacher dataset generation.
+| 3 | LLM Fine-tuning (News LoRA) | ✅ Done | News LoRA training + inference.
+| 4 | Production Pipeline (Daily Automation) | ✅ Done | Daily pipeline automation + health/fallback.
+| 5 | ETF Trader + RAG + RiskGate | ✅ Done | RAG retrieval + deterministic risk gate.
+| 6 | Stock Trader v1.1 (Tech + News) + Dual Tower | ✅ Done | News Tower + Trader Tower integration.
+| 7 | Backtest & Execution | ✅ Done | NAV curve backtest + `Hold=Keep` + `Confirm=2` execution filter.
+| 8 | Paper Trading | ✅ Done | Rolling daily simulation with state persistence + RiskGate CLEAR.
+| 9 | Dashboard | ✅ Done | Streamlit cockpit for NAV, orders, and risk monitoring.
+| 10 | RL (Reinforcement Learning) | Future | Only after longer-horizon backtest is stable.
 
 ---
 
@@ -147,11 +149,11 @@ Stock/
 - [x] Inference-side stock news injection (A/B controllable)
 - [x] Final Exam (news-conditioning / ablation) validated
 
-### Phase 7: Simulation / Backtest (In Progress)
+### Phase 7: Simulation / Backtest (Done)
 - [x] 2025-12 stock feature backfill (daily `stock_features_YYYY-MM-DD.json`)
 - [x] Stock signal-quality backtest (LoRA adapter swap on a single base model)
-- [ ] Upgrade to NAV curve backtest (positions/costs/drawdown)
-- [ ] Re-run on horizon=T+5 and stratify by strong-news vs quiet days
+- [x] Upgrade to NAV curve backtest (positions/costs/drawdown)
+- [ ] Re-run on horizon=T+5 and stratify by strong-news vs quiet days (requires later data coverage)
 
 ### Phase 8: Multi-Market Expansion / RL (Future)
 - [ ] A-share support (CN_Trader LoRA)
@@ -258,6 +260,30 @@ The daily report also includes a **Risk Watch** section for CN `regulation_crack
 .\venv311\Scripts\python.exe scripts\run_daily_inference.py --date 2025-12-14 --use-lora --load-in-4bit --batch-size 4 --max-input-chars 6000
 .\venv311\Scripts\python.exe scripts\generate_daily_report.py --date 2025-12-14
 ```
+
+---
+
+## 📊 Visualization (Dashboard)
+Monitor your paper trading status, NAV curve, orders flow, and risk events using the Streamlit cockpit.
+
+1. **Install Dependencies**:
+
+```bash
+pip install streamlit pandas plotly
+```
+
+2. **Launch Dashboard**:
+
+```bash
+streamlit run scripts/dashboard.py
+```
+
+3. **Select Data Directory**:
+
+In the sidebar, set `Paper Dir` to:
+
+- `data/paper_rolltest` (recommended, includes the rolling drill: Hold / ForceFlat / Pending / Flip)
+- `data/paper` (your current live paper trading directory)
 
 ### Evaluation (T+1 alignment)
 
@@ -400,16 +426,18 @@ MIT License
 
 ## 里程碑总览
 
-| Phase | 名称 | 状态 |
-|-------|------|------|
-| 1 | JSON Pipeline 稳定性 | 完成 |
-| 2 | Teacher 数据生成 (CN/US) | 完成 |
-| 3 | LLM 微调 (News LoRA) | 完成 |
-| 4 | 生产流水线 (日更自动化) | 完成 |
-| 5 | ETF Trader + RAG + RiskGate | 完成 |
-| 6 | Stock Trader v1.1（Tech + News）+ 双塔接线 | 完成 |
-| 7 | Simulation / Backtest（Paper Trading） | 进行中 |
-| 8 | RL 强化学习 | 远期 |
+| Phase | 主题 | 状态 | 说明 |
+| :--- | :--- | :--- | :--- |
+| 1 | JSON Pipeline 稳定性 | ✅ 完成 | JSON 强修复 + schema 校验。
+| 2 | Teacher 数据生成 (CN/US) | ✅ 完成 | 多市场 teacher 数据产出。
+| 3 | LLM 微调 (News LoRA) | ✅ 完成 | News LoRA 训练与推理。
+| 4 | 生产流水线 (日更自动化) | ✅ 完成 | 日更自动化 + 兜底/健康检查。
+| 5 | ETF Trader + RAG + RiskGate | ✅ 完成 | RAG 检索 + 风控闸门。
+| 6 | Stock Trader v1.1（Tech + News）+ 双塔接线 | ✅ 完成 | News/Trader 双塔接线。
+| 7 | 回测与执行层调优 | ✅ 完成 | NAV 回测 + `Hold=Keep` + `Confirm=2` 防抖。
+| 8 | 模拟盘（Paper Trading） | ✅ 完成 | 滚动模拟 + 状态持久化 + RiskGate CLEAR。
+| 9 | 监控看板（Dashboard） | ✅ 完成 | Streamlit 驾驶舱：NAV/订单/风险。
+| 10 | RL 强化学习 | 远期 | 仅在更长窗口回测稳定后考虑。
 
 ---
 
@@ -539,11 +567,11 @@ Stock/
 - [x] 推理侧 stock 模式 news 注入（支持 A/B 对照）
 - [x] Final Exam（news-conditioning / ablation）验收通过
 
-### Phase 7: Simulation / Backtest（进行中）
+### Phase 7: Simulation / Backtest（完成）
 - [x] 2025-12 stock_features 批量补齐
 - [x] Stock 回测（信号质量评估器，adapter 轮换）
-- [ ] 升级为 NAV 曲线回测（仓位/费用/回撤）
-- [ ] 对齐 T+5 并按强新闻日/平静日分层评估
+- [x] 升级为 NAV 曲线回测（仓位/费用/回撤）
+- [ ] 对齐 T+5 并按强新闻日/平静日分层评估（依赖后续数据覆盖）
 
 ### Phase 8: 全市场扩张 / RL（远期）
 - [ ] A股支持（CN_Trader LoRA）
