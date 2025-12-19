@@ -14,12 +14,12 @@ $today = if ($env:DATE_OVERRIDE) { $env:DATE_OVERRIDE } else { (Get-Date).ToStri
 $log = Join-Path $ProjectRoot ("logs\news_ops_{0}.log" -f $today)
 $mutexName = "Global\Stock-NewsOps-7Days"
 
-$NewsModel = if ($env:NEWS_MODEL) { $env:NEWS_MODEL } else { "Qwen/Qwen2.5-14B-Instruct" }
-$NewsLora = if ($env:NEWS_LORA) { $env:NEWS_LORA } else { "models\llm_qwen14b_lora_c_hybrid\lora_weights" }
+$NewsModel = if ($env:NEWS_MODEL) { $env:NEWS_MODEL } else { "Qwen/Qwen2.5-3B-Instruct" }
+$NewsLora = if ($env:NEWS_LORA) { $env:NEWS_LORA } else { "models\news_final_3b_v1_full\lora_weights" }
 $NewsResume = if ($env:NEWS_RESUME) { $env:NEWS_RESUME } else { "1" }
 
-$TradingBase = if ($env:TRADING_BASE) { $env:TRADING_BASE } else { "Qwen/Qwen2.5-14B-Instruct" }
-$TradingAdapter = if ($env:TRADING_ADAPTER) { $env:TRADING_ADAPTER } else { "models\llm_etf_trading_qwen25_14b\lora_weights" }
+$TradingBase = if ($env:TRADING_BASE) { $env:TRADING_BASE } else { "Qwen/Qwen2.5-7B-Instruct" }
+$TradingAdapter = if ($env:TRADING_ADAPTER) { $env:TRADING_ADAPTER } else { "models\llm_etf_trading_qwen25_7b_rag_final" }
 $TradingRiskWatchMarket = if ($env:TRADING_RISK_WATCH_MARKET) { $env:TRADING_RISK_WATCH_MARKET } else { "BOTH" }
 $TradingRiskWatchTop = if ($env:TRADING_RISK_WATCH_TOP) { $env:TRADING_RISK_WATCH_TOP } else { "3" }
 
@@ -37,6 +37,8 @@ $PaperVirtualEvent = if ($env:PAPER_VIRTUAL_EVENT) { $env:PAPER_VIRTUAL_EVENT } 
 
 $SkipFetch = if ($env:SKIP_FETCH) { $env:SKIP_FETCH } else { "0" }
 $SkipFeatures = if ($env:SKIP_FEATURES) { $env:SKIP_FEATURES } else { "0" }
+$SkipNews = if ($env:SKIP_NEWS) { $env:SKIP_NEWS } else { "0" }
+$SkipReport = if ($env:SKIP_REPORT) { $env:SKIP_REPORT } else { "0" }
 
 $ExperimentOutdir = if ($env:EXP_OUTDIR) { $env:EXP_OUTDIR } else { "" }
 
@@ -183,10 +185,22 @@ try {
     Write-Log "SKIP: Build ETF Features"
     Write-Host "SKIP: Build ETF Features"
   }
-  $newsArgs = @('scripts\run_daily_inference.py','--date',$today,'--model',$NewsModel,'--lora',$NewsLora,'--use-lora','--load-in-4bit','--batch-size','4','--max-input-chars','6000','--save-every','20')
-  if ($NewsResume -eq "1") { $newsArgs += @('--resume') }
-  Invoke-Step "Run News Inference" $newsArgs
-  Invoke-Step "Generate Report" @('scripts\generate_daily_report.py','--date',$today)
+
+  if ($SkipNews -ne "1") {
+    $newsArgs = @('scripts\run_daily_inference.py','--date',$today,'--model',$NewsModel,'--lora',$NewsLora,'--use-lora','--load-in-4bit','--batch-size','4','--max-input-chars','6000','--max-new-tokens','512','--save-every','20')
+    if ($NewsResume -eq "1") { $newsArgs += @('--resume') }
+    Invoke-Step "Run News Inference" $newsArgs
+  } else {
+    Write-Log "SKIP: Run News Inference"
+    Write-Host "SKIP: Run News Inference"
+  }
+
+  if (($SkipNews -ne "1") -and ($SkipReport -ne "1")) {
+    Invoke-Step "Generate Report" @('scripts\generate_daily_report.py','--date',$today)
+  } else {
+    Write-Log "SKIP: Generate Report"
+    Write-Host "SKIP: Generate Report"
+  }
 
   $tradingOut = ("data\\daily\\trading_decision_{0}.json" -f $today)
   Invoke-Step "Run Trading Inference" @(
@@ -197,6 +211,8 @@ try {
     '--adapter',$TradingAdapter,
     '--risk-watch-market',$TradingRiskWatchMarket,
     '--risk-watch-top',$TradingRiskWatchTop,
+    '--max-new-tokens','1200',
+    '--temperature','0.1',
     '--out',$tradingOut,
     '--load-4bit'
   )

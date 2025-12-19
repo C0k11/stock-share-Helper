@@ -15,8 +15,8 @@
 | 3 | LLM 微调 (News LoRA) | 完成 | 2025-12 |
 | 4 | 生产流水线 (日更自动化) | 完成 | 2025-12 |
 | 5 | ETF Trader + RAG + RiskGate | 进行中 | - |
-| 6 | News C 微调 + 双塔架构 | 规划中 | - |
-| 7 | 全市场多资产扩张 | 规划中 | - |
+| 6 | Stock Trader v1.1（Tech + News）+ 双塔接线 | 完成 | 2025-12-18 |
+| 7 | Simulation / Backtest（Paper Trading） | 进行中 | 2025-12 |
 | 8 | RL 强化学习 | 远期 | - |
 
 ---
@@ -28,8 +28,8 @@
 - [Phase 3: LLM 微调](#9-phase-3实战化-production-pipelinenight-ops-2025-12-14)
 - [Phase 4: 生产流水线](#10-phase-4对答案backtestingevaluation-2025-12-14)
 - [Phase 5: ETF Trader + RAG + RiskGate](#16-phase-54ragriskg闭环准备25k-数据--回测--发射按钮2025-12-15)
-- [Phase 6: News C 微调蓝图](#17-phase-6-蓝图news-c-微调--双塔架构规划中)
-- [Phase 7: 全市场扩张蓝图](#18-phase-7-蓝图全市场多资产扩张远期愿景)
+- [Phase 6: Stock Trader v1.1（Tech + News）执行记录](#1916-phase-62-里程碑历史-signals-回放backfill与训练集注入injection完成-2025-12-18)
+- [Phase 7: Simulation / Backtest（2025-12）执行计划](#1920-phase-7-执行计划2025-12-月度-simulation--backtest-2025-12-19)
 - [Phase 8: 架构演进路线图](#19-架构演进路线图2024-12-16-记录)
 
 ---
@@ -1246,7 +1246,9 @@ $env:PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True"
 
 ---
 
-## 17. Phase 6 蓝图：News C 微调 + 双塔架构（规划中）
+## 17. Phase 6（附录，历史蓝图）：News C 微调 + 双塔架构（已完成后下沉为参考）
+
+说明：本节为 Phase 6 的早期蓝图记录。Phase 6 的实际执行与验收结果已在本文末尾以里程碑形式补全（见 19.16-19.19）。
 
 ### 17.1 现状与目标
 
@@ -1304,11 +1306,13 @@ $env:PYTORCH_CUDA_ALLOC_CONF = "expandable_segments:True"
 
 ---
 
-**前置依赖**：[Phase 6](#17-phase-6-蓝图news-c-微调--双塔架构规划中) News C 微调完成
+**前置依赖（历史记录）**：Phase 6 的执行与验收已完成（见 19.16-19.19）。
 
 ---
 
-## 18. Phase 7 蓝图：全市场多资产扩张（远期愿景）
+## 18. Phase 7（附录，历史蓝图）：全市场多资产扩张（远期愿景）
+
+说明：当前 Phase 7 的实际执行聚焦于 Simulation / Backtest（见 19.20）。本节保留为长期扩张的结构化设想。
 
 ### 18.1 目标市场
 
@@ -1631,10 +1635,10 @@ Input → Router → [Expert 1: News]
 #### 训练顺序（按重要性）
 
 ```
-Phase 5 (当前)
+Phase 5 (已完成)
     │
     ▼
-US_Trader (ETF) ──────────────── 当前训练中
+US_Trader (ETF) ──────────────── 已完成训练并验证 (2025-12-17)
     │
     ▼
 Phase 6.1: US_Trader 扩展到美股个股
@@ -1708,3 +1712,312 @@ def select_adapter(symbol: str, market: str) -> str:
 >
 > 在高质量数据与稳定闭环之上，再逐步引入更复杂的架构与训练范式。
 
+### 19.10 Phase 5 验收：Trader 7B (v1) 回测报告 (2025-12-17)
+
+**状态**：已完成
+
+**模型版本**：`models/llm_etf_trading_qwen25_7b_rag_final` (LoRA)
+
+**回测区间**：2024-01-01 至 2024-02-01（22 个交易日）
+
+**基准策略**：RAG Context + RiskGate + Long/Short/Hold（US ETFs）
+
+**核心指标 (Benchmark)**：
+- **Total Return**：`+0.76%`
+- **Max Drawdown**：`-1.65%`
+- **Final Value**：`$100,732.32`（初始 `$100,000`）
+
+**工程产物 (Artifacts)**：
+- `scripts/run_paper_backtest_range.py`：滚动回测驱动脚本（逐日串联 `run_trading_inference.py` + `paper_trade_sim.py`）
+- `results/backtest_2024_jan/paper_nav.csv`：NAV 曲线
+- `results/backtest_2024_jan/decisions/`：逐日决策 JSON
+- `results/backtest_2024_jan/account_state.json`：滚动账户状态
+
+**结论**：
+1. **工程闭环**：滚动回测已可稳定复现，具备后续迭代的对比基准线（Baseline）。
+2. **模型稳定性**：全月无 JSON Parse Error；推理侧已固化 `max_new_tokens=1200` 以避免截断导致的解析失败。
+3. **下一步方向**：当前偏“低波动稳健型”。Phase 6 引入个股与 News Teacher 数据侧强化后，目标是提升 Alpha（超额收益）。
+
+### 19.11 Phase 6 规划：Trader v1.1 进化路线图（按 ROI 排序）(2025-12-18)
+
+**里程碑定位**：当前系统相当于“本田雅阁级别”的量化系统：
+- **皮实耐用**：Pipeline 固化，防截断，每天稳定运行。
+- **安全第一**：回撤控制良好（MDD `-1.65%`），震荡期能稳住资金曲线。
+- **基准明确**：已有可引用的基准资金曲线（Reference Baseline）。
+
+**Phase 6 目标**：在不牺牲稳定性的前提下，提升 Alpha（超额收益），将系统从“稳健可用”升级为“强进攻性”。
+
+**Trader v1.1（按 ROI 排序）**：
+
+| 优先级 | 改进方向 | 核心改动 | 预期提升 | 实现难度 | 备注 |
+| --- | --- | --- | --- | --- | --- |
+| P0 | 接入 News Signal（双塔合璧） | 将 News Tower 输出（Sentiment/Event）作为输入特征喂给 Trader/RiskGate | Alpha 提升（高） | 中 | 目前最大的信息缺失：纯量价很难捕捉突发利好/利空 |
+| P1 | 个股扩展（Stock Picking） | 从 ETF 扩展到高波动个股（如 NVDA/TSLA/COIN 等） | Alpha 提升（中-高） | 高 | ETF 平滑波动也平滑收益；个股更适合逻辑分析捕捉超额 |
+| P2 | Reflection（自省机制） | 先输出自检/自我批评，再输出最终决策（保持输出为严格 JSON） | WinRate 提升（中） | 低 | 推理耗时增加，但可减少低级失误 |
+| P3 | 宏观感知（Macro Aware） | RAG 注入 Fed/非农/VIX 期限结构等宏观状态 | 回撤降低（中） | 中 | 系统性风险来临时（如 2022）更可能空仓保命 |
+| P4 | 动态仓位（Kelly/Vol） | 仓位从离散档位变为基于 confidence 与波动率的动态公式 | Sharpe 提升（中） | 中 | 数学优化为主，LLM 提供参数/区间 |
+
+**核心洞察（为何 P0 是胜负手）**：
+- 若仅依赖量价特征，Trader 类似“蒙眼交易”（看得到 K 线，看不到新闻）。
+- 接入 News Signal 后，Trader 能将“价格波动”与“事件驱动”区分开（例如：短期情绪 vs. 基本面冲击），有机会显著改善择时与持仓决策。
+
+**下一步行动（P0 前置条件：先有可用 News Tower）**：
+1. **News Tower Smoke（3B）**：验证训练链路与环境
+  - `python scripts/finetune_llm.py --data data/finetune/news_final_3b/train_news_v1.json --eval-data data/finetune/news_final_3b/val_news_v1.json --model Qwen/Qwen2.5-3B-Instruct --outdir models/news_final_3b_v1 --smoke --max-seq-len 1024`
+2. **News Tower Full Train（3B）**：产出可用于接线的 LoRA
+  - `python scripts/finetune_llm.py --data data/finetune/news_final_3b/train_news_v1.json --eval-data data/finetune/news_final_3b/val_news_v1.json --model Qwen/Qwen2.5-3B-Instruct --outdir models/news_final_3b_v1 --epochs 1 --batch-size 1 --grad-acc 16 --lr 1e-4 --max-seq-len 1024`
+
+### 19.12 Phase 6 验收：双塔接线全链路冒烟 (2025-12-18)
+
+**状态**：已完成
+
+**目标**：验证双塔架构在日常流水线中可稳定运行（Fetch → Features → News(3B) → Trader(7B)），并产出可用的 `signals` 与 `trading_decision`。
+ 
+**Pipeline 脚本**：`scripts/run_pipeline_daily.ps1`
+ 
+**News Tower 配置**：
+- **Base Model**：`Qwen/Qwen2.5-3B-Instruct`
+- **LoRA**：`models/news_final_3b_v1_full/lora_weights`
+- **参数**：`--load-in-4bit --batch-size 4 --max-input-chars 6000 --max-new-tokens 512 --save-every 20 --resume`
+ 
+**Trader Tower 配置**：
+- **Base Model**：`Qwen/Qwen2.5-7B-Instruct`
+- **LoRA**：`models/llm_etf_trading_qwen25_7b_rag_final`
+- **参数**：`--load-4bit --risk-watch-market BOTH --risk-watch-top 3 --max-new-tokens 1200 --temperature 0.1`
+ 
+**执行日期**：`DATE_OVERRIDE=2025-12-18`
+ 
+**结果（News）**：
+- **输入新闻**：`337`
+- **Parse OK**：`333/337`（约 `98.8%`）
+- **产物**：`data/daily/signals_2025-12-18.json`
+ 
+**结果（Trader）**：
+- **产物**：`data/daily/trading_decision_2025-12-18.json`
+ 
+**日志**：`logs/news_ops_2025-12-18.log`（全步骤 `EXIT: 0`；`Generate Report` 已按配置跳过）
+
+### 19.13 Phase 6.1 里程碑：News Tower v1.1 Noise Killer 训练完成与验收 (2025-12-18)
+
+**状态**：已完成
+
+**目标**：
+1. 完成 News Tower v1.1（Noise Killer）LoRA 训练并产出权重。
+2. 验证模型具备噪音识别能力，且不会误杀重要财经新闻。
+3. 验证推理流水线中的 `skipped_noise` 计数器生效，且程序无崩溃。
+
+**训练产物**：
+- `models/news_final_3b_v1_1_noise_killer_retry2/lora_weights/`
+
+**训练命令（记录）**：
+- `python scripts/finetune_llm.py --data data/finetune/news_final_3b/train_news_v1_noise_mix.json --eval-data data/finetune/news_final_3b/val_news_v1.json --model Qwen/Qwen2.5-3B-Instruct --outdir models/news_final_3b_v1_1_noise_killer_retry2 --epochs 1 --batch-size 1 --grad-acc 16 --lr 1e-4 --max-seq-len 512 --qlora --grad-ckpt --save-steps 100 --eval-steps -1 --eval-batch-size 1`
+
+**针对性噪音测试（Dyson/LeBron/NVDA）**：
+- 脚本：`scripts/test_news_v1_1_noise.py`
+- 结果：
+  - Dyson（家电测评）：`event_type=noise`（通过）
+  - LeBron（体育新闻）：`event_type=noise`（通过）
+  - NVDA（财报新闻）：`event_type=corporate_earnings`（通过）
+
+**Pipeline 集成回归（抽样 10 条 US 新闻）**：
+- 命令：
+  - `python scripts/run_daily_inference.py --date 2025-12-18 --model Qwen/Qwen2.5-3B-Instruct --lora models/news_final_3b_v1_1_noise_killer_retry2/lora_weights --use-lora --load-in-4bit --batch-size 4 --max-new-tokens 512 --market US --sample-us 10`
+- 结果（日志关键行）：
+  - `Skipped noise items: 7`
+  - `EXIT: 0`
+- 备注：本次样本中存在 `content` 为空的脏数据，导致个别条目输出为非 JSON（属于输入质量问题，后续可在 pipeline 增加前置过滤：`len(content) < 50` 直接丢弃）。
+
+### 19.14 Phase 6.1 里程碑：Trader Stock v1（纯技术面 baseline）训练启动 (2025-12-18)
+
+**状态**：进行中
+
+**目标**：在未接入 News Signal 的情况下，先训练一版“纯技术面”的 Stock Trader baseline，用于后续对比 News 注入后的增益。
+
+**数据集**：
+- `data/finetune/trader_stock_sft_v1.json`（41,964 条）
+
+**训练命令（记录）**：
+- `python scripts/finetune_llm.py --data data/finetune/trader_stock_sft_v1.json --model Qwen/Qwen2.5-7B-Instruct --outdir models/trader_stock_v1_tech_only --epochs 1 --batch-size 1 --grad-acc 16 --lr 1e-4 --max-seq-len 512 --qlora --grad-ckpt --save-steps 100 --eval-steps -1 --eval-batch-size 1`
+
+**训练产物（预期）**：
+- `models/trader_stock_v1_tech_only/lora_weights/`
+
+### 19.15 Phase 6.1 设计决策记录：Stock 训练集为何采用 tech-only baseline (2025-12-18)
+
+**决策**：Phase 6.1 的 Stock Trader v1 训练集先采用“纯技术面 + 数学规则标签（T+5 收益率）”路线，不在第一阶段引入 Teacher LLM 生成的思维链、RAG 历史上下文或将 RiskGate 逻辑内化到训练数据。
+
+**动机与约束**：
+1. **规模与成本**：Stock 扩展后覆盖标的与样本量显著上升（85 个标的、约 4 万样本）。若对全量样本执行 Teacher+RAG 生成，成本与耗时会显著上升，不符合 Phase 6.1 的交付节奏。
+2. **输入分布一致性**：Stock 终态计划注入的是由 News Tower 输出的结构化信号（signals）。在 News Tower v1.1 刚完成训练且历史 signals 尚未回放生成的前提下，提前用 Teacher/RAG 构造“另一套新闻理解”会引入训练-上线输入分布偏差，降低数据投入 ROI。
+3. **RiskGate 的工程可控性**：将 RiskGate 作为推理阶段外挂约束，便于快速调参、回滚与热修复；在 Stock 高波动场景下，这种“代码层风控”的可解释性与迭代效率更高。
+
+**阶段路线（建议）**：
+1. **阶段 A（当前）**：训练 Stock Trader v1（tech-only baseline），建立可对比的基准模型与指标基线。
+2. **阶段 B（后续）**：使用 News Tower v1.1 对历史新闻回放生成 signals，并通过注入器将 News Context 写入训练 prompt，进行二阶段增量微调，用于量化对比 tech-only vs tech+news 的 Alpha 增益。
+3. **阶段 C（可选）**：抽样高价值样本（高波动/财报/突发事件/大回撤窗口）做小规模 Teacher 精养数据，用于纠偏输出结构与减少低级错误，而不追求全量 Teacher 化。
+
+### 19.16 Phase 6.2 里程碑：历史 signals 回放（Backfill）与训练集注入（Injection）完成 (2025-12-18)
+
+**状态**：已完成
+
+**目标**：
+1. 基于历史新闻回放生成 `signals_YYYY-MM-DD.json`，用于 Stock Trader 的新闻注入训练。
+2. 将每日 signals 注入到 Stock Trader SFT 数据集 prompt 中，构建 v1.1（tech+news）二阶段训练数据。
+
+**Backfill 脚本**：
+- `scripts/backfill_news_signals.py`
+
+**输入数据**：
+- 历史新闻（JSONL）：`data/raw/news_us_raw.jsonl`
+- Stock Trader SFT baseline：`data/finetune/trader_stock_sft_v1.json`
+
+**Backfill 产物**：
+- `data/daily/signals_YYYY-MM-DD.json`（按 Trader SFT 中出现的日期集合回填）
+- `data/tmp/news_by_day/news_YYYY-MM-DD.jsonl`（按日分桶的中间产物，用于加速回放推理）
+
+**Backfill 执行结果（关键日志）**：
+- `days_total=496 days_processed=496 skipped_existing=0 out_dir=data/daily`
+
+**注入脚本（多天自动扫描）**：
+- `scripts/inject_news_into_trader.py`
+
+**注入策略**：
+- 从 `data/daily/signals_YYYY-MM-DD.json` 中筛选：
+  - `parse_ok=true`
+  - `abs(signal.impact_equity) >= 0.5`
+  - 每日取 Top-K（默认 3）
+- 将 News Context 块前置注入到原技术面 prompt 之前（prefix），以对齐训练时输入分布。
+
+**注入产物**：
+- `data/finetune/trader_stock_sft_v1_plus_news.json`
+
+**注入统计（脚本输出）**：
+- `total_samples=41964`
+- `injected_samples=3484`
+- `covered_days=44`（满足阈值且 parse_ok 的日期数）
+
+### 19.17 Phase 6.2 里程碑：Trader Stock v1.1（Tech + News）训练完成 (2025-12-18)
+
+**状态**：已完成
+
+**训练数据**：
+- `data/finetune/trader_stock_sft_v1_plus_news.json`
+
+**训练命令（记录）**：
+- `python scripts/finetune_llm.py --data data/finetune/trader_stock_sft_v1_plus_news.json --model Qwen/Qwen2.5-7B-Instruct --outdir models/trader_stock_v1_1_tech_plus_news --epochs 1 --batch-size 1 --grad-acc 16 --lr 1e-4 --max-seq-len 512 --qlora --grad-ckpt --save-steps 100 --eval-steps -1 --eval-batch-size 1`
+
+**训练产物**：
+- `models/trader_stock_v1_1_tech_plus_news/lora_weights/`
+
+**训练完成标志（关键日志）**：
+- `Fine-tuning completed!`
+- `Model saved to models\trader_stock_v1_1_tech_plus_news\lora_weights`
+
+### 19.18 Phase 6.2 工程缝合：推理侧 Stock Prompt News 注入（News-Aware Inference） (2025-12-18)
+
+**状态**：已完成
+
+**问题**：训练数据已包含 News Context，但推理侧 `run_trading_inference.py` 在 stock 模式下默认仅使用 `stock_features_YYYY-MM-DD.json` 构建 prompt，导致 v1.1 推理无法看到新闻输入。
+
+**修复**：升级 `scripts/run_trading_inference.py`，使其在 stock 模式下按日期自动读取 `signals_YYYY-MM-DD.json` 并注入 prompt（与训练注入格式一致）。
+
+**新增 CLI 控制项**：
+- `--disable-news`：禁用推理侧 News 注入（用于对照实验）
+- `--signals <path>`：覆盖 signals 文件路径（默认使用 `{daily_dir}/signals_{date}.json`）
+- `--min-news-abs-impact <float>`：默认 0.5
+- `--max-news-signals <int>`：默认 3
+
+### 19.19 Phase 6.2 验收：Final Exam（2025-12-15）与对照实验结论 (2025-12-19)
+
+**目标**：验证 v1.1 是否具备“条件触发”能力：当 prompt 中出现 News Context 时，决策与解释是否发生可观测变化；同时验证禁用 News 时是否能回退到技术面行为。
+
+**测试日选择**：
+- 脚本：`scripts/find_best_test_day.py`
+- 评分标准：按日汇总 `sum(abs(signal.impact_equity))`，并输出 Top-N 备选。
+- 选定测试日：`2025-12-15`
+
+**测试日特征生成**：
+- 脚本：`scripts/build_daily_features_universal.py`
+- 产物：`data/daily/stock_features_2025-12-15.json`
+- 校验：`payload_date=2025-12-15` 且 `items[*].date` 全部为 `2025-12-15`（避免数据不足导致日期回退）。
+
+**重要实验控制（避免混杂因素）**：
+1. v1 baseline 推理需显式加 `--disable-news`，否则推理脚本会同样注入 signals，导致对照失效。
+2. RiskGate 可能因外部风险事件或回撤规则强制覆盖最终动作；为隔离“prompt news 注入”效应，使用 `--risk-watch-market NONE` 关闭 RiskWatch 输入。
+
+**三组推理（RiskWatch=NONE）**：
+1. v1 baseline（tech-only, no news）：`models/trader_stock_v1_tech_only/lora_weights` + `--disable-news`
+2. v1.1 full（tech+news）：`models/trader_stock_v1_1_tech_plus_news/lora_weights`
+3. v1.1 ablation（same model, no news）：`models/trader_stock_v1_1_tech_plus_news/lora_weights` + `--disable-news`
+
+**结论（关键样本：AAPL）**：
+- v1 baseline（no news）：AAPL 决策为 BUY
+- v1.1 full（with news）：AAPL 决策为 HOLD
+- v1.1 ablation（no news）：AAPL 决策回退为 BUY
+
+上述现象表明：v1.1 的决策确实对 News Context 的存在与否产生条件响应（Conditional Activation），且禁用 news 后可回退到技术面行为。
+
+**补充（Focus Mode）**：
+- 使用 `--min-news-abs-impact 0.8 --max-news-signals 1` 进行 Top1 news 聚焦测试，模型在解释中出现 “Positive earnings impact” 等语义，但未强制复述实体名词；该结果与训练数据中理由风格偏通用的分布一致。
+
+### 19.20 Phase 7 执行计划：2025-12 月度 Simulation / Backtest (2025-12-19)
+
+**状态**：进行中
+
+#### 19.20.1 数据准备（必须项）
+
+**目标**：为 2025-12 的每个交易日生成对应的 `stock_features_YYYY-MM-DD.json`，并确保同日期存在可用的 `signals_YYYY-MM-DD.json`（可为空，但文件名需一致）。
+
+**现状（扫描结果）**：
+- `signals_*.json` 覆盖较全
+- `stock_features_*.json` 需要批量补齐（此前仅存在少量日期样本）
+
+**执行**：批量生成 2025-12 工作日特征文件
+- 基础脚本：`scripts/build_daily_features_universal.py`
+- 输出目录：`data/daily/stock_features_2025-12-*.json`
+
+#### 19.20.2 回测引擎（实现项）
+
+**目标**：实现轻量级回测脚本（信号质量评估），逐日推理并基于真实价格计算 T+5 收益，输出月度报告。
+
+**拟实现脚本**：
+- `scripts/backtest_trader.py`
+
+**核心指标**：
+- Win Rate（按信号方向定义的胜率）
+- Total Return（累计收益）
+- Max Drawdown（最大回撤，若实现账户曲线）
+- News Impact（在有 news 注入的日期子集上，v1.1 相对 v1 的增益）
+
+#### 19.20.3 实验矩阵（对照严谨性）
+
+建议至少包含以下三组策略对照（同一日期范围、同一标的集合）：
+1. v1（tech-only, disable-news）
+2. v1.1（tech+news）
+3. v1.1（disable-news ablation）
+
+后续可扩展：仅在“强新闻日”子集上做分层统计，避免新闻稀疏导致的稀释。
+
+### 19.21 资产治理：模型目录保留与归档策略（2025-12-19）
+
+**目标**：减少工作区噪音与误用风险，明确“当前主线可用模型”与“历史实验封存模型”的边界。
+
+**主线保留（Active）**：
+1. News Tower（3B）
+  - `models/news_final_3b_v1_1_noise_killer_retry2/`（当前推荐默认）
+2. Stock Trader（7B）
+  - `models/trader_stock_v1_tech_only/`
+  - `models/trader_stock_v1_1_tech_plus_news/`
+3. ETF Trader（7B, 25k teacher 蒸馏）
+  - `models/llm_etf_trading_qwen25_7b_rag_final/`
+
+**归档封存（Archived）**：
+- 所有 14B 相关实验目录统一移动到 `models/_archive_14b/`，仅用于历史复现，不再作为默认训练/推理路径。
+- 典型包括：
+  - `models/llm_qwen14b*`
+  - `models/llm_etf_trading_qwen25_14b*`
+  - `models/llm_teacher_etf_*qwen14b*`
+  - `models/llm_qwen14b_lora_c_hybrid/`（Phase 3 时代桥接方案，已被 3B News Tower 主线替代）
+
+**文档同步**：
+- `README.md` 与本工程日志的 Phase 状态与主线模型口径保持一致：以 3B News + 7B Trader 为默认主线，14B 作为历史实验封存。

@@ -14,9 +14,9 @@
 | 2 | Teacher Data Generation (CN/US) | Done |
 | 3 | LLM Fine-tuning (News LoRA) | Done |
 | 4 | Production Pipeline (Daily Automation) | Done |
-| 5 | ETF Trader + RAG + RiskGate | In Progress |
-| 6 | News C Fine-tuning + Dual Tower | Planned |
-| 7 | Multi-Market Expansion | Planned |
+| 5 | ETF Trader + RAG + RiskGate | Done |
+| 6 | Stock Trader v1.1 (Tech + News) + Dual Tower | Done |
+| 7 | Simulation / Backtest (Paper Trading) | In Progress |
 | 8 | RL (Reinforcement Learning) | Future |
 
 ---
@@ -129,27 +129,36 @@ Stock/
 - [x] Health monitoring & fallback (CN RSS → JSON API)
 - [x] Windows Task Scheduler integration
 
-### Phase 5: ETF Trader + RAG + RiskGate (Current)
+### Phase 5: ETF Trader + RAG + RiskGate (Done (ETF line))
 - [x] ETF feature snapshot (`build_daily_etf_features.py`)
 - [x] Teacher distillation dataset (DeepSeek, 25k samples)
 - [x] RAG retrieval (FAISS-based similar history)
 - [x] RiskGate deterministic constraints
 - [x] Trading inference pipeline (`run_trading_inference.py`)
 - [x] CN concept_hype post-filter & denoising
-- [ ] **Model D training (Qwen2.5-7B, in progress)**
-- [ ] Model D validation vs Trading v1
+- [x] Model D training (Qwen2.5-7B)
+- [x] Model D backtest report (see engineering log)
 
-### Phase 6: News C Fine-tuning (Planned)
-- [ ] Accumulate 10,000+ news samples
-- [ ] Teacher labeling with DeepSeek/GPT-4o
-- [ ] Fine-tune Qwen2.5-3B/7B for news classification
-- [ ] Dual-tower architecture (News 3B + Trader 7B)
+### Phase 6: Stock Trader v1.1 (Tech + News) (Done)
+- [x] News Tower 3B LoRA (noise killer) trained and validated
+- [x] Historical signals backfill (`signals_YYYY-MM-DD.json`)
+- [x] Training-set news injection for Stock SFT
+- [x] Stock Trader v1.1 (Qwen2.5-7B LoRA) trained
+- [x] Inference-side stock news injection (A/B controllable)
+- [x] Final Exam (news-conditioning / ablation) validated
 
-### Phase 7: Multi-Market Expansion (Future)
+### Phase 7: Simulation / Backtest (In Progress)
+- [x] 2025-12 stock feature backfill (daily `stock_features_YYYY-MM-DD.json`)
+- [x] Stock signal-quality backtest (LoRA adapter swap on a single base model)
+- [ ] Upgrade to NAV curve backtest (positions/costs/drawdown)
+- [ ] Re-run on horizon=T+5 and stratify by strong-news vs quiet days
+
+### Phase 8: Multi-Market Expansion / RL (Future)
 - [ ] A-share support (CN_Trader LoRA)
 - [ ] Canadian stocks (CA ETFs)
 - [ ] Gold/Commodities (Macro_Gold LoRA)
 - [ ] Funnel filtering (Python → 3B → 7B)
+- [ ] RL/DPO (only after backtest curve is stable)
 
 ---
 
@@ -304,22 +313,34 @@ This will generate:
 - `data/finetune/train.json`
 - `data/finetune/val.json`
 
-### 3) Train (Qwen2.5-14B QLoRA + checkpoints + resume)
+### 3) Train (Recommended: 3B/7B QLoRA)
 
-For 14B on a single RTX 4090, use QLoRA 4-bit + gradient checkpointing:
+Recommended local setup is Qwen2.5-3B (News) + Qwen2.5-7B (Trader) under QLoRA 4-bit.
+
+Note: 14B experiments are treated as legacy and can be archived (see engineering log).
 
 ```bash
-.\venv311\Scripts\python.exe scripts\finetune_llm.py --model Qwen/Qwen2.5-14B-Instruct --data data/finetune/train.json --qlora --grad-ckpt --max-seq-len 1024 --batch-size 1 --grad-acc 16 --lr 1e-4 --epochs 10 --save-steps 20 --save-total-limit 10 --outdir models/llm_qwen14b_overnight --resume auto
+.\venv311\Scripts\python.exe scripts\finetune_llm.py --model Qwen/Qwen2.5-3B-Instruct --data data/finetune/train.json --qlora --grad-ckpt --max-seq-len 1024 --batch-size 1 --grad-acc 16 --lr 1e-4 --epochs 3 --save-steps 50 --save-total-limit 5 --outdir models/news_final_3b_v1
 ```
 
 ### 4) Inference (base vs LoRA)
 
-For 14B + LoRA inference, 4-bit loading is recommended to avoid CPU/disk offloading issues:
+For 3B/7B + LoRA inference, 4-bit loading is recommended to avoid CPU/disk offloading issues:
 
 ```bash
-.\venv311\Scripts\python.exe scripts\infer_llm.py --model Qwen/Qwen2.5-14B-Instruct --task news --load-in-4bit
-.\venv311\Scripts\python.exe scripts\infer_llm.py --model Qwen/Qwen2.5-14B-Instruct --task news --use-lora --lora models\llm_qwen14b_overnight\lora_weights --load-in-4bit
+.\venv311\Scripts\python.exe scripts\infer_llm.py --model Qwen/Qwen2.5-3B-Instruct --task news --load-in-4bit
+.\venv311\Scripts\python.exe scripts\infer_llm.py --model Qwen/Qwen2.5-3B-Instruct --task news --use-lora --lora models\news_final_3b_v1\lora_weights --load-in-4bit
 ```
+
+---
+
+## Stock Trader (Phase 6/7)
+
+This repo includes a Stock Trader pipeline with optional news-context injection.
+
+- Feature generation: `scripts/build_daily_features_universal.py` -> `data/daily/stock_features_YYYY-MM-DD.json`
+- News backfill: `scripts/backfill_news_signals.py` -> `data/daily/signals_YYYY-MM-DD.json`
+- Stock backtest: `scripts/backtest_trader.py` -> `data/backtest/report_*.json`
 
 ### 5) Teacher distillation dataset (DeepSeek, ETF)
 
@@ -385,9 +406,9 @@ MIT License
 | 2 | Teacher 数据生成 (CN/US) | 完成 |
 | 3 | LLM 微调 (News LoRA) | 完成 |
 | 4 | 生产流水线 (日更自动化) | 完成 |
-| 5 | ETF Trader + RAG + RiskGate | 进行中 |
-| 6 | News C 微调 + 双塔架构 | 规划中 |
-| 7 | 全市场多资产扩张 | 规划中 |
+| 5 | ETF Trader + RAG + RiskGate | 完成 |
+| 6 | Stock Trader v1.1（Tech + News）+ 双塔接线 | 完成 |
+| 7 | Simulation / Backtest（Paper Trading） | 进行中 |
 | 8 | RL 强化学习 | 远期 |
 
 ---
@@ -500,27 +521,36 @@ Stock/
 - [x] 健康监控与兜底（CN RSS → JSON API fallback）
 - [x] Windows 任务计划程序集成
 
-### Phase 5: ETF 交易模型 + RAG + RiskGate（当前阶段）
+### Phase 5: ETF 交易模型 + RAG + RiskGate（完成：ETF line）
 - [x] ETF 特征快照（`build_daily_etf_features.py`）
 - [x] Teacher 蒸馏数据集（DeepSeek，25k 样本）
 - [x] RAG 检索（FAISS 相似历史）
 - [x] RiskGate 确定性约束
 - [x] 交易推理流水线（`run_trading_inference.py`）
 - [x] CN concept_hype 后处理与降噪
-- [ ] **Model D 训练中（Qwen2.5-7B）**
-- [ ] Model D 验证 vs Trading v1
+- [x] Model D 训练（Qwen2.5-7B）
+- [x] Model D 回测报告（详见工程日志）
 
-### Phase 6: News C 微调（规划中）
-- [ ] 积累 10,000+ 条新闻数据
-- [ ] DeepSeek/GPT-4o Teacher 打标
-- [ ] 微调 Qwen2.5-3B/7B 用于新闻分类
-- [ ] 双塔架构（News 3B + Trader 7B）
+### Phase 6: Stock Trader v1.1（Tech + News）（完成）
+- [x] News Tower 3B LoRA（noise killer）训练与验收
+- [x] 历史 signals 回放与落盘（`signals_YYYY-MM-DD.json`）
+- [x] Stock SFT 训练集注入 News Context
+- [x] Stock Trader v1.1（Qwen2.5-7B LoRA）训练完成
+- [x] 推理侧 stock 模式 news 注入（支持 A/B 对照）
+- [x] Final Exam（news-conditioning / ablation）验收通过
 
-### Phase 7: 全市场扩张（远期）
+### Phase 7: Simulation / Backtest（进行中）
+- [x] 2025-12 stock_features 批量补齐
+- [x] Stock 回测（信号质量评估器，adapter 轮换）
+- [ ] 升级为 NAV 曲线回测（仓位/费用/回撤）
+- [ ] 对齐 T+5 并按强新闻日/平静日分层评估
+
+### Phase 8: 全市场扩张 / RL（远期）
 - [ ] A股支持（CN_Trader LoRA）
 - [ ] 加股（CA ETFs）
 - [ ] 黄金/大宗商品（Macro_Gold LoRA）
 - [ ] 漏斗筛选（Python → 3B → 7B）
+- [ ] RL/DPO（仅在回测曲线稳定后考虑）
 
 ---
 

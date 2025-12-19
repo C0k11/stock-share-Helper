@@ -187,7 +187,7 @@ class FineTuner:
                     texts,
                     truncation=True,
                     max_length=self.max_seq_length,
-                    padding="max_length"
+                    padding=False
                 )
             
             tokenized_train = train_dataset.map(
