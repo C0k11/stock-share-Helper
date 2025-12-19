@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+import math
 from datetime import datetime, timedelta
 import json
 import re
@@ -630,6 +631,20 @@ def main() -> None:
     parser.add_argument("--lora", dest="adapter", help="Alias of --adapter")
     parser.add_argument("--use-lora", action="store_true")
     parser.add_argument("--tickers", default="", help="Comma-separated tickers for stock integration")
+    parser.add_argument("--universe", default="auto", choices=["auto", "stock", "etf"])
+    parser.add_argument("--use-fast-prompt", action="store_true", default=False)
+    parser.add_argument(
+        "--risk-max-drawdown",
+        type=float,
+        default=0.08,
+        help="Max drawdown limit (e.g. 0.08 for 8%%). If >1, treated as percent points (e.g. 8 for 8%%).",
+    )
+    parser.add_argument(
+        "--risk-vol-limit",
+        type=float,
+        default=0.0,
+        help="Daily volatility limit (e.g. 0.03 for 3%% daily). If 0, uses default gate settings.",
+    )
     parser.add_argument("--risk-watch-market", default="BOTH", help="CN|US|BOTH|NONE")
     parser.add_argument("--risk-watch-top", type=int, default=3)
     parser.add_argument("--max-new-tokens", type=int, default=512)
@@ -666,7 +681,9 @@ def main() -> None:
     daily_dir = Path(args.daily_dir)
 
     tickers = [t.strip().upper() for t in str(args.tickers).split(",") if t.strip()]
-    use_stock = bool(tickers)
+    use_stock = (str(args.universe).lower() == "stock") or (
+        (str(args.universe).lower() == "auto") and bool(tickers)
+    )
 
     date_list: List[str] = []
     if getattr(args, "date_range", None):
@@ -675,7 +692,20 @@ def main() -> None:
         date_list = [str(args.date)]
 
     rag = MarketRAG(data_dir=str(daily_dir))
-    risk_gate = RiskGate()
+    dd_in = float(getattr(args, "risk_max_drawdown", 0.08) or 0.08)
+    dd_limit_pct = -abs(dd_in) * 100.0 if abs(dd_in) <= 1.0 else -abs(dd_in)
+
+    vol_in = float(getattr(args, "risk_vol_limit", 0.0) or 0.0)
+    if vol_in <= 0:
+        vol_trigger_ann_pct = 30.0
+    else:
+        daily_vol = abs(vol_in) if abs(vol_in) <= 1.0 else abs(vol_in) / 100.0
+        vol_trigger_ann_pct = daily_vol * 100.0 * math.sqrt(252.0)
+
+    risk_gate = RiskGate(
+        max_drawdown_limit_pct=float(dd_limit_pct),
+        vol_reduce_trigger_ann_pct=float(vol_trigger_ann_pct),
+    )
 
     if bool(args.moe_mode):
         scalper = str(args.moe_scalper).strip()
@@ -719,26 +749,29 @@ def main() -> None:
 
         missing_tickers: List[str] = []
         if use_stock:
-            stock_map: Dict[str, Dict[str, Any]] = {}
-            if stock_fp.exists():
+            if not stock_fp.exists():
+                items = []
+            else:
                 stock_payload = json.loads(stock_fp.read_text(encoding="utf-8"))
-                for sym, it in iter_feature_items(stock_payload):
-                    stock_map[str(sym).upper()] = it
+                stock_items = iter_feature_items(stock_payload)
+                if tickers:
+                    stock_map = {str(sym).upper(): it for sym, it in stock_items}
+                    etf_payload = load_daily_payload(daily_dir, str(date_str))
+                    etf_map: Dict[str, Dict[str, Any]] = {}
+                    if etf_payload is not None:
+                        for sym, it in iter_feature_items(etf_payload):
+                            etf_map[str(sym).upper()] = it
 
-            etf_payload = load_daily_payload(daily_dir, str(date_str))
-            etf_map: Dict[str, Dict[str, Any]] = {}
-            if etf_payload is not None:
-                for sym, it in iter_feature_items(etf_payload):
-                    etf_map[str(sym).upper()] = it
-
-            items: List[Tuple[str, Dict[str, Any]]] = []
-            for t in tickers:
-                if t in stock_map:
-                    items.append((t, stock_map[t]))
-                elif t in etf_map:
-                    items.append((t, etf_map[t]))
+                    items = []
+                    for t in tickers:
+                        if t in stock_map:
+                            items.append((t, stock_map[t]))
+                        elif t in etf_map:
+                            items.append((t, etf_map[t]))
+                        else:
+                            missing_tickers.append(t)
                 else:
-                    missing_tickers.append(t)
+                    items = stock_items
         else:
             payload = load_daily_payload(daily_dir, str(date_str))
             if payload is None:
@@ -836,7 +869,10 @@ def main() -> None:
                     else:
                         messages = build_stock_messages_fast(str(symbol), str(date_str), etf_item)
                 else:
-                    messages = build_stock_messages(str(symbol), str(date_str), etf_item, stock_news_contexts)
+                    if bool(args.use_fast_prompt):
+                        messages = build_stock_messages_fast(str(symbol), str(date_str), etf_item)
+                    else:
+                        messages = build_stock_messages(str(symbol), str(date_str), etf_item, stock_news_contexts)
             else:
                 messages = build_teacher_messages(
                     symbol=str(symbol),
