@@ -1,9 +1,16 @@
 import argparse
 import json
 import math
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
+
+project_root = Path(__file__).resolve().parents[1]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+from src.strategy.execution import TickerExecutionState
 
 
 def _safe_float(x: Any, default: float = float("nan")) -> float:
@@ -178,20 +185,13 @@ def simulate_nav(
     tickers: List[str],
     decisions: Dict[str, Dict[str, str]],
     price_dfs: Dict[str, Any],
+    executors: Dict[str, TickerExecutionState],
     initial_capital: float,
     trade_dollar: float,
     cost_bps: float,
     close_fallback: bool,
-    hold_policy: str,
-    min_hold_days: int,
-    reverse_confirm_days: int,
 ) -> Tuple[List[DailyNav], List[TradeEvent], Dict[str, Any]]:
     positions: Dict[str, float] = {t: 0.0 for t in tickers}
-    # Completed holding days for the current open position.
-    # - When a position is opened (or flipped), it resets to 0.
-    # - After each simulated day, if still in a position, it increments by 1.
-    hold_days: Dict[str, int] = {t: 0 for t in tickers}
-    reverse_count: Dict[str, int] = {t: 0 for t in tickers}
     cash = float(initial_capital)
 
     nav_rows: List[DailyNav] = []
@@ -224,63 +224,32 @@ def simulate_nav(
 
             sh_old = float(positions.get(t, 0.0))
             dec = str(day_decisions.get(t, "HOLD")).upper()
-
-            cur_side = 0
-            if sh_old > 0:
-                cur_side = 1
-            elif sh_old < 0:
-                cur_side = -1
-
-            desired_side = 0
+            raw_signal = 0
             if dec == "BUY":
-                desired_side = 1
+                raw_signal = 1
             elif dec == "SELL":
-                desired_side = -1
-            else:
-                desired_side = 0
+                raw_signal = -1
 
-            target_sh = sh_old
+            ex = executors.get(t)
+            if ex is None:
+                raise RuntimeError(f"Missing executor for ticker: {t}")
 
-            if dec == "HOLD":
-                if str(hold_policy).lower() == "keep":
-                    target_sh = sh_old
-                else:
-                    target_sh = 0.0
-            elif dec == "BUY":
-                if sh_old <= 0.0:
-                    target_sh = float(trade_dollar) / float(px)
-            elif dec == "SELL":
-                if sh_old >= 0.0:
-                    target_sh = -float(trade_dollar) / float(px)
+            target_pos = int(ex.update_signal(int(raw_signal)))
+            if target_pos not in (-1, 0, 1):
+                target_pos = 0
 
-            # Debounce: enforce a strict minimum holding period.
-            # If already in a position and we haven't held long enough, ignore any change signals.
-            min_hold = max(0, int(min_hold_days))
-            if sh_old != 0.0 and min_hold > 0 and int(hold_days.get(t, 0)) < min_hold:
-                if target_sh != sh_old:
-                    target_sh = sh_old
-                reverse_count[t] = 0
-            else:
-                # Reverse confirmation: avoid flipping on single-day news panic.
-                confirm_n = max(1, int(reverse_confirm_days))
-                if cur_side != 0:
-                    if desired_side == 0 or desired_side == cur_side:
-                        reverse_count[t] = 0
-                    elif desired_side == -cur_side:
-                        reverse_count[t] = int(reverse_count.get(t, 0)) + 1
-                        if reverse_count[t] >= confirm_n:
-                            reverse_count[t] = 0
-                        else:
-                            # Treat as HOLD (ignore reverse) and apply hold-policy
-                            if str(hold_policy).lower() == "keep":
-                                target_sh = sh_old
-                            else:
-                                target_sh = 0.0
-                else:
-                    reverse_count[t] = 0
+            # Determine old position direction
+            old_pos = 0
+            if sh_old > 0:
+                old_pos = 1
+            elif sh_old < 0:
+                old_pos = -1
 
-            if target_sh == sh_old:
+            # Skip if position direction unchanged (avoid spurious trades from price drift)
+            if target_pos == old_pos:
                 continue
+
+            target_sh = 0.0 if target_pos == 0 else (float(target_pos) * float(trade_dollar) / float(px))
 
             delta = float(target_sh - sh_old)
             trade_value = abs(delta) * float(px)
@@ -290,10 +259,6 @@ def simulate_nav(
             cash -= fee
 
             positions[t] = target_sh
-
-            # Reset completed holding days when position changes (entry/exit/flip).
-            hold_days[t] = 0
-            reverse_count[t] = 0
 
             gross_trade_value += trade_value
             trade_rows.append(
@@ -318,14 +283,6 @@ def simulate_nav(
 
         total_value = float(cash + positions_value)
         nav_rows.append(DailyNav(date=day, cash=float(cash), positions_value=float(positions_value), total_value=total_value))
-
-        # End-of-day: advance completed holding days for positions that remain open.
-        for t in tickers:
-            if float(positions.get(t, 0.0)) != 0.0:
-                hold_days[t] = int(hold_days.get(t, 0)) + 1
-            else:
-                hold_days[t] = 0
-                reverse_count[t] = 0
 
         prev_prices = price_today
 
@@ -448,6 +405,17 @@ def main() -> None:
         "strategies": {},
     }
 
+    executors_by_strategy: Dict[str, Dict[str, TickerExecutionState]] = {}
+    for name in model_names:
+        executors_by_strategy[name] = {
+            t: TickerExecutionState(
+                hold_policy=str(args.hold_policy),
+                min_hold_days=int(args.min_hold_days),
+                reverse_confirm_days=int(args.reverse_confirm_days),
+            )
+            for t in tickers
+        }
+
     for name in model_names:
         decisions = _decisions_by_day(strat_trades[name])
 
@@ -456,13 +424,11 @@ def main() -> None:
             tickers=tickers,
             decisions=decisions,
             price_dfs=price_dfs,
+            executors=executors_by_strategy[name],
             initial_capital=float(args.initial_capital),
             trade_dollar=float(args.trade_dollar),
             cost_bps=float(args.cost_bps),
             close_fallback=bool(args.close_fallback),
-            hold_policy=str(args.hold_policy),
-            min_hold_days=int(args.min_hold_days),
-            reverse_confirm_days=int(args.reverse_confirm_days),
         )
 
         nav_path = out_dir / f"{name}_nav.csv"
