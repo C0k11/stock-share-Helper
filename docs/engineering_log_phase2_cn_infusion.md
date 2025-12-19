@@ -1,6 +1,6 @@
 # QuantAI 工程日志
 
-> 本文档记录项目从 Phase 1 到 Phase 10 的完整工程历程，包括问题诊断、技术决策、实现方案、产物清单与未来规划。
+> 本文档记录项目从 Phase 1 到 Phase 11 的完整工程历程，包括问题诊断、技术决策、实现方案、产物清单与未来规划。
 >
 > **安全原则**：任何 API Key/Token 不得写入仓库，只允许通过环境变量或本地 `.env.local`（已在 `.gitignore` 忽略）管理。
 
@@ -20,7 +20,7 @@
 | 8 | Paper Trading Automation | 完成 | 2025-12-19 |
 | 9 | Dashboard（Streamlit Cockpit） | 完成 | 2025-12-19 |
 | 10 | CoT 蒸馏 / Reasoning 升级（Trader v2） | 进行中 | 2025-12 |
-| 11 | Adapter-MoE / Multi-Agent | 远期 | - |
+| 11 | Adapter-MoE / Multi-Agent | 进行中 | 2025-12 |
 | 12 | RL / DPO / GRPO | 远期 | - |
 
 ---
@@ -35,6 +35,8 @@
 - [Phase 6: Stock Trader v1.1（Tech + News）执行记录](#1916-phase-62-里程碑历史-signals-回放backfill与训练集注入injection完成-2025-12-18)
 - [Phase 7: Simulation / Backtest（2025-12）执行计划](#1920-phase-7-执行计划2025-12-月度-simulation--backtest-2025-12-19)
 - [Phase 8: 架构演进路线图](#19-架构演进路线图2024-12-16-记录)
+- [Phase 10: CoT 蒸馏 / Reasoning 升级（Trader v2）](#2025-12-19-phase-10-prototype-cot-蒸馏--reasoning-升级trader-v2)
+- [Phase 11: Adapter-MoE / Multi-Agent](#phase-111-adapter-moe-router-heuristic-rule-based)
 
 ---
 
