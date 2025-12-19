@@ -2063,3 +2063,12 @@ def select_adapter(symbol: str, market: str) -> str:
 **最终决策（Phase 7 Milestone 2 结项）**：
 - 执行层默认策略：`Hold-Policy=Keep`，`Reverse-Confirm-Days=2`
 - 说明：该决策用于将 news alpha 转化为可执行收益，并降低过度交易与回撤风险。
+
+### 19.23 Phase 7 Completion：Execution Logic Modularization（2025-12-19）
+- **Refactoring**：将执行层状态机逻辑从脚本中抽离为可复用模块 `src/strategy/execution.py`（`TickerExecutionState`），用于统一回测与未来模拟盘/实盘执行。
+- **Validation**：通过一致性冒烟测试验证模块化后交易序列与 P0.5 版本等价，避免“回测逻辑 ≠ 实盘逻辑”的执行偏差风险。
+- **Current Best Config**：
+  - `Hold-Policy`：Keep
+  - `Reverse-Confirm-Days`：2
+  - `Min-Hold-Days`：0
+- **Status**：Phase 7 回测阶段收官；受限于数据时效（价格数据只能覆盖到当下可获得范围），更长窗口回测暂停，进入 Phase 8（Paper Trading / Forward Testing）准备。
