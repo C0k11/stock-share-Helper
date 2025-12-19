@@ -277,16 +277,24 @@ def load_replay_buffer(replay_path: Path, max_samples: int = 0, adapt_format: bo
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Build Trader v2 SFT dataset from Teacher CoT")
-    parser.add_argument("--cot", required=True, help="Input CoT JSONL (e.g. cot_mistakes_100_v4.jsonl)")
-    parser.add_argument("--replay", default="", help="Replay buffer JSON for mixing (optional)")
+    parser.add_argument("--cot", required=False, default="", help="Input CoT JSONL (e.g. cot_mistakes_100_v4.jsonl)")
+    parser.add_argument("--cot-data", dest="cot", help="Alias of --cot")
+    parser.add_argument("--replay", required=False, default="", help="Replay buffer JSON for mixing (optional)")
+    parser.add_argument("--replay-data", dest="replay", help="Alias of --replay")
     parser.add_argument("--replay-ratio", type=float, default=0.5, help="Ratio of replay samples to CoT samples")
+    parser.add_argument("--max-replay-samples", type=int, default=0, help="Hard cap for replay samples (0 means use replay-ratio)")
+    parser.add_argument("--out", default="", help="Explicit output train JSON path (overrides out-dir/out-prefix)")
     parser.add_argument("--out-dir", default="data/finetune", help="Output directory")
     parser.add_argument("--out-prefix", default="trader_v2", help="Output file prefix")
     parser.add_argument("--val-ratio", type=float, default=0.2, help="Validation set ratio")
+    parser.add_argument("--val-from-all", action="store_true", help="If set, val split is sampled from all samples, otherwise only from replay")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     args = parser.parse_args()
 
     random.seed(args.seed)
+
+    if not str(args.cot or "").strip():
+        raise SystemExit("--cot/--cot-data is required")
 
     cot_path = Path(args.cot)
     if not cot_path.exists():
@@ -300,25 +308,44 @@ def main() -> None:
     if args.replay:
         replay_path = Path(args.replay)
         if replay_path.exists():
-            max_replay = int(len(cot_samples) * args.replay_ratio)
+            if int(args.max_replay_samples) > 0:
+                max_replay = int(args.max_replay_samples)
+            else:
+                max_replay = int(len(cot_samples) * args.replay_ratio)
             print(f"Loading replay buffer from {replay_path} (max {max_replay})")
             replay_samples = load_replay_buffer(replay_path, max_samples=max_replay)
             print(f"  Replay samples: {len(replay_samples)}")
 
-    all_samples = cot_samples + replay_samples
-    random.shuffle(all_samples)
+    # Default: keep all CoT in train; sample val only from replay.
+    if bool(args.val_from_all):
+        all_samples = cot_samples + replay_samples
+        random.shuffle(all_samples)
+        val_n = int(len(all_samples) * args.val_ratio)
+        val_n = max(1, val_n) if len(all_samples) >= 2 else 0
+        val_samples = all_samples[:val_n]
+        train_samples = all_samples[val_n:]
+    else:
+        val_pool = list(replay_samples)
+        random.shuffle(val_pool)
+        val_n = int((len(cot_samples) + len(replay_samples)) * args.val_ratio)
+        val_n = min(val_n, len(val_pool))
+        val_n = max(1, val_n) if (len(cot_samples) + len(replay_samples)) >= 2 else 0
+        val_samples = val_pool[:val_n]
+        train_samples = cot_samples + val_pool[val_n:]
+        random.shuffle(train_samples)
 
-    val_n = int(len(all_samples) * args.val_ratio)
-    val_n = max(1, val_n) if len(all_samples) >= 2 else 0
-
-    val_samples = all_samples[:val_n]
-    train_samples = all_samples[val_n:]
-
-    out_dir = Path(args.out_dir)
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    train_path = out_dir / f"{args.out_prefix}_train.json"
-    val_path = out_dir / f"{args.out_prefix}_val.json"
+    if str(args.out or "").strip():
+        train_path = Path(str(args.out)).resolve()
+        train_path.parent.mkdir(parents=True, exist_ok=True)
+        if train_path.suffix.lower() in {".json", ".jsonl"}:
+            val_path = train_path.with_name(train_path.stem + "_val" + train_path.suffix)
+        else:
+            val_path = train_path.with_name(train_path.name + "_val.json")
+    else:
+        out_dir = Path(args.out_dir)
+        out_dir.mkdir(parents=True, exist_ok=True)
+        train_path = out_dir / f"{args.out_prefix}_train.json"
+        val_path = out_dir / f"{args.out_prefix}_val.json"
 
     train_path.write_text(json.dumps(train_samples, ensure_ascii=False, indent=2), encoding="utf-8")
     val_path.write_text(json.dumps(val_samples, ensure_ascii=False, indent=2), encoding="utf-8")

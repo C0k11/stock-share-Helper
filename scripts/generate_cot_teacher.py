@@ -51,6 +51,31 @@ Rules:
 """
 
 
+SYSTEM_PROMPT_NEWS_CASE = """\
+You are a senior trading coach.
+Given a trading scenario (which may be a successful or failed trade), the news context, and technical features,
+provide the OPTIMAL decision and a concise reasoning trace.
+
+Output STRICT JSON only (no markdown, no extra text):
+{
+  "decision": "BUY" | "SELL" | "HOLD",
+  "analysis": "<short summary, max 30 words>",
+  "reasoning_trace": [
+    "1. <first key insight>",
+    "2. <second key insight>",
+    "3. <third key insight>"
+  ]
+}
+
+Rules:
+- reasoning_trace must have exactly 3 bullet points
+- Each bullet point max 25 words
+- decision must be BUY, SELL, or HOLD
+- If News Context is provided, reasoning_trace MUST explicitly reference at least one provided news title (verbatim or a distinctive phrase)
+- Do NOT output anything except the JSON object
+"""
+
+
 def _load_env_local(repo_root: Path) -> None:
     _ENV_LOCAL_KEYS.clear()
     fp = repo_root / ".env.local"
@@ -119,7 +144,7 @@ def _load_env_local(repo_root: Path) -> None:
             os.environ[k_norm] = v
 
 
-def _build_user_prompt(rec: Dict[str, Any]) -> str:
+def _build_user_prompt(rec: Dict[str, Any], *, mode: str) -> str:
     date = rec.get("date", "?")
     ticker = rec.get("ticker", "?")
     orig_decision = rec.get("decision", "?")
@@ -147,6 +172,16 @@ def _build_user_prompt(rec: Dict[str, Any]) -> str:
     regime = features.get("market_regime", {})
     regime_str = f"{regime.get('regime', '?')} (score={regime.get('score', '?')})" if regime else "N/A"
 
+    mode_norm = str(mode or "").strip().lower()
+    suffix = ""
+    if mode_norm == "mistake":
+        suffix = (
+            f"\nBased on the above, the original {orig_decision} was WRONG.\n"
+            "Provide the CORRECT decision and reasoning in STRICT JSON format.\n"
+        )
+    else:
+        suffix = "\nProvide the OPTIMAL decision and reasoning in STRICT JSON format.\n"
+
     return f"""\
 Date: {date}
 Ticker: {ticker}
@@ -161,9 +196,7 @@ Technical Snapshot:
 {tech_block}
 
 Market Regime: {regime_str}
-
-Based on the above, the original {orig_decision} was WRONG.
-Provide the CORRECT decision and reasoning in STRICT JSON format.
+{suffix}
 """
 
 
@@ -285,6 +318,7 @@ def _call_api(
     model: str,
     user_prompt: str,
     json_mode: bool,
+    system_prompt: str,
     max_retries: int = 3,
     timeout: float = 60.0,
 ) -> Optional[Dict[str, Any]]:
@@ -296,7 +330,7 @@ def _call_api(
                 api_key=api_key,
                 model=model,
                 messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
                 ],
                 temperature=0.0 if "reasoner" in str(model).lower() else 0.3,
@@ -318,6 +352,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Generate CoT corrections using DeepSeek teacher")
     p.add_argument("--in", dest="input", required=True, help="Input JSONL (mistakes)")
     p.add_argument("--out", required=True, help="Output JSONL (with CoT)")
+    p.add_argument("--mode", default="mistake", choices=["mistake", "news_case"])
     p.add_argument("--model", default=None, help="Model name (overrides TEACHER_MODEL)")
     p.add_argument("--fallback-model", default="deepseek-chat")
     p.add_argument("--json-mode", action="store_true")
@@ -416,13 +451,16 @@ def main() -> None:
 
             print(f"[{i+1}/{len(records)}] {rec.get('date')} {rec.get('ticker')} ...")
 
-            user_prompt = _build_user_prompt(rec)
+            mode_norm = str(args.mode or "").strip().lower()
+            system_prompt = SYSTEM_PROMPT if mode_norm == "mistake" else SYSTEM_PROMPT_NEWS_CASE
+            user_prompt = _build_user_prompt(rec, mode=str(args.mode))
             result = _call_api(
                 base_url=base_url,
                 api_key=api_key,
                 model=args.model,
                 user_prompt=user_prompt,
                 json_mode=bool(args.json_mode),
+                system_prompt=system_prompt,
                 max_retries=args.max_retries,
                 timeout=args.timeout,
             )
@@ -434,6 +472,7 @@ def main() -> None:
                     model=str(args.fallback_model).strip(),
                     user_prompt=user_prompt,
                     json_mode=bool(args.json_mode),
+                    system_prompt=system_prompt,
                     max_retries=max(1, int(args.max_retries)),
                     timeout=args.timeout,
                 )

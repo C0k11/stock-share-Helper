@@ -272,6 +272,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Sample worst mistakes under strong-news days for CoT distillation")
     p.add_argument("--report", required=True)
     p.add_argument("--out", required=True)
+    p.add_argument("--mode", default="mistake_only", choices=["mistake_only", "all_news"])
     p.add_argument("--strategy", default="v1_1_news")
     p.add_argument("--top-k", type=int, default=100)
     p.add_argument("--min-abs-move", type=float, default=0.01)
@@ -318,8 +319,9 @@ def main() -> None:
         if fwd is None:
             continue
 
-        if not _is_wrong(decision, float(fwd), float(args.min_abs_move)):
-            continue
+        if str(args.mode) == "mistake_only":
+            if not _is_wrong(decision, float(fwd), float(args.min_abs_move)):
+                continue
 
         if date_str not in day_cache:
             sigs = _load_signals(daily_dir, date_str)
@@ -334,9 +336,12 @@ def main() -> None:
         if bool(args.require_ticker_news) and not ticker_sigs:
             continue
 
-        score = _loss_score(decision, float(fwd))
-        if score <= 0:
-            continue
+        if str(args.mode) == "mistake_only":
+            score = _loss_score(decision, float(fwd))
+            if score <= 0:
+                continue
+        else:
+            score = abs(float(fwd))
 
         parsed = tr.get("parsed") if isinstance(tr.get("parsed"), dict) else {}
         feat = _load_stock_features(daily_dir, date_str, ticker)
@@ -346,6 +351,7 @@ def main() -> None:
         rec = {
             "date": date_str,
             "ticker": ticker,
+            "mode": str(args.mode),
             "strategy": str(args.strategy),
             "decision": decision,
             "analysis": parsed.get("analysis", ""),
@@ -355,15 +361,15 @@ def main() -> None:
             "news_join_mode": join_mode,
             "features": feat,
         }
-        picked.append((float(score), rec))
+        picked.append((float(score), float(day_score), rec))
 
-    picked.sort(key=lambda x: x[0], reverse=True)
+    picked.sort(key=lambda x: (x[0], x[1]), reverse=True)
     topk = picked[: max(0, int(args.top_k))]
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     with open(out_path, "w", encoding="utf-8") as f:
-        for _score, rec in topk:
+        for _score, _day_score, rec in topk:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
     print(
@@ -371,6 +377,7 @@ def main() -> None:
             {
                 "report": str(report_path),
                 "strategy": str(args.strategy),
+                "mode": str(args.mode),
                 "trades_total": len(trades),
                 "picked": len(picked),
                 "written": len(topk),

@@ -33,6 +33,7 @@ Response Format (STRICT JSON ONLY, NO MARKDOWN, NO PROSE):
 Rules:
 - reasoning_trace must contain exactly 3 short bullet points
 - each bullet must be <= 25 words
+- if any news context is provided, at least one bullet must explicitly cite it by quoting a short phrase from the news title
 - if provided news context is irrelevant, explicitly say so in the trace
 """
 
@@ -49,6 +50,73 @@ def _to_pct(x: Any) -> float:
     if abs(v) <= 2.5:
         return v * 100.0
     return v
+
+
+def _ticker_aliases(symbol: str) -> List[str]:
+    sym = str(symbol or "").strip().upper()
+    if not sym:
+        return []
+
+    aliases = [sym]
+    common = {
+        "TSLA": ["TESLA"],
+        "AAPL": ["APPLE"],
+        "MSFT": ["MICROSOFT"],
+        "AMZN": ["AMAZON"],
+        "NVDA": ["NVIDIA"],
+        "META": ["META", "FACEBOOK"],
+        "NFLX": ["NETFLIX"],
+        "GOOG": ["GOOGLE", "ALPHABET"],
+        "GOOGL": ["GOOGLE", "ALPHABET"],
+    }
+    for a in common.get(sym, []):
+        aliases.append(str(a).strip().upper())
+
+    out: List[str] = []
+    seen = set()
+    for a in aliases:
+        a2 = str(a or "").strip().upper()
+        if not a2:
+            continue
+        if a2 in seen:
+            continue
+        seen.add(a2)
+        out.append(a2)
+    return out
+
+
+def _title_mentions_ticker(title: str, symbol: str) -> bool:
+    t = str(title or "").strip()
+    if not t:
+        return False
+    t_up = t.upper()
+    for a in _ticker_aliases(symbol):
+        if not a:
+            continue
+        if re.search(rf"\b{re.escape(a)}\b", t_up):
+            return True
+    return False
+
+
+def build_raw_headline_context(it: Dict[str, Any]) -> Optional[str]:
+    title = str(it.get("title") or "").strip()
+    if not title:
+        return None
+
+    source = str(it.get("source") or "").strip()
+    url = str(it.get("url") or "").strip()
+    published_at = str(it.get("published_at") or "").strip()
+
+    lines = []
+    lines.append("Ticker News Headline (raw):")
+    if source:
+        lines.append(f"Source: {source}")
+    if published_at:
+        lines.append(f"PublishedAt: {published_at}")
+    lines.append(f"Title: {title}")
+    if url:
+        lines.append(f"URL: {url}")
+    return "\n".join(lines)
 
 
 def extract_features(etf_item: Dict[str, Any]) -> Dict[str, Any]:
@@ -155,6 +223,7 @@ def load_daily_news_contexts(
     signals_path: str,
     min_abs_impact: float,
     max_signals: int,
+    ticker: str = "",
 ) -> List[str]:
     fp = Path(signals_path) if str(signals_path or "").strip() else (daily_dir / f"signals_{date_str}.json")
     if not fp.exists():
@@ -172,18 +241,29 @@ def load_daily_news_contexts(
     for it in items:
         if not isinstance(it, dict):
             continue
-        if not it.get("parse_ok"):
-            continue
+
+        title = str(it.get("title") or "").strip()
+        parse_ok = bool(it.get("parse_ok"))
         sig = it.get("signal") if isinstance(it.get("signal"), dict) else None
-        if sig is None:
-            continue
-        impact = _to_float(sig.get("impact_equity"))
-        if abs(impact) < float(min_abs_impact):
-            continue
-        ctx = build_news_context_from_signal_item(it)
-        if not ctx:
-            continue
-        candidates.append((abs(impact), ctx))
+
+        # Ticker filter: only keep items whose title mentions ticker (or known aliases).
+        if str(ticker or "").strip():
+            if not _title_mentions_ticker(title, str(ticker)):
+                continue
+
+        if parse_ok and sig is not None:
+            impact = _to_float(sig.get("impact_equity"))
+            if abs(impact) < float(min_abs_impact):
+                continue
+            ctx = build_news_context_from_signal_item(it)
+            if not ctx:
+                continue
+            candidates.append((abs(impact), ctx))
+        else:
+            ctx = build_raw_headline_context(it)
+            if not ctx:
+                continue
+            candidates.append((float(min_abs_impact), ctx))
 
     if not candidates:
         return []
@@ -207,29 +287,43 @@ def build_stock_messages(symbol: str, date_str: str, feats: Dict[str, Any], news
     def gv(d: Dict[str, Any], k: str, default: Any = "") -> Any:
         return d.get(k, default) if isinstance(d, dict) else default
 
-    user = (
-        f"Ticker: {symbol}\n"
-        f"Date: {date_str}\n"
-        f"Close: {gv(tech, 'close', '')}\n"
-        f"Price vs MA20: {gv(tech, 'price_vs_ma20', '')}\n"
-        f"Price vs MA200: {gv(tech, 'price_vs_ma200', '')}\n"
-        f"Trend alignment: {gv(tech, 'trend_alignment', '')}\n"
-        f"Breakout 20d high: {gv(tech, 'breakout_20d_high', '')}\n"
-        f"Breakdown 20d low: {gv(tech, 'breakdown_20d_low', '')}\n"
-        f"Return 5d: {gv(tech, 'return_5d', '')}\n"
-        f"Return 21d: {gv(tech, 'return_21d', '')}\n"
-        f"Return 63d: {gv(tech, 'return_63d', '')}\n"
-        f"Volatility 20d: {gv(tech, 'volatility_20d', '')}\n"
-        f"Volume ratio: {gv(tech, 'vol_ratio', '')}\n"
-        f"Drawdown: {gv(tech, 'drawdown', '')}\n"
-        f"Max drawdown 20d: {gv(tech, 'max_drawdown_20d', '')}\n"
-        f"Max drawdown 60d: {gv(tech, 'max_drawdown_60d', '')}\n"
-        f"Composite signal: {gv(sig, 'composite', '')}\n\n"
-        "Decide BUY/SELL/HOLD for the next 5 days."
+    lines: List[str] = []
+    lines.append(f"Ticker: {symbol}")
+    lines.append(f"Date: {date_str}")
+    if news_contexts:
+        lines.extend([""])
+        lines.extend(news_contexts)
+        lines.extend([""])
+    lines.extend(
+        [
+            f"Close: {gv(tech, 'close', '')}",
+            f"Price vs MA20: {gv(tech, 'price_vs_ma20', '')}",
+            f"Price vs MA200: {gv(tech, 'price_vs_ma200', '')}",
+            f"Trend alignment: {gv(tech, 'trend_alignment', '')}",
+            f"Breakout 20d high: {gv(tech, 'breakout_20d_high', '')}",
+            f"Breakdown 20d low: {gv(tech, 'breakdown_20d_low', '')}",
+            f"Return 5d: {gv(tech, 'return_5d', '')}",
+            f"Return 21d: {gv(tech, 'return_21d', '')}",
+            f"Return 63d: {gv(tech, 'return_63d', '')}",
+            f"Volatility 20d: {gv(tech, 'volatility_20d', '')}",
+            f"Volume ratio: {gv(tech, 'vol_ratio', '')}",
+            f"Drawdown: {gv(tech, 'drawdown', '')}",
+            f"Max drawdown 20d: {gv(tech, 'max_drawdown_20d', '')}",
+            f"Max drawdown 60d: {gv(tech, 'max_drawdown_60d', '')}",
+            f"Composite signal: {gv(sig, 'composite', '')}",
+            "",
+            "Decide BUY/SELL/HOLD for the next 5 days.",
+        ]
     )
 
     if news_contexts:
-        user = prefix_news_contexts(user, news_contexts)
+        lines.extend(
+            [
+                "",
+                "Constraint: You MUST include a short quoted phrase copied from a provided news 'Title:' line in at least one reasoning_trace bullet.",
+            ]
+        )
+    user = "\n".join(lines)
 
     return [
         {"role": "system", "content": SYSTEM_PROMPT_STOCK_STRICT_JSON},
@@ -452,16 +546,6 @@ def main() -> None:
 
     news_signals = extract_news_signals(risk_watch)
 
-    stock_news_contexts: List[str] = []
-    if use_stock and (not bool(args.disable_news)):
-        stock_news_contexts = load_daily_news_contexts(
-            daily_dir=daily_dir,
-            date_str=str(args.date),
-            signals_path=str(args.signals_path),
-            min_abs_impact=float(args.min_news_abs_impact),
-            max_signals=int(args.max_news_signals),
-        )
-
     for symbol, etf_item in items:
         feats = extract_features(etf_item)
 
@@ -478,6 +562,16 @@ def main() -> None:
             risk_trace = []
 
         if use_stock:
+            stock_news_contexts: List[str] = []
+            if not bool(args.disable_news):
+                stock_news_contexts = load_daily_news_contexts(
+                    daily_dir=daily_dir,
+                    date_str=str(args.date),
+                    signals_path=str(args.signals_path),
+                    min_abs_impact=float(args.min_news_abs_impact),
+                    max_signals=int(args.max_news_signals),
+                    ticker=str(symbol),
+                )
             messages = build_stock_messages(str(symbol), str(args.date), etf_item, stock_news_contexts)
         else:
             messages = build_teacher_messages(
