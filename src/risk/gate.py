@@ -2,10 +2,15 @@ import numpy as np
 
 
 class RiskGate:
-    def __init__(self):
-        self.MAX_DRAWDOWN_LIMIT = -8.0
-        self.MAX_POS_LIMIT = 0.5
-        self.VOL_REDUCE_TRIGGER = 30.0
+    def __init__(
+        self,
+        max_drawdown_limit_pct: float = -8.0,
+        vol_reduce_trigger_ann_pct: float = 30.0,
+        max_pos_limit: float = 0.5,
+    ):
+        self.MAX_DRAWDOWN_LIMIT = float(max_drawdown_limit_pct)
+        self.MAX_POS_LIMIT = float(max_pos_limit)
+        self.VOL_REDUCE_TRIGGER = float(vol_reduce_trigger_ann_pct)
 
         self.PANIC_EVENTS = [
             "regulation_crackdown",
