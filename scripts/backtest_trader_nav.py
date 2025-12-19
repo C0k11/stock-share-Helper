@@ -182,8 +182,16 @@ def simulate_nav(
     trade_dollar: float,
     cost_bps: float,
     close_fallback: bool,
+    hold_policy: str,
+    min_hold_days: int,
+    reverse_confirm_days: int,
 ) -> Tuple[List[DailyNav], List[TradeEvent], Dict[str, Any]]:
     positions: Dict[str, float] = {t: 0.0 for t in tickers}
+    # Completed holding days for the current open position.
+    # - When a position is opened (or flipped), it resets to 0.
+    # - After each simulated day, if still in a position, it increments by 1.
+    hold_days: Dict[str, int] = {t: 0 for t in tickers}
+    reverse_count: Dict[str, int] = {t: 0 for t in tickers}
     cash = float(initial_capital)
 
     nav_rows: List[DailyNav] = []
@@ -217,16 +225,59 @@ def simulate_nav(
             sh_old = float(positions.get(t, 0.0))
             dec = str(day_decisions.get(t, "HOLD")).upper()
 
+            cur_side = 0
+            if sh_old > 0:
+                cur_side = 1
+            elif sh_old < 0:
+                cur_side = -1
+
+            desired_side = 0
+            if dec == "BUY":
+                desired_side = 1
+            elif dec == "SELL":
+                desired_side = -1
+            else:
+                desired_side = 0
+
             target_sh = sh_old
 
             if dec == "HOLD":
-                target_sh = 0.0
+                if str(hold_policy).lower() == "keep":
+                    target_sh = sh_old
+                else:
+                    target_sh = 0.0
             elif dec == "BUY":
                 if sh_old <= 0.0:
                     target_sh = float(trade_dollar) / float(px)
             elif dec == "SELL":
                 if sh_old >= 0.0:
                     target_sh = -float(trade_dollar) / float(px)
+
+            # Debounce: enforce a strict minimum holding period.
+            # If already in a position and we haven't held long enough, ignore any change signals.
+            min_hold = max(0, int(min_hold_days))
+            if sh_old != 0.0 and min_hold > 0 and int(hold_days.get(t, 0)) < min_hold:
+                if target_sh != sh_old:
+                    target_sh = sh_old
+                reverse_count[t] = 0
+            else:
+                # Reverse confirmation: avoid flipping on single-day news panic.
+                confirm_n = max(1, int(reverse_confirm_days))
+                if cur_side != 0:
+                    if desired_side == 0 or desired_side == cur_side:
+                        reverse_count[t] = 0
+                    elif desired_side == -cur_side:
+                        reverse_count[t] = int(reverse_count.get(t, 0)) + 1
+                        if reverse_count[t] >= confirm_n:
+                            reverse_count[t] = 0
+                        else:
+                            # Treat as HOLD (ignore reverse) and apply hold-policy
+                            if str(hold_policy).lower() == "keep":
+                                target_sh = sh_old
+                            else:
+                                target_sh = 0.0
+                else:
+                    reverse_count[t] = 0
 
             if target_sh == sh_old:
                 continue
@@ -239,6 +290,10 @@ def simulate_nav(
             cash -= fee
 
             positions[t] = target_sh
+
+            # Reset completed holding days when position changes (entry/exit/flip).
+            hold_days[t] = 0
+            reverse_count[t] = 0
 
             gross_trade_value += trade_value
             trade_rows.append(
@@ -263,6 +318,14 @@ def simulate_nav(
 
         total_value = float(cash + positions_value)
         nav_rows.append(DailyNav(date=day, cash=float(cash), positions_value=float(positions_value), total_value=total_value))
+
+        # End-of-day: advance completed holding days for positions that remain open.
+        for t in tickers:
+            if float(positions.get(t, 0.0)) != 0.0:
+                hold_days[t] = int(hold_days.get(t, 0)) + 1
+            else:
+                hold_days[t] = 0
+                reverse_count[t] = 0
 
         prev_prices = price_today
 
@@ -317,6 +380,10 @@ def main() -> None:
     p.add_argument("--initial-capital", type=float, default=100000.0)
     p.add_argument("--trade-dollar", type=float, default=10000.0)
     p.add_argument("--cost-bps", type=float, default=10.0)
+
+    p.add_argument("--hold-policy", choices=["flat", "keep"], default="flat")
+    p.add_argument("--min-hold-days", type=int, default=0)
+    p.add_argument("--reverse-confirm-days", type=int, default=1)
 
     p.add_argument("--raw-dir", default="data/raw")
     p.add_argument("--close-fallback", action="store_true", default=True)
@@ -375,6 +442,9 @@ def main() -> None:
         "trade_dollar": float(args.trade_dollar),
         "cost_bps": float(args.cost_bps),
         "close_fallback": bool(args.close_fallback),
+        "hold_policy": str(args.hold_policy),
+        "min_hold_days": int(args.min_hold_days),
+        "reverse_confirm_days": int(args.reverse_confirm_days),
         "strategies": {},
     }
 
@@ -390,6 +460,9 @@ def main() -> None:
             trade_dollar=float(args.trade_dollar),
             cost_bps=float(args.cost_bps),
             close_fallback=bool(args.close_fallback),
+            hold_policy=str(args.hold_policy),
+            min_hold_days=int(args.min_hold_days),
+            reverse_confirm_days=int(args.reverse_confirm_days),
         )
 
         nav_path = out_dir / f"{name}_nav.csv"

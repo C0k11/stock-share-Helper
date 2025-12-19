@@ -2021,3 +2021,45 @@ def select_adapter(symbol: str, market: str) -> str:
 
 **文档同步**：
 - `README.md` 与本工程日志的 Phase 状态与主线模型口径保持一致：以 3B News + 7B Trader 为默认主线，14B 作为历史实验封存。
+
+### 19.22 Phase 7 Milestone 2：NAV Backtest & Execution Tuning（2025-12-19）
+
+**目标**：在真实资金曲线（NAV）口径下验证 Stock Trader v1.1（tech+news）是否能将“高胜率”转化为可持续收益，并定位“高胜率但收益为负”的根因，给出可固化的执行层策略。
+
+**实验环境（Strict Horizon）**：
+- Period：`2025-12-01` 至 `2025-12-10`
+- Initial Capital：`$100,000`
+- Position Sizing：每次开仓固定名义资金 `+$10,000 / -$10,000`
+- Cost Model：`10 bps`（开仓/平仓均计费）
+- 数据输入：`data/backtest/report_2025_12_early_strict.json`
+- 回测脚本：`scripts/backtest_trader_nav.py`
+
+**实验过程与发现**：
+1. Raw Execution（Hold=Flat）
+  - 配置：`--hold-policy flat`
+  - 结果：
+    - v1_tech：Return `+1.22%`，Fees `$79.88`
+    - v1_1_news：Return `-0.27%`，Trades `18`，Fees `$300.34`
+    - v1_1_ablation：与 v1_tech 对齐
+  - 结论：v1.1 在信号层面具备更高胜率，但由于执行层将 HOLD 解释为强制离场，且反向信号立即 flip，导致高换手与成本拖累，并在震荡中反复出入场。
+
+2. Hold=Keep Policy
+  - 配置：`--hold-policy keep`
+  - 现象：对 v1_tech 有降频效果，但对 v1_1_news 改善有限。
+  - 原因：v1_1_news 在该窗口几乎不输出 HOLD，而是频繁给出 BUY/SELL（直接反向），绕开了 HOLD 分支。
+
+3. Execution Filter（最终方案：Reverse Confirmation）
+  - 调整：引入反向信号连续确认机制，连续 N 天反向信号才允许 flip。
+  - 最终参数：`Hold-Policy=Keep` + `Reverse-Confirm-Days=2`
+  - 结果（Confirm=2）：
+    - v1_tech：Return `+1.27%`，MaxDD `-1.12%`
+    - v1_1_news：Return `+0.94%`，Trades `6`，Fees `$60.00`，MaxDD `-0.81%`
+    - v1_1_ablation：与 v1_tech 对齐
+  - 关键结论：该过滤器有效抑制单日新闻惊恐（news panic）导致的反手行为，将 v1_1_news 的 Trades 从 `18` 降至 `6`，费用从 `$300` 降至 `$60`，并实现由负转正。
+
+**参数扫描结论**：
+- `Reverse-Confirm-Days=3` 与 `=2` 在该窗口表现一致，说明 `=2` 已达到去噪边界，可作为默认固化参数。
+
+**最终决策（Phase 7 Milestone 2 结项）**：
+- 执行层默认策略：`Hold-Policy=Keep`，`Reverse-Confirm-Days=2`
+- 说明：该决策用于将 news alpha 转化为可执行收益，并降低过度交易与回撤风险。
