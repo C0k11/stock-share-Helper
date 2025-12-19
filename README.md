@@ -19,7 +19,9 @@
 | 7 | Backtest & Execution | Done | NAV curve backtest + `Hold=Keep` + `Confirm=2` execution filter.
 | 8 | Paper Trading | Done | Rolling daily simulation with state persistence + RiskGate CLEAR.
 | 9 | Dashboard | Done | Streamlit cockpit for NAV, orders, and risk monitoring.
-| 10 | RL (Reinforcement Learning) | Future | Only after longer-horizon backtest is stable.
+| 10 | CoT Distillation (Reasoning, Trader v2) | In Progress | Mistake book + teacher reasoning_trace for explainable trading.
+| 11 | Adapter-MoE / Multi-Agent | Future | LoRA experts with a lightweight router.
+| 12 | RL (DPO/GRPO) | Future | Only after longer-horizon backtest is stable.
 
 ---
 
@@ -159,8 +161,40 @@ Stock/
 - [ ] A-share support (CN_Trader LoRA)
 - [ ] Canadian stocks (CA ETFs)
 - [ ] Gold/Commodities (Macro_Gold LoRA)
-- [ ] Funnel filtering (Python → 3B → 7B)
-- [ ] RL/DPO (only after backtest curve is stable)
+
+### Phase 10: CoT Distillation (Reasoning, Trader v2)
+- [x] Generate mistake book from backtest reports (PoC)
+- [x] Teacher reasoning generation (strict JSON)
+- [ ] Improve ticker-news relevance via subject_assets attribution
+- [ ] Fine-tune Trader v2 with reasoning_trace and evaluate vs v1.1
+
+#### Phase 10 Commands (Prototype)
+
+Environment variables (keep secrets out of git):
+
+```bash
+TEACHER_API_KEY=sk-...
+TEACHER_BASE_URL=https://api.deepseek.com
+TEACHER_MODEL=deepseek-reasoner
+```
+
+1) Backfill ticker attribution into daily signals:
+
+```powershell
+.\venv311\Scripts\python.exe scripts\backfill_signal_assets.py --report data\backtest\report_2025_12_extended.json --strategy v1_1_news --overwrite
+```
+
+2) Sample ticker-specific mistakes:
+
+```powershell
+.\venv311\Scripts\python.exe scripts\sample_mistakes.py --report data\backtest\report_2025_12_extended.json --out data\finetune\mistakes_100_v3.jsonl --strategy v1_1_news --top-k 100 --min-abs-move 0.003 --news-score-threshold 0.0 --news-topk 3
+```
+
+3) Generate teacher reasoning_trace dataset:
+
+```powershell
+.\venv311\Scripts\python.exe scripts\generate_cot_teacher.py --in data\finetune\mistakes_100_v3.jsonl --out data\finetune\cot_mistakes_100_v3.jsonl --model deepseek-reasoner --delay 1.0
+```
 
 ---
 
@@ -437,7 +471,9 @@ MIT License
 | 7 | 回测与执行层调优 | 完成 | NAV 回测 + `Hold=Keep` + `Confirm=2` 防抖。
 | 8 | 模拟盘（Paper Trading） | 完成 | 滚动模拟 + 状态持久化 + RiskGate CLEAR。
 | 9 | 监控看板（Dashboard） | 完成 | Streamlit 驾驶舱：NAV/订单/风险。
-| 10 | RL 强化学习 | 远期 | 仅在更长窗口回测稳定后考虑。
+| 10 | CoT 蒸馏 / 推理升级（Trader v2） | 进行中 | 错题本 + Teacher 推理摘要 reasoning_trace。
+| 11 | Adapter-MoE / Multi-Agent | 远期 | 多个 LoRA 专家 + 轻量 Router。
+| 12 | RL（DPO/GRPO） | 远期 | 仅在更长窗口回测稳定后考虑。
 
 ---
 
@@ -577,8 +613,40 @@ Stock/
 - [ ] A股支持（CN_Trader LoRA）
 - [ ] 加股（CA ETFs）
 - [ ] 黄金/大宗商品（Macro_Gold LoRA）
-- [ ] 漏斗筛选（Python → 3B → 7B）
-- [ ] RL/DPO（仅在回测曲线稳定后考虑）
+
+### Phase 10: CoT 蒸馏 / 推理升级（Trader v2）
+- [x] 从回测报告生成错题本（PoC）
+- [x] Teacher 推理摘要生成（Strict JSON）
+- [ ] 通过 subject_assets 做 ticker-news 相关性过滤
+- [ ] 基于 reasoning_trace 微调 Trader v2，并与 v1.1 做对照评估
+
+#### Phase 10 命令（原型）
+
+环境变量（密钥不入库）：
+
+```bash
+TEACHER_API_KEY=sk-...
+TEACHER_BASE_URL=https://api.deepseek.com
+TEACHER_MODEL=deepseek-reasoner
+```
+
+1) 为 daily signals 补齐 subject_assets（ticker 归因）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\backfill_signal_assets.py --report data\backtest\report_2025_12_extended.json --strategy v1_1_news --overwrite
+```
+
+2) 采样 ticker 专属新闻错题：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\sample_mistakes.py --report data\backtest\report_2025_12_extended.json --out data\finetune\mistakes_100_v3.jsonl --strategy v1_1_news --top-k 100 --min-abs-move 0.003 --news-score-threshold 0.0 --news-topk 3
+```
+
+3) 生成 Teacher 推理摘要数据集：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\generate_cot_teacher.py --in data\finetune\mistakes_100_v3.jsonl --out data\finetune\cot_mistakes_100_v3.jsonl --model deepseek-reasoner --delay 1.0
+```
 
 ---
 
