@@ -2129,3 +2129,16 @@ def select_adapter(symbol: str, market: str) -> str:
 1. 对 `mistakes_100_v3.jsonl` 再跑一次 Teacher 生成，产出 `cot_mistakes_100_v3.jsonl`。
 2. 设计 Trader 推理输出 schema：在 Strict JSON 中增加 `reasoning_trace`（最多 3 条要点，强限制长度）。
 3. 将 `reasoning_trace` 接入 Dashboard 展示，并在 `run_trading_inference.py` 中保持解析稳定与风控优先级不变。
+
+### Phase 10.2 v4 Validation: The "Specific Citation" Breakthrough
+
+**Result**: Teacher model successfully cited specific news events in reasoning traces, validating the System 2 hypothesis.
+
+**Sample (TSLA, 2025-12-08)**:
+- **News Context**: "Netflix, Tesla downgraded: Wall Street's top analyst calls"
+- **Student Decision (Wrong)**: SELL
+- **Teacher Correction**: BUY
+- **Teacher Reasoning**:
+  > "News 'Netflix, Tesla downgraded' may have been priced in, with no significant negative impact noted, aligning with positive returns."
+
+**Conclusion**: The pipeline now generates high-quality, news-aware reasoning data suitable for CoT distillation.

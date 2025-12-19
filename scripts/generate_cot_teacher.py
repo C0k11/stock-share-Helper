@@ -46,6 +46,7 @@ Rules:
 - reasoning_trace must have exactly 3 bullet points
 - Each bullet point max 25 words
 - decision must be BUY, SELL, or HOLD
+- If News Context is provided, reasoning_trace MUST explicitly reference at least one provided news title (verbatim or a distinctive phrase)
 - Do NOT output anything except the JSON object
 """
 
@@ -322,6 +323,7 @@ def main() -> None:
     p.add_argument("--json-mode", action="store_true")
     p.add_argument("--no-json-mode", dest="json_mode", action="store_false")
     p.set_defaults(json_mode=True)
+    p.add_argument("--overwrite", action="store_true")
     p.add_argument("--max-retries", type=int, default=3)
     p.add_argument("--timeout", type=float, default=60.0)
     p.add_argument("--delay", type=float, default=1.0, help="Delay between requests (rate limit)")
@@ -385,7 +387,7 @@ def main() -> None:
 
     done_keys: set = set()
     existing: List[Dict[str, Any]] = []
-    if out_path.exists():
+    if out_path.exists() and (not bool(args.overwrite)):
         with open(out_path, "r", encoding="utf-8") as f:
             for line in f:
                 line = line.strip()
@@ -395,6 +397,11 @@ def main() -> None:
                     key = (obj.get("date"), obj.get("ticker"))
                     done_keys.add(key)
         print(f"Resuming: {len(done_keys)} already processed")
+    elif out_path.exists() and bool(args.overwrite):
+        try:
+            out_path.write_text("", encoding="utf-8")
+        except Exception:
+            pass
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
