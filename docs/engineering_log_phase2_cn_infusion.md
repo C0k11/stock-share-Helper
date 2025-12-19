@@ -2219,3 +2219,45 @@ def select_adapter(symbol: str, market: str) -> str:
 **Quick A/B Observation (Smoke)**:
 - Both mixed (`trader_v2_cot`) and incremental (`trader_v2_incremental`) produced strict JSON with `reasoning_trace` on the same test day.
 - On a tiny dataset, behavior is very similar; recommend scaling CoT samples before making a final choice.
+
+### Phase 10.5: Scale-up CoT Distillation (News Cases) + Trader v2 Superset
+
+**Goal**: Scale CoT distillation beyond mistake-only sampling by covering all news-conditioned trades, then fine-tune a Superset Trader v2 that preserves v1.1 behavior while learning news-grounded reasoning.
+
+**Key Changes**:
+- `scripts/sample_mistakes.py` supports `--mode all_news` to sample all trades with strict ticker-news (not only negative PnL).
+- `scripts/generate_cot_teacher.py` supports `--mode news_case` (neutral coaching prompt) to avoid hallucinating “original was wrong”.
+- `scripts/build_trader_v2_dataset.py` supports CLI aliases (`--cot-data/--replay-data/--out`) and `--max-replay-samples`.
+
+**Dataset Build (Scale-up)**:
+- CoT: 12 (`cot_news_cases_scaleup.jsonl`)
+- Replay: 1000 (capped)
+- Output:
+  - Train: `data/finetune/train_trader_v2_scaleup.json`
+  - Val: `data/finetune/train_trader_v2_scaleup_val.json`
+
+**Fine-tune**:
+- Base: `Qwen/Qwen2.5-7B-Instruct`
+- Method: QLoRA + gradient checkpointing
+- Output: `models/trader_v2_cot_scaleup/lora_weights`
+
+**Inference Acceptance (TSLA / 2025-12-08)**:
+- Verified `reasoning_trace` strict 3 bullets.
+- Verified news-grounded reasoning via injected headline (“Tesla downgraded”).
+
+**Production Fix (Inference News Injection Robustness)**:
+- `scripts/run_trading_inference.py` now injects ticker-matched raw headlines even when `signals_YYYY-MM-DD.json` items have `parse_ok=false` (signal parser failure).
+- Added stronger prompting constraints so that when news is provided, at least one `reasoning_trace` bullet must cite a phrase from the provided news title.
+
+### Phase 11.1: Adapter-MoE Router (Heuristic, Rule-based)
+
+**Goal**: Reduce inference cost by routing between fast technical expert (scalper) and slower news reasoning expert (analyst) on-demand.
+
+**Expert Adapters (same base model)**:
+- Scalper: `models/trader_stock_v1_1_tech_plus_news/lora_weights`
+- Analyst: `models/trader_v2_cot_scaleup/lora_weights`
+
+**Inference Engine Upgrade** (`scripts/run_trading_inference.py`):
+- `--moe-mode` loads both adapters once (single backbone) and switches per ticker via `set_adapter()`.
+- Heuristic routing (default): if ticker has matched news contexts, route to `analyst`; otherwise route to `scalper`.
+- Output JSON records per-symbol `expert` + `router` meta for auditability.

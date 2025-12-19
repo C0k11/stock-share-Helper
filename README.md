@@ -214,6 +214,60 @@ TEACHER_MODEL=deepseek-reasoner
 .\venv311\Scripts\python.exe scripts\finetune_llm.py --data data\finetune\trader_v2_train.json --eval-data data\finetune\trader_v2_val.json --model Qwen/Qwen2.5-7B-Instruct --init-adapter models\trader_stock_v1_1_tech_plus_news\lora_weights --outdir models\trader_v2_incremental --epochs 3 --batch-size 1 --grad-acc 4 --lr 2e-4 --save-steps 10 --eval-steps 10 --max-seq-len 1024 --qlora --grad-ckpt
 ```
 
+#### Phase 10.5 命令（Scale-up / Superset）
+
+1) 采样 news cases（任何有严格 ticker-news 的样本，不限 PnL）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\sample_mistakes.py --report data\backtest\report_2025_12_final.json --strategy v1_1_news --mode all_news --out data\finetune\news_cases_scaleup_min20.jsonl --top-k 200 --min-abs-move 0.003 --news-score-threshold 0.0 --news-topk 3 --min-news-chars 20
+```
+
+2) 生成 Teacher CoT（news_case 模式，不假设“原决策一定错”）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\generate_cot_teacher.py --mode news_case --in data\finetune\news_cases_scaleup_min20.jsonl --out data\finetune\cot_news_cases_scaleup.jsonl --model deepseek-reasoner --delay 1.0 --json-mode --overwrite
+```
+
+3) 构建 v2 混合训练集（CoT + replay buffer，限制 replay 规模防止失控）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\build_trader_v2_dataset.py --cot-data data\finetune\cot_news_cases_scaleup.jsonl --replay-data data\finetune\trader_stock_sft_v1_plus_news.json --max-replay-samples 1000 --out data\finetune\train_trader_v2_scaleup.json --val-ratio 0.1 --seed 42
+```
+
+4) 微调 Trader v2 Superset：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\finetune_llm.py --data data\finetune\train_trader_v2_scaleup.json --eval-data data\finetune\train_trader_v2_scaleup_val.json --model Qwen/Qwen2.5-7B-Instruct --outdir models\trader_v2_cot_scaleup --epochs 3 --batch-size 1 --grad-acc 16 --lr 1e-4 --max-seq-len 1024 --qlora --grad-ckpt --save-steps 100 --eval-steps 100 --eval-batch-size 1
+```
+
+5) 实战推理验收（TSLA 例）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\run_trading_inference.py --date 2025-12-08 --model Qwen/Qwen2.5-7B-Instruct --lora models\trader_v2_cot_scaleup\lora_weights --use-lora --load-4bit --tickers TSLA --out data\daily\trading_decision_2025-12-08.json
+```
+
+#### Phase 11 命令（Adapter-MoE 路由 / 多 LoRA 动态切换）
+
+目标：平静日走“快专家”(scalper)，新闻/剧烈波动走“慢专家”(analyst)。
+
+默认路由（只要该 ticker 命中新闻上下文就走 analyst）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\run_trading_inference.py --date 2025-12-08 --model Qwen/Qwen2.5-7B-Instruct --load-4bit --tickers TSLA,NVDA,AAPL --moe-mode --out data\daily\moe_decision_2025-12-08.json
+```
+
+显式指定两位专家 adapter 路径：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\run_trading_inference.py --date 2025-12-08 --model Qwen/Qwen2.5-7B-Instruct --load-4bit --tickers TSLA,NVDA,AAPL --moe-mode --moe-scalper models\trader_stock_v1_1_tech_plus_news\lora_weights --moe-analyst models\trader_v2_cot_scaleup\lora_weights --out data\daily\moe_decision_2025-12-08.json
+```
+
+关闭 any-news（仅阈值路由，便于后续接入自定义 news_score）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\run_trading_inference.py --date 2025-12-08 --model Qwen/Qwen2.5-7B-Instruct --load-4bit --tickers TSLA,NVDA,AAPL --moe-mode --no-moe-any-news --moe-news-threshold 0.8 --out data\daily\moe_decision_2025-12-08.json
+```
+
 ---
 
 ##  Output Protocol
@@ -637,6 +691,8 @@ Stock/
 - [x] Teacher 推理摘要生成（Strict JSON）
 - [x] 通过 subject_assets 做 ticker-news 相关性过滤
 - [x] 基于 reasoning_trace 微调 Trader v2（smoke），并完成端到端接线验证
+- [x] Phase 10.5：扩展为 news cases（非仅错题），混合 replay buffer，训练 Superset Trader v2
+- [x] Phase 11（起步）：Adapter-MoE 路由（多 LoRA 动态切换，按新闻/波动率启发式路由）
 
 #### Phase 10 命令（原型）
 
