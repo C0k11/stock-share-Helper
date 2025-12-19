@@ -15,6 +15,7 @@ class FineTuner:
         self,
         model_name: str = "Qwen/Qwen2.5-7B-Instruct",
         output_dir: str = "models/llm",
+        init_adapter_path: Optional[str] = None,
         lora_r: int = 16,
         lora_alpha: int = 32,
         lora_dropout: float = 0.05,
@@ -33,6 +34,8 @@ class FineTuner:
         self.model_name = model_name
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        self.init_adapter_path = str(init_adapter_path or "").strip() if init_adapter_path else ""
 
         self.max_seq_length = max_seq_length
         self.gradient_checkpointing = gradient_checkpointing
@@ -58,7 +61,7 @@ class FineTuner:
             import torch
             import inspect
             from transformers import AutoModelForCausalLM, AutoTokenizer
-            from peft import LoraConfig, get_peft_model
+            from peft import LoraConfig, PeftModel, get_peft_model
             
             # 加载tokenizer
             self.tokenizer = AutoTokenizer.from_pretrained(
@@ -108,9 +111,17 @@ class FineTuner:
             if self.gradient_checkpointing and hasattr(self.model, "gradient_checkpointing_enable"):
                 self.model.gradient_checkpointing_enable()
             
-            # 应用LoRA
-            lora_config = LoraConfig(**self.lora_config)
-            self.model = get_peft_model(self.model, lora_config)
+            # 应用/加载 LoRA
+            if self.init_adapter_path:
+                logger.info(f"Warm-start: loading init adapter: {self.init_adapter_path}")
+                self.model = PeftModel.from_pretrained(
+                    self.model,
+                    self.init_adapter_path,
+                    is_trainable=True,
+                )
+            else:
+                lora_config = LoraConfig(**self.lora_config)
+                self.model = get_peft_model(self.model, lora_config)
             
             # 打印可训练参数
             trainable_params = sum(p.numel() for p in self.model.parameters() if p.requires_grad)

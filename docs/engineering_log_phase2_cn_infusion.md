@@ -2202,3 +2202,20 @@ def select_adapter(symbol: str, market: str) -> str:
 - This demonstrates clean **Data Lineage**: model reasoning and risk control decisions are preserved separately.
 
 **Status**: Phase 10 Complete. Trader v2 successfully generates structured reasoning traces.
+
+### Phase 10.4 (Route 2): Incremental / Continued Fine-tuning (Old LoRA Warm-start)
+
+**Motivation**: Evaluate the engineering trade-off between mixed re-training vs continued fine-tuning on top of an existing v1.1 LoRA adapter.
+
+**Engineering Enablement**:
+- `scripts/finetune_llm.py` supports `--init-adapter`.
+- `src/llm/finetune/train.py` supports warm-start via `PeftModel.from_pretrained(..., is_trainable=True)`.
+
+**Run**:
+- Base: `Qwen/Qwen2.5-7B-Instruct`
+- Init adapter: `models/trader_stock_v1_1_tech_plus_news/lora_weights`
+- Output: `models/trader_v2_incremental/lora_weights`
+
+**Quick A/B Observation (Smoke)**:
+- Both mixed (`trader_v2_cot`) and incremental (`trader_v2_incremental`) produced strict JSON with `reasoning_trace` on the same test day.
+- On a tiny dataset, behavior is very similar; recommend scaling CoT samples before making a final choice.
