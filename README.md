@@ -165,8 +165,8 @@ Stock/
 ### Phase 10: CoT Distillation (Reasoning, Trader v2)
 - [x] Generate mistake book from backtest reports (PoC)
 - [x] Teacher reasoning generation (strict JSON)
-- [ ] Improve ticker-news relevance via subject_assets attribution
-- [ ] Fine-tune Trader v2 with reasoning_trace and evaluate vs v1.1
+- [x] Improve ticker-news relevance via subject_assets attribution
+- [x] Fine-tune Trader v2 with reasoning_trace (smoke) and validate end-to-end wiring
 
 #### Phase 10 Commands (Prototype)
 
@@ -187,13 +187,31 @@ TEACHER_MODEL=deepseek-reasoner
 2) Sample ticker-specific mistakes:
 
 ```powershell
-.\venv311\Scripts\python.exe scripts\sample_mistakes.py --report data\backtest\report_2025_12_extended.json --out data\finetune\mistakes_100_v3.jsonl --strategy v1_1_news --top-k 100 --min-abs-move 0.003 --news-score-threshold 0.0 --news-topk 3
+.\venv311\Scripts\python.exe scripts\sample_mistakes.py --report data\backtest\report_2025_12_extended.json --out data\finetune\mistakes_100_v4.jsonl --strategy v1_1_news --top-k 100 --min-abs-move 0.003 --news-score-threshold 0.0 --news-topk 3
 ```
 
 3) Generate teacher reasoning_trace dataset:
 
 ```powershell
-.\venv311\Scripts\python.exe scripts\generate_cot_teacher.py --in data\finetune\mistakes_100_v3.jsonl --out data\finetune\cot_mistakes_100_v3.jsonl --model deepseek-reasoner --delay 1.0
+.\venv311\Scripts\python.exe scripts\generate_cot_teacher.py --in data\finetune\mistakes_100_v4.jsonl --out data\finetune\cot_mistakes_100_v4.jsonl --model deepseek-reasoner --delay 1.0 --json-mode --overwrite
+```
+
+4) Build Trader v2 SFT dataset (CoT + replay buffer):
+
+```powershell
+.\venv311\Scripts\python.exe scripts\build_trader_v2_dataset.py --cot data\finetune\cot_mistakes_100_v4.jsonl --replay data\finetune\trader_stock_sft_v1_plus_news.json --replay-ratio 1.0 --out-dir data\finetune --val-ratio 0.2
+```
+
+5) Fine-tune Trader v2 (mixed re-training):
+
+```powershell
+.\venv311\Scripts\python.exe scripts\finetune_llm.py --data data\finetune\trader_v2_train.json --eval-data data\finetune\trader_v2_val.json --model Qwen/Qwen2.5-7B-Instruct --outdir models\trader_v2_cot --epochs 3 --batch-size 1 --grad-acc 4 --lr 2e-4 --save-steps 10 --eval-steps 10 --max-seq-len 1024 --qlora --grad-ckpt
+```
+
+6) Fine-tune Trader v2 (incremental continued fine-tuning from v1.1 LoRA):
+
+```powershell
+.\venv311\Scripts\python.exe scripts\finetune_llm.py --data data\finetune\trader_v2_train.json --eval-data data\finetune\trader_v2_val.json --model Qwen/Qwen2.5-7B-Instruct --init-adapter models\trader_stock_v1_1_tech_plus_news\lora_weights --outdir models\trader_v2_incremental --epochs 3 --batch-size 1 --grad-acc 4 --lr 2e-4 --save-steps 10 --eval-steps 10 --max-seq-len 1024 --qlora --grad-ckpt
 ```
 
 ---
@@ -617,8 +635,8 @@ Stock/
 ### Phase 10: CoT 蒸馏 / 推理升级（Trader v2）
 - [x] 从回测报告生成错题本（PoC）
 - [x] Teacher 推理摘要生成（Strict JSON）
-- [ ] 通过 subject_assets 做 ticker-news 相关性过滤
-- [ ] 基于 reasoning_trace 微调 Trader v2，并与 v1.1 做对照评估
+- [x] 通过 subject_assets 做 ticker-news 相关性过滤
+- [x] 基于 reasoning_trace 微调 Trader v2（smoke），并完成端到端接线验证
 
 #### Phase 10 命令（原型）
 
@@ -639,13 +657,31 @@ TEACHER_MODEL=deepseek-reasoner
 2) 采样 ticker 专属新闻错题：
 
 ```powershell
-.\venv311\Scripts\python.exe scripts\sample_mistakes.py --report data\backtest\report_2025_12_extended.json --out data\finetune\mistakes_100_v3.jsonl --strategy v1_1_news --top-k 100 --min-abs-move 0.003 --news-score-threshold 0.0 --news-topk 3
+.\venv311\Scripts\python.exe scripts\sample_mistakes.py --report data\backtest\report_2025_12_extended.json --out data\finetune\mistakes_100_v4.jsonl --strategy v1_1_news --top-k 100 --min-abs-move 0.003 --news-score-threshold 0.0 --news-topk 3
 ```
 
 3) 生成 Teacher 推理摘要数据集：
 
 ```powershell
-.\venv311\Scripts\python.exe scripts\generate_cot_teacher.py --in data\finetune\mistakes_100_v3.jsonl --out data\finetune\cot_mistakes_100_v3.jsonl --model deepseek-reasoner --delay 1.0
+.\venv311\Scripts\python.exe scripts\generate_cot_teacher.py --in data\finetune\mistakes_100_v4.jsonl --out data\finetune\cot_mistakes_100_v4.jsonl --model deepseek-reasoner --delay 1.0 --json-mode --overwrite
+```
+
+4) 构建 Trader v2 训练集（CoT + replay buffer）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\build_trader_v2_dataset.py --cot data\finetune\cot_mistakes_100_v4.jsonl --replay data\finetune\trader_stock_sft_v1_plus_news.json --replay-ratio 1.0 --out-dir data\finetune --val-ratio 0.2
+```
+
+5) 微调 Trader v2（混合重训 Mixed Re-training）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\finetune_llm.py --data data\finetune\trader_v2_train.json --eval-data data\finetune\trader_v2_val.json --model Qwen/Qwen2.5-7B-Instruct --outdir models\trader_v2_cot --epochs 3 --batch-size 1 --grad-acc 4 --lr 2e-4 --save-steps 10 --eval-steps 10 --max-seq-len 1024 --qlora --grad-ckpt
+```
+
+6) 微调 Trader v2（增量续训 Incremental / Continued Fine-tuning）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\finetune_llm.py --data data\finetune\trader_v2_train.json --eval-data data\finetune\trader_v2_val.json --model Qwen/Qwen2.5-7B-Instruct --init-adapter models\trader_stock_v1_1_tech_plus_news\lora_weights --outdir models\trader_v2_incremental --epochs 3 --batch-size 1 --grad-acc 4 --lr 2e-4 --save-steps 10 --eval-steps 10 --max-seq-len 1024 --qlora --grad-ckpt
 ```
 
 ---

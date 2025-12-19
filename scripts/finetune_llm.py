@@ -27,6 +27,7 @@ def main():
     parser.add_argument("--data", default="data/finetune/train.json", help="训练数据JSON路径")
     parser.add_argument("--eval-data", default=None, help="验证数据JSON路径（可选）")
     parser.add_argument("--model", default="Qwen/Qwen2.5-0.5B-Instruct", help="基础模型名称")
+    parser.add_argument("--init-adapter", default="", help="增量续训：加载已有 LoRA adapter 作为初始化（可选）")
     parser.add_argument("--outdir", default="models/llm", help="输出目录（含checkpoints与lora权重）")
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=1)
@@ -84,6 +85,7 @@ def main():
     trainer = FineTuner(
         model_name=args.model,
         output_dir=args.outdir,
+        init_adapter_path=str(args.init_adapter).strip() if str(args.init_adapter).strip() else None,
         lora_r=8,
         lora_alpha=16,
         lora_dropout=0.05,
