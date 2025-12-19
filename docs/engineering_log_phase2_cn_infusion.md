@@ -1,6 +1,6 @@
 # QuantAI 工程日志
 
-> 本文档记录项目从 Phase 1 到 Phase 9 的完整工程历程，包括问题诊断、技术决策、实现方案、产物清单与未来规划。
+> 本文档记录项目从 Phase 1 到 Phase 10 的完整工程历程，包括问题诊断、技术决策、实现方案、产物清单与未来规划。
 >
 > **安全原则**：任何 API Key/Token 不得写入仓库，只允许通过环境变量或本地 `.env.local`（已在 `.gitignore` 忽略）管理。
 
@@ -19,7 +19,9 @@
 | 7 | Simulation / Backtest（NAV Backtest + Execution Tuning） | 完成 | 2025-12-19 |
 | 8 | Paper Trading Automation | 完成 | 2025-12-19 |
 | 9 | Dashboard（Streamlit Cockpit） | 完成 | 2025-12-19 |
-| 10 | RL 强化学习 | 远期 | - |
+| 10 | CoT 蒸馏 / Reasoning 升级（Trader v2） | 进行中 | 2025-12 |
+| 11 | Adapter-MoE / Multi-Agent | 远期 | - |
+| 12 | RL / DPO / GRPO | 远期 | - |
 
 ---
 
@@ -2095,3 +2097,35 @@ def select_adapter(symbol: str, market: str) -> str:
     - Flip 交易金额正确计算（2x Trade Dollar）。
 
 **状态**：System Ready for Deployment.
+
+## 2025-12-19 Phase 10 Prototype: CoT 蒸馏 / Reasoning 升级（Trader v2）
+
+**目标**：在保持严格 JSON 输出与执行层安全闭环不变的前提下，引入可展示的推理摘要（Reasoning Trace），提升对“新闻相关性”与“证据不足时不交易”的识别能力，为后续微调与 Dashboard 展示奠定数据与工程基础。
+
+**关键约束**：
+1. 推理输出必须保持 Strict JSON（避免 token 爆炸导致解析失败）。
+2. Teacher/Key 不入库：仅允许从环境变量或 `.env.local` 读取。
+
+**工程交付**：
+1. **错题采样（Mistake Book）**
+  - `scripts/sample_mistakes.py`
+  - v1：从 `data/backtest/report_2025_12_extended.json` 的 `v1_1_news` 交易明细中抽取“强新闻日 + 方向错误”样本，输出 `data/finetune/mistakes_100.jsonl`。
+  - 观察：Teacher 在样本上大量倾向 HOLD，暴露“新闻与 ticker 不相关”的数据噪音问题。
+2. **Teacher CoT 生成（Strict JSON）**
+  - `scripts/generate_cot_teacher.py`
+  - 输入 `data/finetune/mistakes_100.jsonl`，输出 `data/finetune/cot_mistakes_100.jsonl`。
+  - 特性：断点续跑、失败重试、Strict JSON 解析；支持从 `.env.local` 读取 `TEACHER_API_KEY / TEACHER_BASE_URL / TEACHER_MODEL`。
+  - 结果：`success=19, fail=0`。
+3. **Ticker-News Join（消除“新闻不相关”噪音）**
+  - 问题：`data/daily/signals_YYYY-MM-DD.json` 为全市场事件列表，缺少 ticker 归因字段，无法直接做严格 join。
+  - 解决：新增 `scripts/backfill_signal_assets.py`，使用 Teacher 为 daily signals 补 `subject_assets`，输出 `data/daily/signals_assets_YYYY-MM-DD.json`。
+  - `scripts/sample_mistakes.py` 更新为优先读取 `signals_assets_YYYY-MM-DD.json` 并基于 `subject_assets` 做 join。
+  - v3 结果：输出 `data/finetune/mistakes_100_v3.jsonl`，得到 `5` 条通过 `subject_assets` 精确命中的 ticker 专属新闻错题（含金量高，可用于后续 CoT 微调展示）。
+
+**离线验证（快速判卷）**：
+- 在错题集上，Teacher 纠错使 proxy PnL 从负转正（用于 PoC 验证 teacher 具备噪音识别与纠错能力）。
+
+**下一步计划**：
+1. 对 `mistakes_100_v3.jsonl` 再跑一次 Teacher 生成，产出 `cot_mistakes_100_v3.jsonl`。
+2. 设计 Trader 推理输出 schema：在 Strict JSON 中增加 `reasoning_trace`（最多 3 条要点，强限制长度）。
+3. 将 `reasoning_trace` 接入 Dashboard 展示，并在 `run_trading_inference.py` 中保持解析稳定与风控优先级不变。
