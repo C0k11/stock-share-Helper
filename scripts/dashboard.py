@@ -203,6 +203,55 @@ def _scan_recent_clear(paper_dir: Path, max_files: int = 50) -> Tuple[str, List[
     return "", []
 
 
+def _load_latest_decisions(paper_dir: Path, meta: Dict[str, Any]) -> Tuple[str, Dict[str, Any]]:
+    sig_path = str(meta.get("signals") or "").strip() if isinstance(meta, dict) else ""
+    if sig_path:
+        fp = Path(sig_path)
+        if fp.exists():
+            try:
+                obj = _read_json(fp)
+                if isinstance(obj, dict):
+                    return str(fp), obj
+            except Exception:
+                pass
+
+    candidates: List[Path] = []
+    for p in sorted(paper_dir.glob("decisions_*.json"), reverse=True)[:10]:
+        candidates.append(p)
+    for p in sorted(Path("data").glob("decisions*.json"), reverse=True)[:10]:
+        candidates.append(p)
+
+    best: Optional[Path] = None
+    best_mtime = -1.0
+    for fp in candidates:
+        try:
+            mt = fp.stat().st_mtime
+        except Exception:
+            continue
+        if mt > best_mtime:
+            best_mtime = mt
+            best = fp
+
+    if best and best.exists():
+        try:
+            obj = _read_json(best)
+            if isinstance(obj, dict):
+                return str(best), obj
+        except Exception:
+            pass
+
+    return "", {}
+
+
+def _normalize_reasoning_trace(v: Any) -> List[str]:
+    if isinstance(v, list):
+        out = [str(x) for x in v if str(x).strip()]
+        return out
+    if isinstance(v, str) and v.strip():
+        return [v.strip()]
+    return []
+
+
 def _derive_order_action(row: Dict[str, Any], trade_dollar: float) -> str:
     try:
         trade_value = float(row.get("trade_value") or 0.0)
@@ -300,6 +349,43 @@ def main() -> None:
         )
 
     st.markdown("---")
+
+    dec_path, decisions = _load_latest_decisions(paper_dir, meta)
+    if decisions:
+        st.subheader("AI Reasoning Inspector")
+        if dec_path:
+            st.caption(f"Decisions Source: {dec_path}")
+
+        dec_items = decisions.get("items") if isinstance(decisions.get("items"), dict) else {}
+        tickers = sorted([str(k) for k in dec_items.keys()])
+
+        if tickers:
+            selected = st.selectbox("Ticker", tickers)
+            rec = dec_items.get(selected) if isinstance(dec_items.get(selected), dict) else {}
+            parsed = rec.get("parsed") if isinstance(rec.get("parsed"), dict) else {}
+            final = rec.get("final") if isinstance(rec.get("final"), dict) else {}
+
+            c1, c2 = st.columns([1, 2])
+            with c1:
+                st.metric("Final Action", str(final.get("action") or ""))
+                st.write(f"Target Position: {final.get('target_position')}")
+                trace = final.get("trace")
+                if isinstance(trace, list) and trace:
+                    st.write("Risk Trace")
+                    st.code("\n".join([str(x) for x in trace[:10]]))
+
+            with c2:
+                st.write(f"Decision: {parsed.get('decision')}")
+                st.write(f"Analysis: {parsed.get('analysis')}")
+                rt = _normalize_reasoning_trace(parsed.get("reasoning_trace"))
+                if rt:
+                    st.write("Reasoning Trace")
+                    for t in rt[:10]:
+                        st.markdown(f"- {t}")
+                else:
+                    st.caption("No reasoning_trace found in parsed output")
+        else:
+            st.caption("No decisions.items found in decisions JSON")
 
     ocol, lcol = st.columns([2, 1])
     with ocol:

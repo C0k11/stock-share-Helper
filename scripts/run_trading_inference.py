@@ -19,7 +19,21 @@ You must analyze the input market data and output a JSON object containing the t
 The decision logic is based on maximizing T+5 returns.
 
 Response Format (STRICT JSON ONLY, NO MARKDOWN, NO PROSE):
-{"decision": "BUY" | "SELL" | "HOLD", "ticker": "SYMBOL", "analysis": "Brief reason < 30 words"}
+{
+  "decision": "BUY" | "SELL" | "HOLD",
+  "ticker": "SYMBOL",
+  "analysis": "Brief reason < 30 words",
+  "reasoning_trace": [
+    "1. <short reason>",
+    "2. <short reason>",
+    "3. <short reason>"
+  ]
+}
+
+Rules:
+- reasoning_trace must contain exactly 3 short bullet points
+- each bullet must be <= 25 words
+- if provided news context is irrelevant, explicitly say so in the trace
 """
 
 
@@ -232,6 +246,26 @@ def validate_stock_decision(obj: Dict[str, Any]) -> Tuple[List[str], List[str]]:
     if decision not in {"BUY", "SELL", "HOLD"}:
         missing = sorted(list(set(missing + ["decision(enum BUY/SELL/HOLD)"])))
     return missing, extra
+
+
+def _normalize_reasoning_trace(obj: Dict[str, Any]) -> None:
+    rt = obj.get("reasoning_trace")
+    if not isinstance(rt, list):
+        rt = []
+    items: List[str] = []
+    for x in rt:
+        s = str(x or "").strip()
+        if not s:
+            continue
+        s = re.sub(r"\s+", " ", s)
+        if len(s) > 160:
+            s = s[:160]
+        items.append(s)
+        if len(items) >= 3:
+            break
+    while len(items) < 3:
+        items.append("No trace provided.")
+    obj["reasoning_trace"] = items
 
 
 def iter_feature_items(payload: Any) -> List[Tuple[str, Dict[str, Any]]]:
@@ -492,8 +526,11 @@ def main() -> None:
                     parsed["ticker"] = str(symbol)
                 if "analysis" not in parsed:
                     parsed["analysis"] = ""
+                _normalize_reasoning_trace(parsed)
                 missing, extra = validate_stock_decision(parsed)
             else:
+                if isinstance(parsed, dict) and ("reasoning_trace" in parsed):
+                    parsed.pop("reasoning_trace", None)
                 missing, extra = validate_label(parsed)
             if missing or extra:
                 raise ValueError(f"schema mismatch missing={missing} extra={extra}")
