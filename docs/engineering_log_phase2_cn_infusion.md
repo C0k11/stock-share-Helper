@@ -2142,3 +2142,63 @@ def select_adapter(symbol: str, market: str) -> str:
   > "News 'Netflix, Tesla downgraded' may have been priced in, with no significant negative impact noted, aligning with positive returns."
 
 **Conclusion**: The pipeline now generates high-quality, news-aware reasoning data suitable for CoT distillation.
+
+### Phase 10.3: Reasoning Trace Wiring (Inference + Dashboard)
+
+**Commit**: `d7282b6`
+
+**Changes**:
+1. `scripts/run_trading_inference.py`:
+   - Updated `SYSTEM_PROMPT_STOCK_STRICT_JSON` to require `reasoning_trace` (3 short bullet points).
+   - Added `_normalize_reasoning_trace()` to ensure consistent output format.
+   - Preserved ETF mode compatibility by stripping `reasoning_trace` before `validate_label()`.
+
+2. `scripts/dashboard.py`:
+   - Added **AI Reasoning Inspector** section.
+   - Displays `parsed.decision`, `parsed.analysis`, `parsed.reasoning_trace`.
+   - Shows `final.action`, `final.target_position`, `final.trace` (RiskGate audit trail).
+
+**Validation**: Ran inference with Qwen2.5-7B + LoRA, confirmed `reasoning_trace` appears in output JSON.
+
+### Phase 10.4: Trader v2 Fine-Tuning (CoT Distillation)
+
+**Objective**: Train a Student model that can generate `reasoning_trace` autonomously.
+
+**Data Pipeline**:
+1. `scripts/build_trader_v2_dataset.py`:
+   - Converts `cot_mistakes_100_v4.jsonl` (Teacher corrections) to SFT conversations format.
+   - Supports replay buffer mixing from existing trader data to prevent catastrophic forgetting.
+   - Adapts replay samples to v2 format (unified system prompt + placeholder `reasoning_trace`).
+
+2. **Dataset Stats**:
+   - CoT samples: 5 (high-quality Teacher corrections with news citations)
+   - Replay buffer: 5 (adapted from `trader_stock_sft_v1_plus_news.json`)
+   - Train/Val split: 8/2
+
+**Fine-Tuning**:
+- Base: `Qwen/Qwen2.5-7B-Instruct`
+- Method: QLoRA (4-bit quantization)
+- Epochs: 3
+- Output: `models/trader_v2_cot/lora_weights`
+- Train loss: 2.55
+
+**Validation Result**:
+```json
+{
+  "decision": "BUY",
+  "ticker": "AAPL",
+  "analysis": "Positive FOMC decision and strong earnings support Apple's upward trend.",
+  "reasoning_trace": [
+    "1. Positive FOMC decision indicates favorable market conditions.",
+    "2. Strong earnings report supports long-term growth prospects.",
+    "3. Trend aligned with moving averages suggests momentum."
+  ]
+}
+```
+
+**RiskGate Override Example (TSLA)**:
+- `parsed.decision`: BUY (model recommendation)
+- `final.action`: CLEAR (RiskGate forced liquidation due to -14% drawdown exceeding -8% limit)
+- This demonstrates clean **Data Lineage**: model reasoning and risk control decisions are preserved separately.
+
+**Status**: Phase 10 Complete. Trader v2 successfully generates structured reasoning traces.
