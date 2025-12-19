@@ -10,15 +10,15 @@
 
 | Phase | Topic | Status | Description |
 | :--- | :--- | :--- | :--- |
-| 1 | Bulletproof JSON Pipeline | ✅ Done | Strict JSON repair + schema validation.
-| 2 | Teacher Data Generation (CN/US) | ✅ Done | Multi-market teacher dataset generation.
-| 3 | LLM Fine-tuning (News LoRA) | ✅ Done | News LoRA training + inference.
-| 4 | Production Pipeline (Daily Automation) | ✅ Done | Daily pipeline automation + health/fallback.
-| 5 | ETF Trader + RAG + RiskGate | ✅ Done | RAG retrieval + deterministic risk gate.
-| 6 | Stock Trader v1.1 (Tech + News) + Dual Tower | ✅ Done | News Tower + Trader Tower integration.
-| 7 | Backtest & Execution | ✅ Done | NAV curve backtest + `Hold=Keep` + `Confirm=2` execution filter.
-| 8 | Paper Trading | ✅ Done | Rolling daily simulation with state persistence + RiskGate CLEAR.
-| 9 | Dashboard | ✅ Done | Streamlit cockpit for NAV, orders, and risk monitoring.
+| 1 | Bulletproof JSON Pipeline | Done | Strict JSON repair + schema validation.
+| 2 | Teacher Data Generation (CN/US) | Done | Multi-market teacher dataset generation.
+| 3 | LLM Fine-tuning (News LoRA) | Done | News LoRA training + inference.
+| 4 | Production Pipeline (Daily Automation) | Done | Daily pipeline automation + health/fallback.
+| 5 | ETF Trader + RAG + RiskGate | Done | RAG retrieval + deterministic risk gate.
+| 6 | Stock Trader v1.1 (Tech + News) + Dual Tower | Done | News Tower + Trader Tower integration.
+| 7 | Backtest & Execution | Done | NAV curve backtest + `Hold=Keep` + `Confirm=2` execution filter.
+| 8 | Paper Trading | Done | Rolling daily simulation with state persistence + RiskGate CLEAR.
+| 9 | Dashboard | Done | Streamlit cockpit for NAV, orders, and risk monitoring.
 | 10 | RL (Reinforcement Learning) | Future | Only after longer-horizon backtest is stable.
 
 ---
@@ -263,7 +263,7 @@ The daily report also includes a **Risk Watch** section for CN `regulation_crack
 
 ---
 
-## 📊 Visualization (Dashboard)
+## Visualization (Dashboard)
 Monitor your paper trading status, NAV curve, orders flow, and risk events using the Streamlit cockpit.
 
 1. **Install Dependencies**:
@@ -428,15 +428,15 @@ MIT License
 
 | Phase | 主题 | 状态 | 说明 |
 | :--- | :--- | :--- | :--- |
-| 1 | JSON Pipeline 稳定性 | ✅ 完成 | JSON 强修复 + schema 校验。
-| 2 | Teacher 数据生成 (CN/US) | ✅ 完成 | 多市场 teacher 数据产出。
-| 3 | LLM 微调 (News LoRA) | ✅ 完成 | News LoRA 训练与推理。
-| 4 | 生产流水线 (日更自动化) | ✅ 完成 | 日更自动化 + 兜底/健康检查。
-| 5 | ETF Trader + RAG + RiskGate | ✅ 完成 | RAG 检索 + 风控闸门。
-| 6 | Stock Trader v1.1（Tech + News）+ 双塔接线 | ✅ 完成 | News/Trader 双塔接线。
-| 7 | 回测与执行层调优 | ✅ 完成 | NAV 回测 + `Hold=Keep` + `Confirm=2` 防抖。
-| 8 | 模拟盘（Paper Trading） | ✅ 完成 | 滚动模拟 + 状态持久化 + RiskGate CLEAR。
-| 9 | 监控看板（Dashboard） | ✅ 完成 | Streamlit 驾驶舱：NAV/订单/风险。
+| 1 | JSON Pipeline 稳定性 | 完成 | JSON 强修复 + schema 校验。
+| 2 | Teacher 数据生成 (CN/US) | 完成 | 多市场 teacher 数据产出。
+| 3 | LLM 微调 (News LoRA) | 完成 | News LoRA 训练与推理。
+| 4 | 生产流水线 (日更自动化) | 完成 | 日更自动化 + 兜底/健康检查。
+| 5 | ETF Trader + RAG + RiskGate | 完成 | RAG 检索 + 风控闸门。
+| 6 | Stock Trader v1.1（Tech + News）+ 双塔接线 | 完成 | News/Trader 双塔接线。
+| 7 | 回测与执行层调优 | 完成 | NAV 回测 + `Hold=Keep` + `Confirm=2` 防抖。
+| 8 | 模拟盘（Paper Trading） | 完成 | 滚动模拟 + 状态持久化 + RiskGate CLEAR。
+| 9 | 监控看板（Dashboard） | 完成 | Streamlit 驾驶舱：NAV/订单/风险。
 | 10 | RL 强化学习 | 远期 | 仅在更长窗口回测稳定后考虑。
 
 ---
