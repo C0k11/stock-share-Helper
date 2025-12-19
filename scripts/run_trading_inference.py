@@ -38,6 +38,19 @@ Rules:
 """
 
 
+SYSTEM_PROMPT_STOCK_FAST_JSON = """You are a strictly compliant trading signal generator.
+You must analyze the input market data and output a JSON object containing the trading decision.
+The decision logic is based on maximizing T+5 returns.
+
+Response Format (STRICT JSON ONLY, NO MARKDOWN, NO PROSE):
+{
+  "decision": "BUY" | "SELL" | "HOLD",
+  "ticker": "SYMBOL",
+  "analysis": "Brief reason < 25 words"
+}
+"""
+
+
 def _to_float(x: Any) -> float:
     try:
         return float(x)
@@ -331,6 +344,35 @@ def build_stock_messages(symbol: str, date_str: str, feats: Dict[str, Any], news
     ]
 
 
+def build_stock_messages_fast(symbol: str, date_str: str, feats: Dict[str, Any]) -> List[Dict[str, str]]:
+    tech = feats.get("technical") if isinstance(feats.get("technical"), dict) else {}
+    sig = feats.get("signal") if isinstance(feats.get("signal"), dict) else {}
+
+    def gv(d: Dict[str, Any], k: str, default: Any = "") -> Any:
+        return d.get(k, default) if isinstance(d, dict) else default
+
+    user = (
+        f"Ticker: {symbol}\n"
+        f"Date: {date_str}\n"
+        f"Close: {gv(tech, 'close', '')}\n"
+        f"Price vs MA20: {gv(tech, 'price_vs_ma20', '')}\n"
+        f"Price vs MA200: {gv(tech, 'price_vs_ma200', '')}\n"
+        f"Trend alignment: {gv(tech, 'trend_alignment', '')}\n"
+        f"Return 5d: {gv(tech, 'return_5d', '')}\n"
+        f"Return 21d: {gv(tech, 'return_21d', '')}\n"
+        f"Volatility 20d: {gv(tech, 'volatility_20d', '')}\n"
+        f"Volume ratio: {gv(tech, 'vol_ratio', '')}\n"
+        f"Max drawdown 20d: {gv(tech, 'max_drawdown_20d', '')}\n"
+        f"Composite signal: {gv(sig, 'composite', '')}\n\n"
+        "Decide BUY/SELL/HOLD for the next 5 days."
+    )
+
+    return [
+        {"role": "system", "content": SYSTEM_PROMPT_STOCK_FAST_JSON},
+        {"role": "user", "content": user},
+    ]
+
+
 def validate_stock_decision(obj: Dict[str, Any]) -> Tuple[List[str], List[str]]:
     required = {"decision"}
     keys = set(obj.keys())
@@ -462,6 +504,102 @@ def load_model(base_model_id: str, adapter_path: str, load_4bit: bool) -> Tuple[
     return model, tokenizer
 
 
+def load_model_moe(
+    base_model_id: str,
+    adapters: Dict[str, str],
+    load_4bit: bool,
+    default_adapter: str,
+) -> Tuple[Any, Any]:
+    import torch
+    from transformers import AutoModelForCausalLM, AutoTokenizer
+
+    if not isinstance(adapters, dict) or not adapters:
+        raise ValueError("adapters must be non-empty dict")
+
+    tok_src = base_model_id
+    for p in adapters.values():
+        if str(p or "").strip() and Path(str(p), "tokenizer_config.json").exists():
+            tok_src = str(p)
+            break
+    tokenizer = AutoTokenizer.from_pretrained(tok_src, trust_remote_code=True)
+    if tokenizer.pad_token is None:
+        tokenizer.pad_token = tokenizer.eos_token
+
+    model_kwargs: Dict[str, Any] = {
+        "device_map": "auto",
+        "trust_remote_code": True,
+    }
+
+    if torch.cuda.is_available():
+        model_kwargs["torch_dtype"] = torch.bfloat16
+        model_kwargs["low_cpu_mem_usage"] = True
+
+    if load_4bit:
+        from transformers import BitsAndBytesConfig
+
+        compute_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float16
+        model_kwargs["quantization_config"] = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+            bnb_4bit_compute_dtype=compute_dtype,
+        )
+
+    base_model = AutoModelForCausalLM.from_pretrained(base_model_id, **model_kwargs)
+
+    from peft import PeftModel
+
+    names = list(adapters.keys())
+    first = names[0]
+    model = PeftModel.from_pretrained(base_model, str(adapters[first]), adapter_name=str(first))
+    for name in names[1:]:
+        model.load_adapter(str(adapters[name]), adapter_name=str(name))
+
+    if str(default_adapter) in set(names):
+        model.set_adapter(str(default_adapter))
+    else:
+        model.set_adapter(str(first))
+
+    model.eval()
+    return model, tokenizer
+
+
+def _router_choose_expert(
+    *,
+    symbol: str,
+    feats: Dict[str, Any],
+    news_contexts: List[str],
+    moe_any_news: bool,
+    moe_news_threshold: float,
+    moe_vol_threshold: float,
+) -> Tuple[str, Dict[str, Any]]:
+    vol = feats.get("volatility_ann_pct")
+    if vol is None:
+        vol = _to_pct((feats.get("technical") or {}).get("volatility_20d")) if isinstance(feats.get("technical"), dict) else None
+    vol_f = _to_float(vol)
+
+    news_score = 0.0
+    if news_contexts:
+        news_score = 1.0
+
+    use_analyst = False
+    if moe_any_news and news_contexts:
+        use_analyst = True
+    elif news_score >= float(moe_news_threshold):
+        use_analyst = True
+    elif (float(moe_vol_threshold) > 0.0) and (vol_f >= float(moe_vol_threshold)):
+        use_analyst = True
+
+    expert = "analyst" if use_analyst else "scalper"
+    meta = {
+        "expert": expert,
+        "news_count": int(len(news_contexts)),
+        "news_score": float(news_score),
+        "volatility_ann_pct": float(vol_f),
+    }
+    return expert, meta
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run Trading LoRA inference with MarketRAG + RiskGate")
     parser.add_argument("--date", required=True, help="YYYY-MM-DD")
@@ -476,7 +614,8 @@ def main() -> None:
     parser.add_argument("--risk-watch-top", type=int, default=3)
     parser.add_argument("--max-new-tokens", type=int, default=512)
     parser.add_argument("--temperature", type=float, default=0.1)
-    parser.add_argument("--load-4bit", action="store_true")
+    parser.add_argument("--load-4bit", dest="load_4bit", action="store_true")
+    parser.add_argument("--load-in-4bit", dest="load_4bit", action="store_true")
     parser.add_argument("--no-load-4bit", dest="load_4bit", action="store_false")
     parser.set_defaults(load_4bit=True)
     parser.add_argument("--disable-news", action="store_true", default=False)
@@ -485,6 +624,15 @@ def main() -> None:
     parser.add_argument("--max-news-signals", type=int, default=3)
     parser.add_argument("--out", default="data/decisions_inference.json")
     parser.add_argument("--output", dest="out", help="Alias of --out")
+    parser.add_argument("--moe-mode", action="store_true", default=False)
+    parser.add_argument("--moe-scalper", default="models/trader_stock_v1_1_tech_plus_news/lora_weights")
+    parser.add_argument("--moe-analyst", default="models/trader_v2_cot_scaleup/lora_weights")
+    parser.add_argument("--adapter-scalper", dest="moe_scalper", help="Alias of --moe-scalper")
+    parser.add_argument("--adapter-analyst", dest="moe_analyst", help="Alias of --moe-analyst")
+    parser.add_argument("--moe-any-news", action="store_true", default=True)
+    parser.add_argument("--no-moe-any-news", dest="moe_any_news", action="store_false")
+    parser.add_argument("--moe-news-threshold", type=float, default=0.8)
+    parser.add_argument("--moe-vol-threshold", type=float, default=-1.0)
     args = parser.parse_args()
 
     from src.data.rag import MarketRAG
@@ -502,24 +650,39 @@ def main() -> None:
     stock_fp = daily_dir / f"stock_features_{args.date}.json"
     etf_fp = daily_dir / f"etf_features_{args.date}.json"
 
-    use_stock = bool(tickers) and stock_fp.exists()
+    use_stock = bool(tickers)
 
     if use_stock:
-        payload = json.loads(stock_fp.read_text(encoding="utf-8"))
+        stock_map: Dict[str, Dict[str, Any]] = {}
+        if stock_fp.exists():
+            stock_payload = json.loads(stock_fp.read_text(encoding="utf-8"))
+            for sym, it in iter_feature_items(stock_payload):
+                stock_map[str(sym).upper()] = it
+
+        etf_payload = load_daily_payload(daily_dir, str(args.date))
+        etf_map: Dict[str, Dict[str, Any]] = {}
+        if etf_payload is not None:
+            for sym, it in iter_feature_items(etf_payload):
+                etf_map[str(sym).upper()] = it
+
+        missing: List[str] = []
+        items: List[Tuple[str, Dict[str, Any]]] = []
+        for t in tickers:
+            if t in stock_map:
+                items.append((t, stock_map[t]))
+            elif t in etf_map:
+                items.append((t, etf_map[t]))
+            else:
+                missing.append(t)
+        if missing:
+            raise SystemExit(f"No requested tickers found in daily features payloads: {missing}")
     else:
         payload = load_daily_payload(daily_dir, str(args.date))
         if payload is None:
             raise SystemExit(f"Missing daily features: {etf_fp}")
-
-    items = iter_feature_items(payload)
-    if not items:
-        raise SystemExit("No symbols found in daily features payload")
-
-    if use_stock:
-        allow = set(tickers)
-        items = [(sym, it) for (sym, it) in items if sym.upper() in allow]
+        items = iter_feature_items(payload)
         if not items:
-            raise SystemExit(f"No requested tickers found in stock features payload: {tickers}")
+            raise SystemExit("No symbols found in daily features payload")
 
     risk_watch = build_risk_watch_summary(
         daily_dir=daily_dir,
@@ -531,10 +694,21 @@ def main() -> None:
     rag = MarketRAG(data_dir=str(daily_dir))
     risk_gate = RiskGate()
 
-    if bool(args.use_lora) and not str(args.adapter).strip():
-        raise SystemExit("--use-lora requires --adapter/--lora")
-
-    model, tokenizer = load_model(str(args.base), str(args.adapter), bool(args.load_4bit))
+    if bool(args.moe_mode):
+        scalper = str(args.moe_scalper).strip()
+        analyst = str(args.moe_analyst).strip()
+        if not scalper or not analyst:
+            raise SystemExit("--moe-mode requires --moe-scalper and --moe-analyst")
+        model, tokenizer = load_model_moe(
+            str(args.base),
+            {"scalper": scalper, "analyst": analyst},
+            bool(args.load_4bit),
+            default_adapter="scalper",
+        )
+    else:
+        if bool(args.use_lora) and not str(args.adapter).strip():
+            raise SystemExit("--use-lora requires --adapter/--lora")
+        model, tokenizer = load_model(str(args.base), str(args.adapter), bool(args.load_4bit))
 
     decisions: Dict[str, Any] = {
         "date": str(args.date),
@@ -543,6 +717,16 @@ def main() -> None:
         "risk_watch": risk_watch,
         "items": {},
     }
+
+    if bool(args.moe_mode):
+        decisions["moe"] = {
+            "enabled": True,
+            "scalper": str(args.moe_scalper),
+            "analyst": str(args.moe_analyst),
+            "any_news": bool(args.moe_any_news),
+            "news_threshold": float(args.moe_news_threshold),
+            "vol_threshold": float(args.moe_vol_threshold),
+        }
 
     news_signals = extract_news_signals(risk_watch)
 
@@ -561,6 +745,9 @@ def main() -> None:
         except Exception:
             risk_trace = []
 
+        expert = "default"
+        router_meta: Dict[str, Any] = {}
+
         if use_stock:
             stock_news_contexts: List[str] = []
             if not bool(args.disable_news):
@@ -572,7 +759,23 @@ def main() -> None:
                     max_signals=int(args.max_news_signals),
                     ticker=str(symbol),
                 )
-            messages = build_stock_messages(str(symbol), str(args.date), etf_item, stock_news_contexts)
+
+            if bool(args.moe_mode):
+                expert, router_meta = _router_choose_expert(
+                    symbol=str(symbol),
+                    feats=feats,
+                    news_contexts=stock_news_contexts,
+                    moe_any_news=bool(args.moe_any_news),
+                    moe_news_threshold=float(args.moe_news_threshold),
+                    moe_vol_threshold=float(args.moe_vol_threshold),
+                )
+                model.set_adapter(str(expert))
+                if str(expert) == "analyst":
+                    messages = build_stock_messages(str(symbol), str(args.date), etf_item, stock_news_contexts)
+                else:
+                    messages = build_stock_messages_fast(str(symbol), str(args.date), etf_item)
+            else:
+                messages = build_stock_messages(str(symbol), str(args.date), etf_item, stock_news_contexts)
         else:
             messages = build_teacher_messages(
                 symbol=str(symbol),
@@ -662,12 +865,18 @@ def main() -> None:
                     final_pos = 0.0
                 final_trace = [f"[RISK] adjudicate error: {e}"]
 
-        decisions["items"][symbol] = {
+        rec: Dict[str, Any] = {
             "parsed": parsed,
             "parse_error": parse_error,
             "final": {"action": final_action, "target_position": final_pos, "trace": final_trace},
             "raw": raw_text,
         }
+
+        if bool(args.moe_mode) and use_stock:
+            rec["expert"] = str(expert)
+            rec["router"] = router_meta
+
+        decisions["items"][symbol] = rec
 
         if parsed is not None:
             print(f"{symbol}: {final_action} {final_pos}")
