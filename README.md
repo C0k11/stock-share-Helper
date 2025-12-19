@@ -20,7 +20,7 @@
 | 8 | Paper Trading | Done | Rolling daily simulation with state persistence + RiskGate CLEAR.
 | 9 | Dashboard | Done | Streamlit cockpit for NAV, orders, and risk monitoring.
 | 10 | CoT Distillation (Reasoning, Trader v2) | In Progress | Mistake book + teacher reasoning_trace for explainable trading.
-| 11 | Adapter-MoE / Multi-Agent | Future | LoRA experts with a lightweight router.
+| 11 | Adapter-MoE / Multi-Agent | In Progress | LoRA experts + router (MoE) + tunable RiskGate thresholds for A/B.
 | 12 | RL (DPO/GRPO) | Future | Only after longer-horizon backtest is stable.
 
 ---
@@ -156,6 +156,11 @@ Stock/
 - [x] Stock signal-quality backtest (LoRA adapter swap on a single base model)
 - [x] Upgrade to NAV curve backtest (positions/costs/drawdown)
 - [ ] Re-run on horizon=T+5 and stratify by strong-news vs quiet days (requires later data coverage)
+
+### Phase 11: Adapter-MoE / Multi-Agent (In Progress)
+- [x] Inference-side MoE routing (`--moe-mode`, scalper vs analyst)
+- [x] System 1 baseline prompt mode (`--use-fast-prompt`)
+- [x] RiskGate thresholds parameterized via CLI (`--risk-max-drawdown`, `--risk-vol-limit`)
 
 ### Phase 8: Multi-Market Expansion / RL (Future)
 - [ ] A-share support (CN_Trader LoRA)

@@ -2261,3 +2261,19 @@ def select_adapter(symbol: str, market: str) -> str:
 - `--moe-mode` loads both adapters once (single backbone) and switches per ticker via `set_adapter()`.
 - Heuristic routing (default): if ticker has matched news contexts, route to `analyst`; otherwise route to `scalper`.
 - Output JSON records per-symbol `expert` + `router` meta for auditability.
+
+### Phase 11.6: RiskGate Jailbreak (Parameterized Risk Limits)
+
+**Finding**:
+- Analyst routed samples showed high intent divergence vs baseline but were mostly blocked by RiskGate, resulting in near-zero realized delta.
+
+**Upgrade**:
+- `src/risk/gate.py` now supports configurable thresholds via constructor:
+  - `max_drawdown_limit_pct` (default `-8.0`)
+  - `vol_reduce_trigger_ann_pct` (default `30.0`)
+- `scripts/run_trading_inference.py` exposes RiskGate overrides via CLI:
+  - `--risk-max-drawdown` (e.g. `0.30` for 30%; also accepts `30`)
+  - `--risk-vol-limit` daily vol (e.g. `0.05` for 5% daily; converted to annualized trigger using `sqrt(252)`)
+
+**Purpose**:
+- Enable strict vs loose risk A/B experiments to validate whether Trader v2 (Analyst) alpha is suppressed by overly conservative RiskGate defaults.
