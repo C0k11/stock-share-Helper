@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+from datetime import datetime, timedelta
 import json
 import re
 import sys
@@ -600,9 +601,28 @@ def _router_choose_expert(
     return expert, meta
 
 
+def _parse_ymd(s: str) -> datetime:
+    return datetime.strptime(str(s).strip(), "%Y-%m-%d")
+
+
+def _iter_dates_inclusive(start_ymd: str, end_ymd: str) -> List[str]:
+    a = _parse_ymd(start_ymd)
+    b = _parse_ymd(end_ymd)
+    if b < a:
+        a, b = b, a
+    cur = a
+    out: List[str] = []
+    while cur <= b:
+        out.append(cur.strftime("%Y-%m-%d"))
+        cur = cur + timedelta(days=1)
+    return out
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Run Trading LoRA inference with MarketRAG + RiskGate")
-    parser.add_argument("--date", required=True, help="YYYY-MM-DD")
+    g = parser.add_mutually_exclusive_group(required=True)
+    g.add_argument("--date", help="YYYY-MM-DD")
+    g.add_argument("--date-range", nargs=2, metavar=("START", "END"), help="YYYY-MM-DD YYYY-MM-DD")
     parser.add_argument("--daily-dir", default="data/daily")
     parser.add_argument("--base", default="Qwen/Qwen2.5-14B-Instruct")
     parser.add_argument("--adapter", default="", help="LoRA adapter path (output dir or lora_weights dir)")
@@ -646,50 +666,13 @@ def main() -> None:
     daily_dir = Path(args.daily_dir)
 
     tickers = [t.strip().upper() for t in str(args.tickers).split(",") if t.strip()]
-
-    stock_fp = daily_dir / f"stock_features_{args.date}.json"
-    etf_fp = daily_dir / f"etf_features_{args.date}.json"
-
     use_stock = bool(tickers)
 
-    if use_stock:
-        stock_map: Dict[str, Dict[str, Any]] = {}
-        if stock_fp.exists():
-            stock_payload = json.loads(stock_fp.read_text(encoding="utf-8"))
-            for sym, it in iter_feature_items(stock_payload):
-                stock_map[str(sym).upper()] = it
-
-        etf_payload = load_daily_payload(daily_dir, str(args.date))
-        etf_map: Dict[str, Dict[str, Any]] = {}
-        if etf_payload is not None:
-            for sym, it in iter_feature_items(etf_payload):
-                etf_map[str(sym).upper()] = it
-
-        missing: List[str] = []
-        items: List[Tuple[str, Dict[str, Any]]] = []
-        for t in tickers:
-            if t in stock_map:
-                items.append((t, stock_map[t]))
-            elif t in etf_map:
-                items.append((t, etf_map[t]))
-            else:
-                missing.append(t)
-        if missing:
-            raise SystemExit(f"No requested tickers found in daily features payloads: {missing}")
+    date_list: List[str] = []
+    if getattr(args, "date_range", None):
+        date_list = _iter_dates_inclusive(str(args.date_range[0]), str(args.date_range[1]))
     else:
-        payload = load_daily_payload(daily_dir, str(args.date))
-        if payload is None:
-            raise SystemExit(f"Missing daily features: {etf_fp}")
-        items = iter_feature_items(payload)
-        if not items:
-            raise SystemExit("No symbols found in daily features payload")
-
-    risk_watch = build_risk_watch_summary(
-        daily_dir=daily_dir,
-        date_str=str(args.date),
-        market_mode=str(args.risk_watch_market),
-        top_k=int(args.risk_watch_top),
-    )
+        date_list = [str(args.date)]
 
     rag = MarketRAG(data_dir=str(daily_dir))
     risk_gate = RiskGate()
@@ -710,182 +693,263 @@ def main() -> None:
             raise SystemExit("--use-lora requires --adapter/--lora")
         model, tokenizer = load_model(str(args.base), str(args.adapter), bool(args.load_4bit))
 
-    decisions: Dict[str, Any] = {
-        "date": str(args.date),
-        "base": str(args.base),
-        "adapter": str(args.adapter),
-        "risk_watch": risk_watch,
-        "items": {},
-    }
-
-    if bool(args.moe_mode):
-        decisions["moe"] = {
-            "enabled": True,
-            "scalper": str(args.moe_scalper),
-            "analyst": str(args.moe_analyst),
-            "any_news": bool(args.moe_any_news),
-            "news_threshold": float(args.moe_news_threshold),
-            "vol_threshold": float(args.moe_vol_threshold),
+    multi_day = len(date_list) > 1
+    if multi_day:
+        out: Dict[str, Any] = {
+            "date_range": {"start": date_list[0], "end": date_list[-1]},
+            "base": str(args.base),
+            "adapter": str(args.adapter),
+            "days": {},
         }
+        if bool(args.moe_mode):
+            out["moe"] = {
+                "enabled": True,
+                "scalper": str(args.moe_scalper),
+                "analyst": str(args.moe_analyst),
+                "any_news": bool(args.moe_any_news),
+                "news_threshold": float(args.moe_news_threshold),
+                "vol_threshold": float(args.moe_vol_threshold),
+            }
+    else:
+        out = {}
 
-    news_signals = extract_news_signals(risk_watch)
+    for date_str in date_list:
+        stock_fp = daily_dir / f"stock_features_{date_str}.json"
+        etf_fp = daily_dir / f"etf_features_{date_str}.json"
 
-    for symbol, etf_item in items:
-        feats = extract_features(etf_item)
-
-        similar_days: List[Dict[str, Any]] = []
-        if not use_stock:
-            try:
-                similar_days = rag.retrieve(feats, k=3, ticker=symbol, exclude_date=str(args.date))
-            except Exception:
-                similar_days = []
-
-        try:
-            _, _, risk_trace = risk_gate.adjudicate(feats, news_signals, "BUY", 1.0)
-        except Exception:
-            risk_trace = []
-
-        expert = "default"
-        router_meta: Dict[str, Any] = {}
-
+        missing_tickers: List[str] = []
         if use_stock:
-            stock_news_contexts: List[str] = []
-            if not bool(args.disable_news):
-                stock_news_contexts = load_daily_news_contexts(
-                    daily_dir=daily_dir,
-                    date_str=str(args.date),
-                    signals_path=str(args.signals_path),
-                    min_abs_impact=float(args.min_news_abs_impact),
-                    max_signals=int(args.max_news_signals),
-                    ticker=str(symbol),
-                )
+            stock_map: Dict[str, Dict[str, Any]] = {}
+            if stock_fp.exists():
+                stock_payload = json.loads(stock_fp.read_text(encoding="utf-8"))
+                for sym, it in iter_feature_items(stock_payload):
+                    stock_map[str(sym).upper()] = it
 
-            if bool(args.moe_mode):
-                expert, router_meta = _router_choose_expert(
-                    symbol=str(symbol),
-                    feats=feats,
-                    news_contexts=stock_news_contexts,
-                    moe_any_news=bool(args.moe_any_news),
-                    moe_news_threshold=float(args.moe_news_threshold),
-                    moe_vol_threshold=float(args.moe_vol_threshold),
-                )
-                model.set_adapter(str(expert))
-                if str(expert) == "analyst":
-                    messages = build_stock_messages(str(symbol), str(args.date), etf_item, stock_news_contexts)
+            etf_payload = load_daily_payload(daily_dir, str(date_str))
+            etf_map: Dict[str, Dict[str, Any]] = {}
+            if etf_payload is not None:
+                for sym, it in iter_feature_items(etf_payload):
+                    etf_map[str(sym).upper()] = it
+
+            items: List[Tuple[str, Dict[str, Any]]] = []
+            for t in tickers:
+                if t in stock_map:
+                    items.append((t, stock_map[t]))
+                elif t in etf_map:
+                    items.append((t, etf_map[t]))
                 else:
-                    messages = build_stock_messages_fast(str(symbol), str(args.date), etf_item)
-            else:
-                messages = build_stock_messages(str(symbol), str(args.date), etf_item, stock_news_contexts)
+                    missing_tickers.append(t)
         else:
-            messages = build_teacher_messages(
-                symbol=str(symbol),
-                date_str=str(args.date),
-                etf_item=etf_item,
-                risk_watch=risk_watch,
-                history=similar_days,
-                risk_constraints=risk_trace,
-                include_cot=False,
-                variant_index=0,
-            )
+            payload = load_daily_payload(daily_dir, str(date_str))
+            if payload is None:
+                continue
+            items = iter_feature_items(payload)
 
-        text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = tokenizer([text], return_tensors="pt").to(model.device)
-
-        import torch
-
-        with torch.no_grad():
-            gen_ids = model.generate(
-                **inputs,
-                max_new_tokens=int(args.max_new_tokens),
-                temperature=float(args.temperature),
-                do_sample=False,
-            )
-
-        gen_ids = [
-            out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, gen_ids)
-        ]
-        raw_text = tokenizer.batch_decode(gen_ids, skip_special_tokens=True)[0]
-
-        parsed: Optional[Dict[str, Any]] = None
-        parse_error = ""
-        try:
-            raw_json = extract_json_text(raw_text.strip())
-            if raw_json is None:
-                raise ValueError("no json found in model output")
-
-            obj = repair_and_parse_json(raw_json)
-            if not isinstance(obj, dict):
-                raise ValueError("model output json is not object")
-
-            parsed = obj
-            if use_stock:
-                if not str(parsed.get("ticker") or "").strip():
-                    parsed["ticker"] = str(symbol)
-                if "analysis" not in parsed:
-                    parsed["analysis"] = ""
-                _normalize_reasoning_trace(parsed)
-                missing, extra = validate_stock_decision(parsed)
+        if not items:
+            decisions: Dict[str, Any] = {
+                "date": str(date_str),
+                "base": str(args.base),
+                "adapter": str(args.adapter),
+                "risk_watch": {"available": False, "signals_path": str(daily_dir / f"signals_{date_str}.json")},
+                "items": {},
+            }
+            if missing_tickers:
+                decisions["missing_tickers"] = missing_tickers
+            if multi_day:
+                out["days"][str(date_str)] = decisions
             else:
-                if isinstance(parsed, dict) and ("reasoning_trace" in parsed):
-                    parsed.pop("reasoning_trace", None)
-                missing, extra = validate_label(parsed)
-            if missing or extra:
-                raise ValueError(f"schema mismatch missing={missing} extra={extra}")
-        except Exception as e:
-            parsed = None
-            parse_error = str(e)
+                out = decisions
+            continue
 
-        final_action = "HOLD"
-        final_pos = 0.0
-        final_trace: List[str] = []
-        if parsed is not None:
-            if use_stock:
-                proposed_action = str(parsed.get("decision") or "HOLD")
-                decision = str(proposed_action).strip().upper()
-                if decision == "BUY":
-                    proposed_pos = 0.5
-                else:
-                    proposed_pos = 0.0
-            else:
-                label = parsed.get("label") if isinstance(parsed.get("label"), dict) else {}
-                proposed_action = str(label.get("action") or "hold")
-                proposed_pos = label.get("target_position", 0.0)
-            try:
-                final_action, final_pos, final_trace = risk_gate.adjudicate(
-                    feats,
-                    news_signals,
-                    proposed_action,
-                    proposed_pos,
-                )
-            except Exception as e:
-                final_action = str(proposed_action).upper()
-                try:
-                    final_pos = float(proposed_pos)
-                except Exception:
-                    final_pos = 0.0
-                final_trace = [f"[RISK] adjudicate error: {e}"]
+        risk_watch = build_risk_watch_summary(
+            daily_dir=daily_dir,
+            date_str=str(date_str),
+            market_mode=str(args.risk_watch_market),
+            top_k=int(args.risk_watch_top),
+        )
 
-        rec: Dict[str, Any] = {
-            "parsed": parsed,
-            "parse_error": parse_error,
-            "final": {"action": final_action, "target_position": final_pos, "trace": final_trace},
-            "raw": raw_text,
+        decisions = {
+            "date": str(date_str),
+            "base": str(args.base),
+            "adapter": str(args.adapter),
+            "risk_watch": risk_watch,
+            "items": {},
         }
 
-        if bool(args.moe_mode) and use_stock:
-            rec["expert"] = str(expert)
-            rec["router"] = router_meta
+        if missing_tickers:
+            decisions["missing_tickers"] = missing_tickers
 
-        decisions["items"][symbol] = rec
+        if bool(args.moe_mode):
+            decisions["moe"] = {
+                "enabled": True,
+                "scalper": str(args.moe_scalper),
+                "analyst": str(args.moe_analyst),
+                "any_news": bool(args.moe_any_news),
+                "news_threshold": float(args.moe_news_threshold),
+                "vol_threshold": float(args.moe_vol_threshold),
+            }
 
-        if parsed is not None:
-            print(f"{symbol}: {final_action} {final_pos}")
+        news_signals = extract_news_signals(risk_watch)
+
+        for symbol, etf_item in items:
+            feats = extract_features(etf_item)
+
+            similar_days: List[Dict[str, Any]] = []
+            if not use_stock:
+                try:
+                    similar_days = rag.retrieve(feats, k=3, ticker=symbol, exclude_date=str(date_str))
+                except Exception:
+                    similar_days = []
+
+            try:
+                _, _, risk_trace = risk_gate.adjudicate(feats, news_signals, "BUY", 1.0)
+            except Exception:
+                risk_trace = []
+
+            expert = "default"
+            router_meta: Dict[str, Any] = {}
+
+            if use_stock:
+                stock_news_contexts: List[str] = []
+                if not bool(args.disable_news):
+                    stock_news_contexts = load_daily_news_contexts(
+                        daily_dir=daily_dir,
+                        date_str=str(date_str),
+                        signals_path=str(args.signals_path),
+                        min_abs_impact=float(args.min_news_abs_impact),
+                        max_signals=int(args.max_news_signals),
+                        ticker=str(symbol),
+                    )
+
+                if bool(args.moe_mode):
+                    expert, router_meta = _router_choose_expert(
+                        symbol=str(symbol),
+                        feats=feats,
+                        news_contexts=stock_news_contexts,
+                        moe_any_news=bool(args.moe_any_news),
+                        moe_news_threshold=float(args.moe_news_threshold),
+                        moe_vol_threshold=float(args.moe_vol_threshold),
+                    )
+                    model.set_adapter(str(expert))
+                    if str(expert) == "analyst":
+                        messages = build_stock_messages(str(symbol), str(date_str), etf_item, stock_news_contexts)
+                    else:
+                        messages = build_stock_messages_fast(str(symbol), str(date_str), etf_item)
+                else:
+                    messages = build_stock_messages(str(symbol), str(date_str), etf_item, stock_news_contexts)
+            else:
+                messages = build_teacher_messages(
+                    symbol=str(symbol),
+                    date_str=str(date_str),
+                    etf_item=etf_item,
+                    risk_watch=risk_watch,
+                    history=similar_days,
+                    risk_constraints=risk_trace,
+                    include_cot=False,
+                    variant_index=0,
+                )
+
+            text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            inputs = tokenizer([text], return_tensors="pt").to(model.device)
+
+            import torch
+
+            with torch.no_grad():
+                gen_ids = model.generate(
+                    **inputs,
+                    max_new_tokens=int(args.max_new_tokens),
+                    temperature=float(args.temperature),
+                    do_sample=False,
+                )
+
+            gen_ids = [out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, gen_ids)]
+            raw_text = tokenizer.batch_decode(gen_ids, skip_special_tokens=True)[0]
+
+            parsed: Optional[Dict[str, Any]] = None
+            parse_error = ""
+            try:
+                raw_json = extract_json_text(raw_text.strip())
+                if raw_json is None:
+                    raise ValueError("no json found in model output")
+
+                obj = repair_and_parse_json(raw_json)
+                if not isinstance(obj, dict):
+                    raise ValueError("model output json is not object")
+
+                parsed = obj
+                if use_stock:
+                    if not str(parsed.get("ticker") or "").strip():
+                        parsed["ticker"] = str(symbol)
+                    if "analysis" not in parsed:
+                        parsed["analysis"] = ""
+                    _normalize_reasoning_trace(parsed)
+                    missing, extra = validate_stock_decision(parsed)
+                else:
+                    if isinstance(parsed, dict) and ("reasoning_trace" in parsed):
+                        parsed.pop("reasoning_trace", None)
+                    missing, extra = validate_label(parsed)
+                if missing or extra:
+                    raise ValueError(f"schema mismatch missing={missing} extra={extra}")
+            except Exception as e:
+                parsed = None
+                parse_error = str(e)
+
+            final_action = "HOLD"
+            final_pos = 0.0
+            final_trace: List[str] = []
+            if parsed is not None:
+                if use_stock:
+                    proposed_action = str(parsed.get("decision") or "HOLD")
+                    decision = str(proposed_action).strip().upper()
+                    if decision == "BUY":
+                        proposed_pos = 0.5
+                    else:
+                        proposed_pos = 0.0
+                else:
+                    label = parsed.get("label") if isinstance(parsed.get("label"), dict) else {}
+                    proposed_action = str(label.get("action") or "hold")
+                    proposed_pos = label.get("target_position", 0.0)
+                try:
+                    final_action, final_pos, final_trace = risk_gate.adjudicate(
+                        feats,
+                        news_signals,
+                        proposed_action,
+                        proposed_pos,
+                    )
+                except Exception as e:
+                    final_action = str(proposed_action).upper()
+                    try:
+                        final_pos = float(proposed_pos)
+                    except Exception:
+                        final_pos = 0.0
+                    final_trace = [f"[RISK] adjudicate error: {e}"]
+
+            rec: Dict[str, Any] = {
+                "parsed": parsed,
+                "parse_error": parse_error,
+                "final": {"action": final_action, "target_position": final_pos, "trace": final_trace},
+                "raw": raw_text,
+            }
+
+            if bool(args.moe_mode) and use_stock:
+                rec["expert"] = str(expert)
+                rec["router"] = router_meta
+
+            decisions["items"][symbol] = rec
+
+            if parsed is not None:
+                print(f"{symbol}: {final_action} {final_pos}")
+            else:
+                print(f"{symbol}: PARSE_ERROR {parse_error}")
+
+        if multi_day:
+            out["days"][str(date_str)] = decisions
         else:
-            print(f"{symbol}: PARSE_ERROR {parse_error}")
+            out = decisions
 
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(json.dumps(decisions, ensure_ascii=False, indent=2), encoding="utf-8")
+    out_path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Saved: {out_path}")
 
 
