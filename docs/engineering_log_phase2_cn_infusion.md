@@ -1,6 +1,6 @@
 # QuantAI 工程日志
 
-> 本文档记录项目从 Phase 1 到 Phase 8 的完整工程历程，包括问题诊断、技术决策、实现方案、产物清单与未来规划。
+> 本文档记录项目从 Phase 1 到 Phase 9 的完整工程历程，包括问题诊断、技术决策、实现方案、产物清单与未来规划。
 >
 > **安全原则**：任何 API Key/Token 不得写入仓库，只允许通过环境变量或本地 `.env.local`（已在 `.gitignore` 忽略）管理。
 
@@ -14,10 +14,12 @@
 | 2 | Teacher 数据生成 (CN/US) | 完成 | 2025-12 |
 | 3 | LLM 微调 (News LoRA) | 完成 | 2025-12 |
 | 4 | 生产流水线 (日更自动化) | 完成 | 2025-12 |
-| 5 | ETF Trader + RAG + RiskGate | 进行中 | - |
+| 5 | ETF Trader + RAG + RiskGate | 完成 | 2025-12-17 |
 | 6 | Stock Trader v1.1（Tech + News）+ 双塔接线 | 完成 | 2025-12-18 |
-| 7 | Simulation / Backtest（Paper Trading） | 进行中 | 2025-12 |
-| 8 | RL 强化学习 | 远期 | - |
+| 7 | Simulation / Backtest（NAV Backtest + Execution Tuning） | 完成 | 2025-12-19 |
+| 8 | Paper Trading Automation | 完成 | 2025-12-19 |
+| 9 | Dashboard（Streamlit Cockpit） | 完成 | 2025-12-19 |
+| 10 | RL 强化学习 | 远期 | - |
 
 ---
 
