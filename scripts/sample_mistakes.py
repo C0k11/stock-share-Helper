@@ -78,6 +78,82 @@ def _top_news(signals: List[Dict[str, Any]], k: int) -> List[Dict[str, Any]]:
     return out
 
 
+def _format_news_items(items: List[Dict[str, Any]], k: int) -> List[Dict[str, Any]]:
+    out: List[Dict[str, Any]] = []
+    kk = max(0, int(k))
+    for it in items[:kk]:
+        if not isinstance(it, dict):
+            continue
+        sig = it.get("signal") if isinstance(it.get("signal"), dict) else {}
+        out.append(
+            {
+                "market": it.get("market"),
+                "source": it.get("source"),
+                "title": it.get("title"),
+                "published_at": it.get("published_at"),
+                "event_type": sig.get("event_type"),
+                "impact_equity": sig.get("impact_equity"),
+                "summary": sig.get("summary"),
+                "url": it.get("url"),
+            }
+        )
+    return out
+
+
+def _news_text(it: Dict[str, Any]) -> str:
+    if not isinstance(it, dict):
+        return ""
+    title = str(it.get("title") or "").strip()
+    sig = it.get("signal") if isinstance(it.get("signal"), dict) else {}
+    summary = str(sig.get("summary") or "").strip()
+    text = (title + "\n" + summary).strip()
+    return text
+
+
+def _top_ticker_news(signals: List[Dict[str, Any]], k: int, *, min_news_chars: int) -> List[Dict[str, Any]]:
+    candidates: List[Tuple[int, Dict[str, Any]]] = []
+    for it in signals:
+        if not isinstance(it, dict):
+            continue
+        txt = _news_text(it)
+        if len(txt) < int(min_news_chars):
+            continue
+        candidates.append((len(txt), it))
+
+    if not candidates:
+        return []
+
+    candidates.sort(key=lambda x: x[0], reverse=True)
+    kk = max(0, int(k))
+    return [it for _len, it in candidates[:kk]]
+
+
+def _ticker_news_candidates(
+    signals: List[Dict[str, Any]],
+    ticker: str,
+    *,
+    min_news_chars: int,
+) -> Tuple[List[Dict[str, Any]], str]:
+    matched, join_mode = _select_ticker_signals(signals, ticker)
+    if not matched:
+        return [], join_mode
+
+    out: List[Dict[str, Any]] = []
+    for it in matched:
+        if not isinstance(it, dict):
+            continue
+        title = str(it.get("title") or "").strip()
+        if not title:
+            continue
+        sig = it.get("signal") if isinstance(it.get("signal"), dict) else {}
+        _ = str(sig.get("summary") or "").strip()
+        if len(_news_text(it)) < int(min_news_chars):
+            continue
+        out.append(it)
+
+    return out, join_mode
+
+
 def _normalize_assets(v: Any) -> List[str]:
     if v is None:
         return []
@@ -201,6 +277,7 @@ def main() -> None:
     p.add_argument("--min-abs-move", type=float, default=0.01)
     p.add_argument("--news-score-threshold", type=float, default=1.0)
     p.add_argument("--news-topk", type=int, default=3)
+    p.add_argument("--min-news-chars", type=int, default=40)
     p.add_argument("--require-ticker-news", action="store_true")
     p.add_argument("--no-require-ticker-news", dest="require_ticker_news", action="store_false")
     p.set_defaults(require_ticker_news=True)
@@ -252,7 +329,7 @@ def main() -> None:
         if float(day_score) < float(args.news_score_threshold):
             continue
 
-        ticker_sigs, join_mode = _select_ticker_signals(sigs, ticker)
+        ticker_sigs, join_mode = _ticker_news_candidates(sigs, ticker, min_news_chars=int(args.min_news_chars))
         join_mode_counts[join_mode] = join_mode_counts.get(join_mode, 0) + 1
         if bool(args.require_ticker_news) and not ticker_sigs:
             continue
@@ -263,6 +340,9 @@ def main() -> None:
 
         parsed = tr.get("parsed") if isinstance(tr.get("parsed"), dict) else {}
         feat = _load_stock_features(daily_dir, date_str, ticker)
+        ticker_news_top = _top_ticker_news(ticker_sigs, int(args.news_topk), min_news_chars=int(args.min_news_chars))
+        if bool(args.require_ticker_news) and not ticker_news_top:
+            continue
         rec = {
             "date": date_str,
             "ticker": ticker,
@@ -271,7 +351,7 @@ def main() -> None:
             "analysis": parsed.get("analysis", ""),
             "forward_return": float(fwd),
             "news_score": float(day_score),
-            "news_top": _top_news(ticker_sigs, int(args.news_topk)) if ticker_sigs else [],
+            "news_top": _format_news_items(ticker_news_top, int(args.news_topk)) if ticker_news_top else [],
             "news_join_mode": join_mode,
             "features": feat,
         }
@@ -297,6 +377,7 @@ def main() -> None:
                 "out": str(out_path),
                 "news_score_threshold": float(args.news_score_threshold),
                 "min_abs_move": float(args.min_abs_move),
+                "min_news_chars": int(args.min_news_chars),
                 "require_ticker_news": bool(args.require_ticker_news),
                 "join_mode_counts": join_mode_counts,
             },
