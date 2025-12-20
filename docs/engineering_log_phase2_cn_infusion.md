@@ -2279,3 +2279,35 @@ def select_adapter(symbol: str, market: str) -> str:
 
 **Purpose**:
 - Enable strict vs loose risk A/B experiments to validate whether Trader v2 (Analyst) alpha is suppressed by overly conservative RiskGate defaults.
+
+**Autopsy (MoE Loose vs Baseline Fast, Dec 2025)**:
+
+Context:
+- Baseline Fast output: `data/daily/scalper_baseline_fast_dec2025.json`
+- MoE Strict output: `data/daily/moe_race_dec2025.json`
+- MoE Loose output: `data/daily/moe_race_dec2025_loose.json`
+- Metrics computed by `scripts/analyze_moe_results.py` using daily close-based forward return.
+
+Horizon scan (MoE Loose vs Baseline Fast):
+
+| Horizon | Baseline trades_scored | Baseline pnl_sum | Baseline winrate | MoE Loose trades_scored | MoE Loose pnl_sum | MoE Loose winrate | Delta (MoE - Baseline) |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 245 | +0.096017 | 0.3184 | 791 | +0.080523 | 0.3464 | -0.015494 |
+| 5 | 205 | +0.397180 | 0.3366 | 684 | -1.677122 | 0.3406 | -2.074302 |
+| 10 | 155 | +0.290215 | 0.4258 | 551 | -5.427916 | 0.3321 | -5.718131 |
+
+Key conclusion:
+- MoE Loose does not release positive alpha; it amplifies noise by drastically increasing trade count, causing large negative PnL at horizon 5/10.
+
+Action breakdown (MoE Loose, horizon=5, scored trades=684):
+- BUY: 619 (winrate=0.3667, pnl_sum=-1.620144)
+- SELL: 65 (winrate=0.0923, pnl_sum=-0.056979)
+
+Expert contribution (MoE Loose, horizon=5):
+- Analyst scored trades: 23
+  - BUY: 22 (winrate=0.3182, pnl_sum=-0.213826)
+  - SELL: 1
+
+Diagnosis:
+- Trader v2 (Analyst) currently exhibits a strong long-only bias (permabull): ~95% of its scored trades are BUY.
+- This provides a concrete training target for Phase 12 DPO: correct long-only bias and teach effective abstention / bearish actions when warranted.
