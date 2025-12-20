@@ -36,6 +36,7 @@ peft>=0.7.0               # LoRA/参数高效微调
 accelerate>=0.25.0        # 训练加速
 bitsandbytes>=0.41.0      # 量化支持
 datasets>=2.16.0          # 数据集处理
+trl>=0.8.0               # DPO/偏好优化 (Transformer Reinforcement Learning)
 sentencepiece>=0.1.99     # 分词器
 
 # ====================
