@@ -53,6 +53,12 @@ Response Format (STRICT JSON ONLY, NO MARKDOWN, NO PROSE):
 """
 
 
+def _patch_prompt_allow_clear(prompt: str) -> str:
+    p = str(prompt or "")
+    p = p.replace('"decision": "BUY" | "SELL" | "HOLD"', '"decision": "BUY" | "SELL" | "HOLD" | "CLEAR"')
+    return p
+
+
 def _to_float(x: Any) -> float:
     try:
         return float(x)
@@ -295,7 +301,14 @@ def prefix_news_contexts(user_text: str, contexts: List[str]) -> str:
     return addon + user_text
 
 
-def build_stock_messages(symbol: str, date_str: str, feats: Dict[str, Any], news_contexts: Optional[List[str]] = None) -> List[Dict[str, str]]:
+def build_stock_messages(
+    symbol: str,
+    date_str: str,
+    feats: Dict[str, Any],
+    news_contexts: Optional[List[str]] = None,
+    *,
+    allow_clear: bool = False,
+) -> List[Dict[str, str]]:
     tech = feats.get("technical") if isinstance(feats.get("technical"), dict) else {}
     sig = feats.get("signal") if isinstance(feats.get("signal"), dict) else {}
 
@@ -327,7 +340,7 @@ def build_stock_messages(symbol: str, date_str: str, feats: Dict[str, Any], news
             f"Max drawdown 60d: {gv(tech, 'max_drawdown_60d', '')}",
             f"Composite signal: {gv(sig, 'composite', '')}",
             "",
-            "Decide BUY/SELL/HOLD for the next 5 days.",
+            "Decide BUY/SELL/HOLD/CLEAR for the next 5 days." if bool(allow_clear) else "Decide BUY/SELL/HOLD for the next 5 days.",
         ]
     )
 
@@ -340,13 +353,23 @@ def build_stock_messages(symbol: str, date_str: str, feats: Dict[str, Any], news
         )
     user = "\n".join(lines)
 
+    sys_prompt = SYSTEM_PROMPT_STOCK_STRICT_JSON
+    if bool(allow_clear):
+        sys_prompt = _patch_prompt_allow_clear(sys_prompt)
+
     return [
-        {"role": "system", "content": SYSTEM_PROMPT_STOCK_STRICT_JSON},
+        {"role": "system", "content": sys_prompt},
         {"role": "user", "content": user},
     ]
 
 
-def build_stock_messages_fast(symbol: str, date_str: str, feats: Dict[str, Any]) -> List[Dict[str, str]]:
+def build_stock_messages_fast(
+    symbol: str,
+    date_str: str,
+    feats: Dict[str, Any],
+    *,
+    allow_clear: bool = False,
+) -> List[Dict[str, str]]:
     tech = feats.get("technical") if isinstance(feats.get("technical"), dict) else {}
     sig = feats.get("signal") if isinstance(feats.get("signal"), dict) else {}
 
@@ -366,22 +389,29 @@ def build_stock_messages_fast(symbol: str, date_str: str, feats: Dict[str, Any])
         f"Volume ratio: {gv(tech, 'vol_ratio', '')}\n"
         f"Max drawdown 20d: {gv(tech, 'max_drawdown_20d', '')}\n"
         f"Composite signal: {gv(sig, 'composite', '')}\n\n"
-        "Decide BUY/SELL/HOLD for the next 5 days."
+        + ("Decide BUY/SELL/HOLD/CLEAR for the next 5 days." if bool(allow_clear) else "Decide BUY/SELL/HOLD for the next 5 days.")
     )
 
+    sys_prompt = SYSTEM_PROMPT_STOCK_FAST_JSON
+    if bool(allow_clear):
+        sys_prompt = _patch_prompt_allow_clear(sys_prompt)
+
     return [
-        {"role": "system", "content": SYSTEM_PROMPT_STOCK_FAST_JSON},
+        {"role": "system", "content": sys_prompt},
         {"role": "user", "content": user},
     ]
 
 
-def validate_stock_decision(obj: Dict[str, Any]) -> Tuple[List[str], List[str]]:
+def validate_stock_decision(obj: Dict[str, Any], *, allow_clear: bool = False) -> Tuple[List[str], List[str]]:
     required = {"decision"}
     keys = set(obj.keys())
     missing = sorted(list(required - keys))
     extra = []
     decision = str(obj.get("decision") or "").strip().upper()
-    if decision not in {"BUY", "SELL", "HOLD"}:
+    allowed = {"BUY", "SELL", "HOLD"}
+    if bool(allow_clear):
+        allowed.add("CLEAR")
+    if decision not in allowed:
         missing = sorted(list(set(missing + ["decision(enum BUY/SELL/HOLD)"])))
     return missing, extra
 
@@ -660,6 +690,12 @@ def main() -> None:
     parser.add_argument("--no-load-4bit", dest="load_4bit", action="store_false")
     parser.set_defaults(load_4bit=True)
     parser.add_argument("--disable-news", action="store_true", default=False)
+    parser.add_argument(
+        "--allow-clear",
+        action="store_true",
+        default=False,
+        help="Allow model to output CLEAR (cash) in decision schema. Useful for DPO-trained adapters.",
+    )
     parser.add_argument("--signals", dest="signals_path", default="", help="Override signals_YYYY-MM-DD.json path for stock news injection")
     parser.add_argument("--min-news-abs-impact", type=float, default=0.5)
     parser.add_argument("--max-news-signals", type=int, default=3)
@@ -899,14 +935,36 @@ def main() -> None:
 
                     model.set_adapter(str(expert))
                     if str(expert) == "analyst":
-                        messages = build_stock_messages(str(symbol), str(date_str), etf_item, stock_news_contexts)
+                        messages = build_stock_messages(
+                            str(symbol),
+                            str(date_str),
+                            etf_item,
+                            stock_news_contexts,
+                            allow_clear=bool(args.allow_clear),
+                        )
                     else:
-                        messages = build_stock_messages_fast(str(symbol), str(date_str), etf_item)
+                        messages = build_stock_messages_fast(
+                            str(symbol),
+                            str(date_str),
+                            etf_item,
+                            allow_clear=bool(args.allow_clear),
+                        )
                 else:
                     if bool(args.use_fast_prompt):
-                        messages = build_stock_messages_fast(str(symbol), str(date_str), etf_item)
+                        messages = build_stock_messages_fast(
+                            str(symbol),
+                            str(date_str),
+                            etf_item,
+                            allow_clear=bool(args.allow_clear),
+                        )
                     else:
-                        messages = build_stock_messages(str(symbol), str(date_str), etf_item, stock_news_contexts)
+                        messages = build_stock_messages(
+                            str(symbol),
+                            str(date_str),
+                            etf_item,
+                            stock_news_contexts,
+                            allow_clear=bool(args.allow_clear),
+                        )
             else:
                 messages = build_teacher_messages(
                     symbol=str(symbol),
@@ -953,7 +1011,7 @@ def main() -> None:
                     if "analysis" not in parsed:
                         parsed["analysis"] = ""
                     _normalize_reasoning_trace(parsed)
-                    missing, extra = validate_stock_decision(parsed)
+                    missing, extra = validate_stock_decision(parsed, allow_clear=bool(args.allow_clear))
                 else:
                     if isinstance(parsed, dict) and ("reasoning_trace" in parsed):
                         parsed.pop("reasoning_trace", None)
