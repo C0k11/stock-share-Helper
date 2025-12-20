@@ -2393,3 +2393,116 @@ Current gating logic depends only on `strategy`, not on `risk_budget`, so there 
 - Planner schema + gating logic verified end-to-end on real daily outputs.
 - Smoke test checklist satisfied.
 - Interpretation: “stop-biting-cage” is enforced; Analyst is quarantined outside `aggressive_long`, with auditable before/after expert fields.
+
+
+## Phase 12.1–12.2: DPO Infrastructure + Few-shot Preference Surgery (Analyst)
+
+**Goal**: Fix Analyst long-only prior (“permabull”) using preference pairs mined from backtest outcomes (T+5), plus synthetic counterfactuals (CLEAR) for negative examples.
+
+### Phase 12.1: Data mining (preference pairs)
+
+- Source decisions:
+  - `data/daily/moe_race_dec2025_loose.json`
+  - `data/daily/moe_planner_dec2025.json`
+- Output pairs (JSONL):
+  - `data/dpo/pairs_moe_loose_h5_x002_first.jsonl`
+  - `data/dpo/pairs_moe_planner_dec2025_h5_x002.jsonl`
+
+**Key design choices**:
+- `horizon=5`, threshold `x=0.02` (2%).
+- Filter target expert: `analyst` (also includes planner-quarantined cases via `router.expert_before_planner_gate`).
+- Synthetic counterfactual:
+  - If `forward_return <= -x`: `chosen=CLEAR`, `rejected=original BUY`.
+  - If `forward_return >= +x`: `chosen=original BUY`, `rejected=CLEAR`.
+- Prompt stored as **messages list** (not JSON-encoded string) for chat-template consumers.
+- System prompt patched to allow `CLEAR` in schema for DPO consistency.
+
+Example run (Planner monthly output):
+
+```powershell
+.\venv311\Scripts\python.exe scripts\build_dpo_pairs.py `
+  --inputs data\daily\moe_planner_dec2025.json `
+  --daily-dir data\daily `
+  --out data\dpo\pairs_moe_planner_dec2025_h5_x002.jsonl `
+  --horizon 5 `
+  --x 0.02 `
+  --target-expert analyst
+```
+
+Observed summary (Dec 2025 Planner run):
+- `items_total=1955`
+- `analyst_items=48`
+- `pairs_written=14` (expected: Analyst is low-coverage by design)
+
+### Phase 12.1: Training engine (TRL DPO)
+
+Added `scripts/train_dpo.py` (TRL-based DPO trainer):
+- Loads base model in **4-bit** (QLoRA-friendly).
+- Loads existing SFT adapter as starting point (`models/trader_v2_cot_scaleup/lora_weights`).
+- Accepts dataset format from `build_dpo_pairs.py`:
+  - `prompt`: messages list
+  - `chosen`, `rejected`: JSON strings
+
+Dependency:
+- `trl` added to `requirements.txt`.
+
+### Phase 12.2: Few-shot DPO runs + verification
+
+**v3 (baseline DPO)**:
+- Train:
+
+```powershell
+.\venv311\Scripts\python.exe scripts\train_dpo.py `
+  --base-model Qwen/Qwen2.5-7B-Instruct `
+  --sft-adapter models\trader_v2_cot_scaleup\lora_weights `
+  --data-path data\dpo\pairs_moe_planner_dec2025_h5_x002.jsonl `
+  --output-dir models\trader_v3_dpo_analyst `
+  --epochs 3 `
+  --batch-size 1 `
+  --grad-accum 4 `
+  --lr 1e-6
+```
+
+**v3a (shock therapy)**:
+- Train:
+
+```powershell
+.\venv311\Scripts\python.exe scripts\train_dpo.py `
+  --base-model Qwen/Qwen2.5-7B-Instruct `
+  --sft-adapter models\trader_v2_cot_scaleup\lora_weights `
+  --data-path data\dpo\pairs_moe_planner_dec2025_h5_x002.jsonl `
+  --output-dir models\trader_v3_dpo_analyst_aggressive `
+  --epochs 10 `
+  --batch-size 1 `
+  --grad-accum 4 `
+  --lr 1e-6 `
+  --beta 0.5
+```
+
+**Verification harness (single-model mode, no MoE/router)**:
+
+To observe the DPO effect, inference must allow `CLEAR` in the schema; add `--allow-clear` to inference.
+
+```powershell
+.\venv311\Scripts\python.exe scripts\run_trading_inference.py `
+  --date 2025-12-05 `
+  --universe stock `
+  --tickers NFLX,TCOM,RIOT `
+  --model Qwen/Qwen2.5-7B-Instruct `
+  --load-in-4bit `
+  --adapter models\trader_v3_dpo_analyst_aggressive `
+  --allow-clear `
+  --risk-watch-market NONE `
+  --risk-max-drawdown 1 `
+  --risk-vol-limit 1 `
+  --out data\daily\dpo_verification_v3a_2025-12-05.json
+```
+
+Observed decision distribution on the 14-sample set:
+- v3: `BUY=11`, `HOLD=3`, `SELL=0`, `CLEAR=0`
+- v3a: `BUY=10`, `HOLD=3`, `SELL=1`, `CLEAR=0`
+
+Notable improvement (negative-return case):
+- `2025-12-05 RIOT` forward_return=-0.073776
+  - v3: `BUY`
+  - v3a: `SELL`
