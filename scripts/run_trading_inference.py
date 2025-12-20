@@ -682,7 +682,6 @@ def main() -> None:
     from scripts.generate_etf_teacher_dataset import (
         build_risk_watch_summary,
         build_teacher_messages,
-        extract_news_signals,
     )
 
     daily_dir = Path(args.daily_dir)
