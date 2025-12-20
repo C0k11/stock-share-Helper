@@ -634,6 +634,12 @@ def main() -> None:
     parser.add_argument("--universe", default="auto", choices=["auto", "stock", "etf"])
     parser.add_argument("--use-fast-prompt", action="store_true", default=False)
     parser.add_argument(
+        "--planner-mode",
+        default="off",
+        choices=["off", "rule"],
+        help="Global strategy planner. If enabled, can gate MoE expert choice (defensive/cash_preservation => disable analyst).",
+    )
+    parser.add_argument(
         "--risk-max-drawdown",
         type=float,
         default=0.08,
@@ -672,10 +678,11 @@ def main() -> None:
 
     from src.data.rag import MarketRAG
     from src.risk.gate import RiskGate
+    from src.agent.planner import Planner
     from scripts.generate_etf_teacher_dataset import (
         build_risk_watch_summary,
         build_teacher_messages,
-        validate_label,
+        extract_news_signals,
     )
 
     daily_dir = Path(args.daily_dir)
@@ -706,6 +713,10 @@ def main() -> None:
         max_drawdown_limit_pct=float(dd_limit_pct),
         vol_reduce_trigger_ann_pct=float(vol_trigger_ann_pct),
     )
+
+    planner: Optional[Planner] = None
+    if str(getattr(args, "planner_mode", "off")).lower() == "rule":
+        planner = Planner()
 
     if bool(args.moe_mode):
         scalper = str(args.moe_scalper).strip()
@@ -748,11 +759,22 @@ def main() -> None:
         etf_fp = daily_dir / f"etf_features_{date_str}.json"
 
         missing_tickers: List[str] = []
+        planner_decision: Optional[Dict[str, Any]] = None
         if use_stock:
             if not stock_fp.exists():
                 items = []
             else:
                 stock_payload = json.loads(stock_fp.read_text(encoding="utf-8"))
+                if planner is not None:
+                    try:
+                        mr = None
+                        if isinstance(stock_payload.get("items"), list) and stock_payload.get("items"):
+                            first = stock_payload.get("items")[0]
+                            if isinstance(first, dict):
+                                mr = first.get("market_regime")
+                        planner_decision = planner.decide(market_regime=mr).to_dict()
+                    except Exception:
+                        planner_decision = None
                 stock_items = iter_feature_items(stock_payload)
                 if tickers:
                     stock_map = {str(sym).upper(): it for sym, it in stock_items}
@@ -808,6 +830,8 @@ def main() -> None:
             "risk_watch": risk_watch,
             "items": {},
         }
+        if planner_decision is not None:
+            decisions["planner"] = planner_decision
 
         if missing_tickers:
             decisions["missing_tickers"] = missing_tickers
@@ -863,6 +887,17 @@ def main() -> None:
                         moe_news_threshold=float(args.moe_news_threshold),
                         moe_vol_threshold=float(args.moe_vol_threshold),
                     )
+
+                    if planner_decision is not None:
+                        strategy = str(planner_decision.get("strategy") or "").strip()
+                        router_meta = dict(router_meta)
+                        router_meta["planner_strategy"] = strategy
+                        if strategy and strategy != "aggressive_long" and str(expert) == "analyst":
+                            router_meta["expert_before_planner_gate"] = str(router_meta.get("expert") or str(expert))
+                            expert = "scalper"
+                            router_meta["expert"] = "scalper"
+                            router_meta["planner_gate"] = "disabled_analyst"
+
                     model.set_adapter(str(expert))
                     if str(expert) == "analyst":
                         messages = build_stock_messages(str(symbol), str(date_str), etf_item, stock_news_contexts)
