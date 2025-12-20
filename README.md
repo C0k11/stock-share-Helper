@@ -21,7 +21,7 @@
 | 9 | Dashboard | Done | Streamlit cockpit for NAV, orders, and risk monitoring.
 | 10 | CoT Distillation (Reasoning, Trader v2) | In Progress | Mistake book + teacher reasoning_trace for explainable trading.
 | 11 | Adapter-MoE / Multi-Agent | In Progress | LoRA experts + router (MoE) + tunable RiskGate thresholds for A/B.
-| 12 | RL (DPO/GRPO) | Future | Only after longer-horizon backtest is stable.
+| 12 | RL (DPO/GRPO) | In Progress | DPO data mining + TRL trainer + small-set verification; scale-up after backtest stabilizes.
 
 ---
 
@@ -89,6 +89,8 @@ Stock/
 │   ├── build_daily_etf_features.py   # Generate ETF feature snapshots
 │   ├── run_daily_inference.py        # News structuring (Qwen + LoRA)
 │   ├── run_trading_inference.py      # Trading decisions (RAG + RiskGate)
+│   ├── build_dpo_pairs.py            # Phase 12: mine DPO preference pairs
+│   ├── train_dpo.py                  # Phase 12: TRL DPO training script
 │   ├── generate_daily_report.py      # Generate Markdown report
 │   ├── generate_etf_teacher_dataset.py # Teacher distillation (DeepSeek)
 │   ├── process_rag_data.py           # Process training data with denoising
@@ -161,6 +163,53 @@ Stock/
 - [x] Inference-side MoE routing (`--moe-mode`, scalper vs analyst)
 - [x] System 1 baseline prompt mode (`--use-fast-prompt`)
 - [x] RiskGate thresholds parameterized via CLI (`--risk-max-drawdown`, `--risk-vol-limit`)
+
+### Phase 12: DPO (Few-shot preference alignment) (In Progress)
+
+1) Mine DPO preference pairs from decision logs:
+
+```powershell
+.\venv311\Scripts\python.exe scripts\build_dpo_pairs.py `
+  --inputs data\daily\moe_planner_dec2025.json `
+  --daily-dir data\daily `
+  --out data\dpo\pairs_moe_planner_dec2025_h5_x002.jsonl `
+  --horizon 5 `
+  --x 0.02 `
+  --target-expert analyst
+```
+
+2) Train DPO adapter with TRL:
+
+```powershell
+.\venv311\Scripts\python.exe scripts\train_dpo.py `
+  --base-model Qwen/Qwen2.5-7B-Instruct `
+  --sft-adapter models\trader_v2_cot_scaleup\lora_weights `
+  --data-path data\dpo\pairs_moe_planner_dec2025_h5_x002.jsonl `
+  --output-dir models\trader_v3_dpo_analyst `
+  --epochs 3 `
+  --batch-size 1 `
+  --grad-accum 4 `
+  --lr 1e-6
+```
+
+3) Verify on specific (date,ticker) cases in single-model mode:
+
+Note: use `--allow-clear` so the inference schema allows DPO-trained `CLEAR` outputs.
+
+```powershell
+.\venv311\Scripts\python.exe scripts\run_trading_inference.py `
+  --date 2025-12-05 `
+  --universe stock `
+  --tickers NFLX,TCOM,RIOT `
+  --model Qwen/Qwen2.5-7B-Instruct `
+  --load-in-4bit `
+  --adapter models\trader_v3_dpo_analyst `
+  --allow-clear `
+  --risk-watch-market NONE `
+  --risk-max-drawdown 1 `
+  --risk-vol-limit 1 `
+  --out data\daily\dpo_verification_example.json
+```
 
 ### Phase 8: Multi-Market Expansion / RL (Future)
 - [ ] A-share support (CN_Trader LoRA)
