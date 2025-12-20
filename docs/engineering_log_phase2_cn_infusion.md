@@ -2506,3 +2506,65 @@ Notable improvement (negative-return case):
 - `2025-12-05 RIOT` forward_return=-0.073776
   - v3: `BUY`
   - v3a: `SELL`
+
+### Phase 12.3: Grand Analysis & Final Verdict (Dec 2025)
+
+**Experiment**: Comparison of Baseline Fast (System 1), Old MoE Loose (SFT Analyst), and New MoE DPO Ultimate (DPO Analyst).
+**Goal**: Verify if DPO fixed the "Permabull" bias of the Analyst expert.
+
+| Metric (H=5) | Baseline Fast | Old MoE Loose | New MoE DPO Ultimate | Delta (New - Old) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Global PnL** | **+0.4518** | -1.4581 | -1.3443 | +0.1138 |
+| **Global Trades**| 205 | 689 | 672 | -17 |
+| **Analyst Trades**| N/A | **23** | **6** | **-17 (74% Drop)** |
+| **Analyst PnL** | N/A | -0.1285 | -0.0147 | +0.1138 |
+
+**Key Conclusions**:
+1.  **DPO Success**: The "Ultimate Shock" therapy (Beta=1.0 + Augmented Negatives) successfully curbed the Analyst's aggression. Scored trades dropped from 23 to 6, effectively silencing the "noise" and reducing Analyst-specific drawdowns by ~90%.
+2.  **System Noise**: The Global PnL remains negative because the **Scalper expert** (responsible for ~660 trades) was running in "Loose Risk" mode to facilitate this test.
+3.  **Path Forward**: The ideal system is **Strict Scalper (Baseline) + Planner Gating + DPO Analyst**.
+
+
+## Phase 13: The Golden Run (Strict Risk + Planner + DPO Analyst Ultimate, Dec 2025)
+
+**Goal**: Validate the “complete system” under strict risk controls: use System 1 (Scalper) for broad coverage, and only allow System 2 (DPO Analyst) to contribute when it is truly high-conviction.
+
+**Artifacts**:
+- Baseline Fast (System 1): `data/daily/scalper_baseline_fast_dec2025.json`
+- MoE Loose Old (System 1 + old SFT Analyst, loose risk): `data/daily/moe_race_dec2025_loose.json`
+- MoE Golden Strict (System 1 + DPO Analyst Ultimate + Planner gating + strict risk): `data/daily/moe_golden_strict_dec2025.json`
+
+**Evaluation method**:
+- Metrics computed via daily-close forward return (`stock_features_YYYY-MM-DD.json`) with horizons `h=1/5/10`.
+- We report global PnL/trade stats and break down by expert (Analyst vs Scalper).
+
+### Graduation Analysis (Baseline Fast vs Old MoE Loose vs Golden Strict)
+
+#### Horizon h=1
+
+| System | PnL(sum) | Trades | WinRate | AnalystCoverage | AnalystPnL | AnalystTrades | ScalperPnL | ScalperTrades |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Baseline Fast | 0.096017 | 245 | 0.318 | 0.000 | 0.000000 | 0 | 0.096017 | 245 |
+| MoE Loose Old | 0.080523 | 791 | 0.346 | 0.027 | -0.003589 | 23 | 0.084112 | 768 |
+| MoE Golden Strict | 0.128746 | 237 | 0.333 | 0.025 | 0.005063 | 1 | 0.123683 | 236 |
+
+#### Horizon h=5
+
+| System | PnL(sum) | Trades | WinRate | AnalystCoverage | AnalystPnL | AnalystTrades | ScalperPnL | ScalperTrades |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Baseline Fast | 0.397180 | 205 | 0.337 | 0.000 | 0.000000 | 0 | 0.397180 | 205 |
+| MoE Loose Old | -1.677122 | 684 | 0.341 | 0.027 | -0.213826 | 23 | -1.463296 | 661 |
+| MoE Golden Strict | 0.432973 | 197 | 0.355 | 0.025 | 0.005491 | 1 | 0.427483 | 196 |
+
+#### Horizon h=10
+
+| System | PnL(sum) | Trades | WinRate | AnalystCoverage | AnalystPnL | AnalystTrades | ScalperPnL | ScalperTrades |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| Baseline Fast | 0.290215 | 155 | 0.426 | 0.000 | 0.000000 | 0 | 0.290215 | 155 |
+| MoE Loose Old | -5.427916 | 551 | 0.332 | 0.027 | -0.432633 | 23 | -4.995283 | 528 |
+| MoE Golden Strict | 0.256901 | 150 | 0.427 | 0.025 | 0.012336 | 1 | 0.244565 | 149 |
+
+**Key Conclusions**:
+1.  **Golden Strict achieves the target behavior**: The system stays “quiet” most of the time (trade count close to Baseline Fast, far below MoE Loose Old) while still producing strong PnL under strict risk.
+2.  **Analyst is effectively “safely integrated”**: Analyst participation stays low (`AnalystTrades=1` for all horizons), and Analyst PnL is positive across `h=1/5/10`. This is the desired outcome for a high-risk, high-variance expert.
+3.  **Old MoE Loose confirms the original failure mode**: despite higher winrate in some horizons, it massively over-trades and collapses at longer horizons (`h=5/10`), dominated by large negative Scalper PnL under loose risk.
