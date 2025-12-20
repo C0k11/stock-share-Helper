@@ -2311,3 +2311,85 @@ Expert contribution (MoE Loose, horizon=5):
 Diagnosis:
 - Trader v2 (Analyst) currently exhibits a strong long-only bias (permabull): ~95% of its scored trades are BUY.
 - This provides a concrete training target for Phase 12 DPO: correct long-only bias and teach effective abstention / bearish actions when warranted.
+
+### Phase 11.7 — Rule-Based Planner (MoE Router Gating) Acceptance
+
+**Change summary**:
+- Pushed to `main` successfully.
+- Fixed smoke-test `ImportError` caused by incorrect import of `extract_news_signals`.
+  - Commit pushed: `78aca4b` (`Fix: run_trading_inference uses local extract_news_signals`)
+
+**Smoke test results (end-to-end)**:
+
+Goal: validate Planner schema write + gating (“if strategy != aggressive_long -> force scalper”) on real daily outputs.
+
+Smoke test executed twice to cover:
+- `risk_on` (no gate expected)
+- non-`risk_on` (gate expected)
+
+Case A — 2025-12-10 (`risk_on` → `aggressive_long`, no gate expected)
+- Output: `data/daily/moe_planner_smoke_2025-12-10.json`
+- Schema: top-level `planner` present.
+  - `planner.strategy = "aggressive_long"`
+  - `planner.risk_budget = 1.0`
+- Expected: `planner_gate` should NOT trigger under `risk_on`.
+- Observed: gating not triggered (matches expectation).
+
+Evidence snippet (no planner_gate under aggressive_long):
+```json
+"expert": "scalper",
+"router": {
+  "expert": "scalper",
+  "news_count": 0,
+  "news_score": 0.0,
+  "volatility_ann_pct": 15.4624,
+  "planner_strategy": "aggressive_long"
+}
+```
+
+Case B — 2025-12-01 (`transition` → `cash_preservation`, gate triggers)
+- Output: `data/daily/moe_planner_smoke_2025-12-01.json`
+- Schema: top-level `planner` present.
+  - `planner.strategy = "cash_preservation"`
+  - `planner.risk_budget = 0.4`
+- Expected: disable analyst when in `cash_preservation` regime.
+- Observed (auditable evidence present in JSON): gate triggered and audit fields self-consistent with final adapter selection.
+
+Evidence snippet (gate triggered: analyst quarantined):
+```json
+"expert": "scalper",
+"router": {
+  "expert": "scalper",
+  "news_count": 2,
+  "news_score": 1.0,
+  "volatility_ann_pct": 15.577,
+  "planner_strategy": "cash_preservation",
+  "expert_before_planner_gate": "analyst",
+  "planner_gate": "disabled_analyst"
+}
+```
+
+**Edge acceptance (anti-regression)**:
+
+1) “Not analyst originally” should remain unchanged.
+
+`2025-12-01` has samples where router already selects scalper; no `planner_gate` is applied.
+```json
+"expert": "scalper",
+"router": {
+  "expert": "scalper",
+  "news_count": 0,
+  "news_score": 0.0,
+  "volatility_ann_pct": 21.0879,
+  "planner_strategy": "cash_preservation"
+}
+```
+
+2) `risk_budget` boundary values.
+
+Current gating logic depends only on `strategy`, not on `risk_budget`, so there is no float threshold to mis-trigger. If we introduce budget-based gating later, add explicit threshold tests (equals / +/- epsilon) to prevent off-by-one behavior.
+
+**Conclusion**:
+- Planner schema + gating logic verified end-to-end on real daily outputs.
+- Smoke test checklist satisfied.
+- Interpretation: “stop-biting-cage” is enforced; Analyst is quarantined outside `aggressive_long`, with auditable before/after expert fields.
