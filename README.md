@@ -21,7 +21,7 @@
 | 9 | Dashboard | Done | Streamlit cockpit for NAV, orders, and risk monitoring.
 | 10 | CoT Distillation (Reasoning, Trader v2) | In Progress | Mistake book + teacher reasoning_trace for explainable trading.
 | 11 | Adapter-MoE / Multi-Agent | In Progress | LoRA experts + router (MoE) + tunable RiskGate thresholds for A/B.
-| 12 | RL (DPO/GRPO) | In Progress | DPO data mining + TRL trainer + small-set verification; scale-up after backtest stabilizes.
+| 12 | RL (DPO/GRPO) | Done | DPO preference surgery successfully reduced Analyst noise; full-month MoE run + grand analysis complete (Dec 2025).
 
 ---
 
@@ -91,6 +91,7 @@ Stock/
 │   ├── run_trading_inference.py      # Trading decisions (RAG + RiskGate)
 │   ├── build_dpo_pairs.py            # Phase 12: mine DPO preference pairs
 │   ├── train_dpo.py                  # Phase 12: TRL DPO training script
+│   ├── analyze_moe_results.py         # Phase 11/12: MoE vs Baseline analysis
 │   ├── generate_daily_report.py      # Generate Markdown report
 │   ├── generate_etf_teacher_dataset.py # Teacher distillation (DeepSeek)
 │   ├── process_rag_data.py           # Process training data with denoising
@@ -164,7 +165,7 @@ Stock/
 - [x] System 1 baseline prompt mode (`--use-fast-prompt`)
 - [x] RiskGate thresholds parameterized via CLI (`--risk-max-drawdown`, `--risk-vol-limit`)
 
-### Phase 12: DPO (Few-shot preference alignment) (In Progress)
+### Phase 12: DPO (Few-shot preference alignment) (Done)
 
 1) Mine DPO preference pairs from decision logs:
 
@@ -210,6 +211,46 @@ Note: use `--allow-clear` so the inference schema allows DPO-trained `CLEAR` out
   --risk-vol-limit 1 `
   --out data\daily\dpo_verification_example.json
 ```
+
+4) Run full-month MoE inference with DPO Analyst (Loose Risk, Dec 2025):
+
+```powershell
+.\venv311\Scripts\python.exe scripts\run_trading_inference.py `
+  --date-range 2025-12-01 2025-12-31 `
+  --universe stock `
+  --moe-mode `
+  --planner-mode rule `
+  --moe-analyst models\trader_v3_dpo_analyst_ultimate\lora_weights `
+  --allow-clear `
+  --risk-watch-market NONE `
+  --risk-max-drawdown 1 `
+  --risk-vol-limit 1 `
+  --out data\daily\moe_dpo_ultimate_dec2025.json
+```
+
+5) Grand analysis (Baseline Fast vs Old MoE Loose vs New MoE DPO Ultimate, H=5):
+
+```powershell
+.\venv311\Scripts\python.exe scripts\analyze_moe_results.py `
+  --moe data\daily\moe_dpo_ultimate_dec2025.json `
+  --baseline data\daily\scalper_baseline_fast_dec2025.json `
+  --report data\backtest\report_2025_12_final.json `
+  --strategy v1_1_news `
+  --horizon 5
+```
+
+### Phase 12.3: Grand Analysis & Final Verdict (Dec 2025)
+
+| Metric (H=5) | Baseline Fast | Old MoE Loose | New MoE DPO Ultimate | Delta (New - Old) |
+| :--- | :--- | :--- | :--- | :--- |
+| **Global PnL** | **+0.4518** | -1.4581 | -1.3443 | +0.1138 |
+| **Global Trades**| 205 | 689 | 672 | -17 |
+| **Analyst Trades**| N/A | **23** | **6** | **-17 (74% Drop)** |
+| **Analyst PnL** | N/A | -0.1285 | -0.0147 | +0.1138 |
+
+Key conclusions:
+- DPO successfully reduced Analyst noise (23 -> 6 scored trades) and shrank Analyst drawdown.
+- Global PnL remains negative in this experiment because Scalper was intentionally run under Loose Risk.
 
 ### Phase 8: Multi-Market Expansion / RL (Future)
 - [ ] A-share support (CN_Trader LoRA)
@@ -598,8 +639,8 @@ MIT License
 | 8 | 模拟盘（Paper Trading） | 完成 | 滚动模拟 + 状态持久化 + RiskGate CLEAR。
 | 9 | 监控看板（Dashboard） | 完成 | Streamlit 驾驶舱：NAV/订单/风险。
 | 10 | CoT 蒸馏 / 推理升级（Trader v2） | 进行中 | 错题本 + Teacher 推理摘要 reasoning_trace。
-| 11 | Adapter-MoE / Multi-Agent | 远期 | 多个 LoRA 专家 + 轻量 Router。
-| 12 | RL（DPO/GRPO） | 远期 | 仅在更长窗口回测稳定后考虑。
+| 11 | Adapter-MoE / Multi-Agent | 进行中 | 多个 LoRA 专家 + 轻量 Router + 可调 RiskGate，用于 A/B。
+| 12 | RL（DPO/GRPO） | 完成 | DPO 已显著抑制 Analyst“死多头”噪声；Dec 2025 全月 MoE 跑完并完成总评。
 
 ---
 
@@ -667,6 +708,9 @@ Stock/
 │   ├── build_daily_etf_features.py   # 生成ETF特征快照
 │   ├── run_daily_inference.py        # 新闻结构化（Qwen + LoRA）
 │   ├── run_trading_inference.py      # 交易决策（RAG + RiskGate）
+│   ├── build_dpo_pairs.py            # Phase 12：挖掘 DPO 偏好对
+│   ├── train_dpo.py                  # Phase 12：TRL DPO 训练脚本
+│   ├── analyze_moe_results.py         # Phase 11/12：MoE vs Baseline 指标分析
 │   ├── generate_daily_report.py      # 生成Markdown日报
 │   ├── generate_etf_teacher_dataset.py # Teacher蒸馏（DeepSeek）
 │   ├── process_rag_data.py           # 处理训练数据（含降噪）
@@ -739,6 +783,20 @@ Stock/
 - [ ] A股支持（CN_Trader LoRA）
 - [ ] 加股（CA ETFs）
 - [ ] 黄金/大宗商品（Macro_Gold LoRA）
+
+### Phase 12.3：总评与最终结论（Dec 2025）
+
+| 指标（H=5） | Baseline Fast | Old MoE Loose | New MoE DPO Ultimate | 增量（New - Old） |
+| :--- | :--- | :--- | :--- | :--- |
+| **全局 PnL** | **+0.4518** | -1.4581 | -1.3443 | +0.1138 |
+| **全局交易数** | 205 | 689 | 672 | -17 |
+| **Analyst 交易数** | N/A | **23** | **6** | **-17（下降 74%）** |
+| **Analyst PnL** | N/A | -0.1285 | -0.0147 | +0.1138 |
+
+结论：
+- DPO 手术刀式地切掉了 Analyst 大量噪声交易（23 -> 6），显著收敛了 Analyst 侧回撤。
+- 本次实验全局依然为负，核心原因是为了验证融合效果，Scalper 以 Loose 风控运行，产生了大量噪声交易。
+- 终局路径：Strict Scalper（Baseline） + Planner 大局观 + DPO Analyst（谨慎 System 2）。
 
 ### Phase 10: CoT 蒸馏 / 推理升级（Trader v2）
 - [x] 从回测报告生成错题本（PoC）
