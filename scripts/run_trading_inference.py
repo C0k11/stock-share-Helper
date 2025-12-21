@@ -685,6 +685,7 @@ def main() -> None:
     parser.add_argument("--risk-watch-top", type=int, default=3)
     parser.add_argument("--max-new-tokens", type=int, default=512)
     parser.add_argument("--temperature", type=float, default=0.1)
+    parser.add_argument("--progress", action="store_true", default=False)
     parser.add_argument("--load-4bit", dest="load_4bit", action="store_true")
     parser.add_argument("--load-in-4bit", dest="load_4bit", action="store_true")
     parser.add_argument("--no-load-4bit", dest="load_4bit", action="store_false")
@@ -789,7 +790,10 @@ def main() -> None:
     else:
         out = {}
 
-    for date_str in date_list:
+    total_dates = len(date_list)
+    for i, date_str in enumerate(date_list, start=1):
+        if bool(args.progress) and total_dates > 1:
+            print(f"[date {i}/{total_dates}] {date_str}", flush=True)
         stock_fp = daily_dir / f"stock_features_{date_str}.json"
         etf_fp = daily_dir / f"etf_features_{date_str}.json"
 
