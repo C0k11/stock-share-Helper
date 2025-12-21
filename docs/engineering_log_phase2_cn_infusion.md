@@ -1933,7 +1933,7 @@ def select_adapter(symbol: str, market: str) -> str:
 - `--min-news-abs-impact <float>`：默认 0.5
 - `--max-news-signals <int>`：默认 3
 
-### 19.19 Phase 6.2 验收：Final Exam（2025-12-15）与对照实验结论 (2025-12-19)
+### 19.19 Phase 6.2 验收：最终测试（2025-12-15）与对照实验结论 (2025-12-19)
 
 **目标**：验证 v1.1 是否具备“条件触发”能力：当 prompt 中出现 News Context 时，决策与解释是否发生可观测变化；同时验证禁用 News 时是否能回退到技术面行为。
 
@@ -2028,7 +2028,7 @@ def select_adapter(symbol: str, market: str) -> str:
 **文档同步**：
 - `README.md` 与本工程日志的 Phase 状态与主线模型口径保持一致：以 3B News + 7B Trader 为默认主线，14B 作为历史实验封存。
 
-### 19.22 Phase 7 Milestone 2：NAV Backtest & Execution Tuning（2025-12-19）
+### 19.22 Phase 7 里程碑 2：NAV 回测与执行调优（2025-12-19）
 
 **目标**：在真实资金曲线（NAV）口径下验证 Stock Trader v1.1（tech+news）是否能将“高胜率”转化为可持续收益，并定位“高胜率但收益为负”的根因，给出可固化的执行层策略。
 
@@ -2041,21 +2041,21 @@ def select_adapter(symbol: str, market: str) -> str:
 - 回测脚本：`scripts/backtest_trader_nav.py`
 
 **实验过程与发现**：
-1. Raw Execution（Hold=Flat）
+1. 原始执行（Hold=Flat）
   - 配置：`--hold-policy flat`
   - 结果：
-    - v1_tech：Return `+1.22%`，Fees `$79.88`
-    - v1_1_news：Return `-0.27%`，Trades `18`，Fees `$300.34`
+    - v1_tech：收益 `+1.22%`，费用 `$79.88`
+    - v1_1_news：收益 `-0.27%`，交易 `18` 笔，费用 `$300.34`
     - v1_1_ablation：与 v1_tech 对齐
-  - 结论：v1.1 在信号层面具备更高胜率，但由于执行层将 HOLD 解释为强制离场，且反向信号立即 flip，导致高换手与成本拖累，并在震荡中反复出入场。
+  - 结论：v1.1 在信号层面具备更高胜率，但由于执行层将 HOLD 解释为强制离场，且反向信号立即翻转，导致高换手与成本拖累，并在震荡中反复出入场。
 
-2. Hold=Keep Policy
+2. Hold=Keep 策略
   - 配置：`--hold-policy keep`
   - 现象：对 v1_tech 有降频效果，但对 v1_1_news 改善有限。
   - 原因：v1_1_news 在该窗口几乎不输出 HOLD，而是频繁给出 BUY/SELL（直接反向），绕开了 HOLD 分支。
 
-3. Execution Filter（最终方案：Reverse Confirmation）
-  - 调整：引入反向信号连续确认机制，连续 N 天反向信号才允许 flip。
+3. 执行过滤器（最终方案：反向确认）
+  - 调整：引入反向信号连续确认机制，连续 N 天反向信号才允许翻转。
   - 最终参数：`Hold-Policy=Keep` + `Reverse-Confirm-Days=2`
   - 结果（Confirm=2）：
     - v1_tech：Return `+1.27%`，MaxDD `-1.12%`
@@ -2070,37 +2070,37 @@ def select_adapter(symbol: str, market: str) -> str:
 - 执行层默认策略：`Hold-Policy=Keep`，`Reverse-Confirm-Days=2`
 - 说明：该决策用于将 news alpha 转化为可执行收益，并降低过度交易与回撤风险。
 
-### 19.23 Phase 7 Completion：Execution Logic Modularization（2025-12-19）
-- **Refactoring**：将执行层状态机逻辑从脚本中抽离为可复用模块 `src/strategy/execution.py`（`TickerExecutionState`），用于统一回测与未来模拟盘/实盘执行。
-- **Validation**：通过一致性冒烟测试验证模块化后交易序列与 P0.5 版本等价，避免“回测逻辑 ≠ 实盘逻辑”的执行偏差风险。
-- **Current Best Config**：
+### 19.23 Phase 7 完成：执行逻辑模块化（2025-12-19）
+- **重构**：将执行层状态机逻辑从脚本中抽离为可复用模块 `src/strategy/execution.py`（`TickerExecutionState`），用于统一回测与未来模拟盘/实盘执行。
+- **验证**：通过一致性冒烟测试验证模块化后交易序列与 P0.5 版本等价，避免"回测逻辑 ≠ 实盘逻辑"的执行偏差风险。
+- **当前最佳配置**：
   - `Hold-Policy`：Keep
   - `Reverse-Confirm-Days`：2
   - `Min-Hold-Days`：0
-- **Status**：Phase 7 回测阶段收官；受限于数据时效（价格数据只能覆盖到当下可获得范围），更长窗口回测暂停，进入 Phase 8（Paper Trading / Forward Testing）准备。
+- **状态**：Phase 7 回测阶段收官；受限于数据时效（价格数据只能覆盖到当下可获得范围），更长窗口回测暂停，进入 Phase 8（模拟盘 / 前向测试）准备。
 
-## 2025-12-19 Phase 8 Milestone: Paper Trading Automation
+## Phase 8 里程碑：模拟盘自动化（2025-12-19）
 **目标**：构建支持每日滚动运行、状态持久化与自动订单生成的模拟盘系统。
 
 **核心交付**：
-1. **Execution Engine Upgrade**
+1. **执行引擎升级**
   - `src/strategy/execution.py` 增加序列化/反序列化支持。
   - 增加 `force_flat` 接口以支持 Risk Gate（CLEAR）信号。
-2. **Paper Trading Script**
+2. **模拟盘脚本**
   - 新增 `scripts/run_paper_trading.py`。
-  - 实现 Mock 信号与 Real Inference 信号的兼容适配。
+  - 实现 Mock 信号与真实推理信号的兼容适配。
   - 实现每日状态接力（State Handover）与幂等性保护。
-3. **Validation (Rolling Drill)**
-  - Scenario：12-18（Init）-> 12-19（Hold/ForceFlat）-> 12-20（Pending Reverse）-> 12-21（Confirm Flip）。
-  - Result：
+3. **验证（滚动演练）**
+  - 场景：12-18（初始化）-> 12-19（持有/强制平仓）-> 12-20（待反转）-> 12-21（确认反转）。
+  - 结果：
     - 状态接力正确（Days Held 递增）。
     - Risk Gate 正确触发强制平仓。
-    - Confirm=2 机制成功在 Day 3 抑制反向，在 Day 4 执行反转。
-    - Flip 交易金额正确计算（2x Trade Dollar）。
+    - Confirm=2 机制成功在第 3 天抑制反向，在第 4 天执行反转。
+    - 反转交易金额正确计算（2x Trade Dollar）。
 
-**状态**：System Ready for Deployment.
+**状态**：系统已就绪，可用于部署。
 
-## 2025-12-19 Phase 10 Prototype: CoT 蒸馏 / Reasoning 升级（Trader v2）
+## Phase 10 原型：CoT 蒸馏 / 推理升级（Trader v2，2025-12-19）
 
 **目标**：在保持严格 JSON 输出与执行层安全闭环不变的前提下，引入可展示的推理摘要（Reasoning Trace），提升对“新闻相关性”与“证据不足时不交易”的识别能力，为后续微调与 Dashboard 展示奠定数据与工程基础。
 
@@ -2132,59 +2132,59 @@ def select_adapter(symbol: str, market: str) -> str:
 2. 设计 Trader 推理输出 schema：在 Strict JSON 中增加 `reasoning_trace`（最多 3 条要点，强限制长度）。
 3. 将 `reasoning_trace` 接入 Dashboard 展示，并在 `run_trading_inference.py` 中保持解析稳定与风控优先级不变。
 
-### Phase 10.2 v4 Validation: The "Specific Citation" Breakthrough
+### Phase 10.2 v4 验证：特定引用突破
 
-**Result**: Teacher model successfully cited specific news events in reasoning traces, validating the System 2 hypothesis.
+**结果**：教师模型在推理轨迹中成功引用了特定新闻事件，验证了 System 2 假设。
 
-**Sample (TSLA, 2025-12-08)**:
-- **News Context**: "Netflix, Tesla downgraded: Wall Street's top analyst calls"
-- **Student Decision (Wrong)**: SELL
-- **Teacher Correction**: BUY
-- **Teacher Reasoning**:
-  > "News 'Netflix, Tesla downgraded' may have been priced in, with no significant negative impact noted, aligning with positive returns."
+**样本（TSLA，2025-12-08）**：
+- **新闻上下文**："Netflix, Tesla downgraded: Wall Street's top analyst calls"
+- **学生决策（错误）**：SELL
+- **教师纠正**：BUY
+- **教师推理**：
+  > "新闻 'Netflix, Tesla downgraded' 可能已被市场定价，未观察到显著负面影响，与正向收益一致。"
 
-**Conclusion**: The pipeline now generates high-quality, news-aware reasoning data suitable for CoT distillation.
+**结论**：管道现已生成高质量、新闻感知的推理数据，适用于 CoT 蒸馏。
 
-### Phase 10.3: Reasoning Trace Wiring (Inference + Dashboard)
+### Phase 10.3：推理轨迹接入（推理 + 仪表板）
 
-**Commit**: `d7282b6`
+**提交**：`d7282b6`
 
-**Changes**:
-1. `scripts/run_trading_inference.py`:
-   - Updated `SYSTEM_PROMPT_STOCK_STRICT_JSON` to require `reasoning_trace` (3 short bullet points).
-   - Added `_normalize_reasoning_trace()` to ensure consistent output format.
-   - Preserved ETF mode compatibility by stripping `reasoning_trace` before `validate_label()`.
+**变更**：
+1. `scripts/run_trading_inference.py`：
+   - 更新 `SYSTEM_PROMPT_STOCK_STRICT_JSON`，要求包含 `reasoning_trace`（3 条简短要点）。
+   - 新增 `_normalize_reasoning_trace()` 以确保输出格式一致。
+   - 在 `validate_label()` 前剥离 `reasoning_trace`，保持 ETF 模式兼容性。
 
-2. `scripts/dashboard.py`:
-   - Added **AI Reasoning Inspector** section.
-   - Displays `parsed.decision`, `parsed.analysis`, `parsed.reasoning_trace`.
-   - Shows `final.action`, `final.target_position`, `final.trace` (RiskGate audit trail).
+2. `scripts/dashboard.py`：
+   - 新增 **AI 推理检查器** 部分。
+   - 显示 `parsed.decision`、`parsed.analysis`、`parsed.reasoning_trace`。
+   - 展示 `final.action`、`final.target_position`、`final.trace`（RiskGate 审计轨迹）。
 
-**Validation**: Ran inference with Qwen2.5-7B + LoRA, confirmed `reasoning_trace` appears in output JSON.
+**验证**：使用 Qwen2.5-7B + LoRA 运行推理，确认 `reasoning_trace` 出现在输出 JSON 中。
 
-### Phase 10.4: Trader v2 Fine-Tuning (CoT Distillation)
+### Phase 10.4：Trader v2 微调（CoT 蒸馏）
 
-**Objective**: Train a Student model that can generate `reasoning_trace` autonomously.
+**目标**：训练一个能够自主生成 `reasoning_trace` 的学生模型。
 
-**Data Pipeline**:
-1. `scripts/build_trader_v2_dataset.py`:
-   - Converts `cot_mistakes_100_v4.jsonl` (Teacher corrections) to SFT conversations format.
-   - Supports replay buffer mixing from existing trader data to prevent catastrophic forgetting.
-   - Adapts replay samples to v2 format (unified system prompt + placeholder `reasoning_trace`).
+**数据流水线**：
+1. `scripts/build_trader_v2_dataset.py`：
+   - 将 `cot_mistakes_100_v4.jsonl`（教师纠正）转换为 SFT 对话格式。
+   - 支持与现有交易数据混合回放缓冲区，防止灾难性遗忘。
+   - 将回放样本适配为 v2 格式（统一系统提示词 + `reasoning_trace` 占位符）。
 
-2. **Dataset Stats**:
-   - CoT samples: 5 (high-quality Teacher corrections with news citations)
-   - Replay buffer: 5 (adapted from `trader_stock_sft_v1_plus_news.json`)
-   - Train/Val split: 8/2
+2. **数据集统计**：
+   - CoT 样本：5（包含新闻引用的高质量教师纠正）
+   - 回放缓冲区：5（从 `trader_stock_sft_v1_plus_news.json` 适配）
+   - 训练/验证分割：8/2
 
-**Fine-Tuning**:
-- Base: `Qwen/Qwen2.5-7B-Instruct`
-- Method: QLoRA (4-bit quantization)
-- Epochs: 3
-- Output: `models/trader_v2_cot/lora_weights`
-- Train loss: 2.55
+**微调配置**：
+- 基础模型：`Qwen/Qwen2.5-7B-Instruct`
+- 方法：QLoRA（4 位量化）
+- 训练轮数：3
+- 输出：`models/trader_v2_cot/lora_weights`
+- 训练损失：2.55
 
-**Validation Result**:
+**验证结果**：
 ```json
 {
   "decision": "BUY",
@@ -2198,97 +2198,97 @@ def select_adapter(symbol: str, market: str) -> str:
 }
 ```
 
-**RiskGate Override Example (TSLA)**:
-- `parsed.decision`: BUY (model recommendation)
-- `final.action`: CLEAR (RiskGate forced liquidation due to -14% drawdown exceeding -8% limit)
-- This demonstrates clean **Data Lineage**: model reasoning and risk control decisions are preserved separately.
+**RiskGate 覆盖示例（TSLA）**：
+- `parsed.decision`：BUY（模型推荐）
+- `final.action`：CLEAR（RiskGate 强制清算，因 -14% 回撤超过 -8% 限制）
+- 这展现了清晰的**数据血缘**：模型推理与风险控制决策分开保存。
 
-**Status**: Phase 10 Complete. Trader v2 successfully generates structured reasoning traces.
+**状态**：Phase 10 完成。Trader v2 成功生成结构化推理轨迹。
 
-### Phase 10.4 (Route 2): Incremental / Continued Fine-tuning (Old LoRA Warm-start)
+### Phase 10.4（路径 2）：增量/持续微调（旧 LoRA  warm-start）
 
-**Motivation**: Evaluate the engineering trade-off between mixed re-training vs continued fine-tuning on top of an existing v1.1 LoRA adapter.
+**动机**：评估混合重训练与在现有 v1.1 LoRA 适配器基础上持续微调之间的工程权衡。
 
-**Engineering Enablement**:
-- `scripts/finetune_llm.py` supports `--init-adapter`.
-- `src/llm/finetune/train.py` supports warm-start via `PeftModel.from_pretrained(..., is_trainable=True)`.
+**工程实现**：
+- `scripts/finetune_llm.py` 支持 `--init-adapter`。
+- `src/llm/finetune/train.py` 支持通过 `PeftModel.from_pretrained(..., is_trainable=True)` 进行热启动。
 
-**Run**:
-- Base: `Qwen/Qwen2.5-7B-Instruct`
-- Init adapter: `models/trader_stock_v1_1_tech_plus_news/lora_weights`
-- Output: `models/trader_v2_incremental/lora_weights`
+**运行配置**：
+- 基础模型：`Qwen/Qwen2.5-7B-Instruct`
+- 初始适配器：`models/trader_stock_v1_1_tech_plus_news/lora_weights`
+- 输出：`models/trader_v2_incremental/lora_weights`
 
-**Quick A/B Observation (Smoke)**:
-- Both mixed (`trader_v2_cot`) and incremental (`trader_v2_incremental`) produced strict JSON with `reasoning_trace` on the same test day.
-- On a tiny dataset, behavior is very similar; recommend scaling CoT samples before making a final choice.
+**快速 A/B 观察（冒烟测试）**：
+- 混合训练（`trader_v2_cot`）与增量训练（`trader_v2_incremental`）在同一天测试中均产生包含 `reasoning_trace` 的严格 JSON。
+- 在小数据集上，行为非常相似；建议在做出最终选择前扩展 CoT 样本规模。
 
-### Phase 10.5: Scale-up CoT Distillation (News Cases) + Trader v2 Superset
+### Phase 10.5：扩展 CoT 蒸馏（新闻案例）+ Trader v2 超集
 
-**Goal**: Scale CoT distillation beyond mistake-only sampling by covering all news-conditioned trades, then fine-tune a Superset Trader v2 that preserves v1.1 behavior while learning news-grounded reasoning.
+**目标**：通过覆盖所有新闻条件交易，将 CoT 蒸馏扩展至超越仅错误样本采样，随后微调一个 Trader v2 超集，在保持 v1.1 行为的同时学习基于新闻的推理。
 
-**Key Changes**:
-- `scripts/sample_mistakes.py` supports `--mode all_news` to sample all trades with strict ticker-news (not only negative PnL).
-- `scripts/generate_cot_teacher.py` supports `--mode news_case` (neutral coaching prompt) to avoid hallucinating “original was wrong”.
-- `scripts/build_trader_v2_dataset.py` supports CLI aliases (`--cot-data/--replay-data/--out`) and `--max-replay-samples`.
+**关键变更**：
+- `scripts/sample_mistakes.py` 支持 `--mode all_news`，用于采样所有具有严格 ticker-news 的交易（不仅限于负 PnL）。
+- `scripts/generate_cot_teacher.py` 支持 `--mode news_case`（中性指导提示词），以避免幻觉"原始决策一定错误"。
+- `scripts/build_trader_v2_dataset.py` 支持 CLI 别名（`--cot-data/--replay-data/--out`）和 `--max-replay-samples`。
 
-**Dataset Build (Scale-up)**:
-- CoT: 12 (`cot_news_cases_scaleup.jsonl`)
-- Replay: 1000 (capped)
-- Output:
-  - Train: `data/finetune/train_trader_v2_scaleup.json`
-  - Val: `data/finetune/train_trader_v2_scaleup_val.json`
+**数据集构建（扩展）**：
+- CoT：12（`cot_news_cases_scaleup.jsonl`）
+- 回放：1000（上限）
+- 输出：
+  - 训练集：`data/finetune/train_trader_v2_scaleup.json`
+  - 验证集：`data/finetune/train_trader_v2_scaleup_val.json`
 
-**Fine-tune**:
-- Base: `Qwen/Qwen2.5-7B-Instruct`
-- Method: QLoRA + gradient checkpointing
-- Output: `models/trader_v2_cot_scaleup/lora_weights`
+**微调配置**：
+- 基础模型：`Qwen/Qwen2.5-7B-Instruct`
+- 方法：QLoRA + 梯度检查点
+- 输出：`models/trader_v2_cot_scaleup/lora_weights`
 
-**Inference Acceptance (TSLA / 2025-12-08)**:
-- Verified `reasoning_trace` strict 3 bullets.
-- Verified news-grounded reasoning via injected headline (“Tesla downgraded”).
+**推理验收（TSLA / 2025-12-08）**：
+- 验证 `reasoning_trace` 严格包含 3 条要点。
+- 通过注入标题（"Tesla downgraded"）验证基于新闻的推理。
 
-**Production Fix (Inference News Injection Robustness)**:
-- `scripts/run_trading_inference.py` now injects ticker-matched raw headlines even when `signals_YYYY-MM-DD.json` items have `parse_ok=false` (signal parser failure).
-- Added stronger prompting constraints so that when news is provided, at least one `reasoning_trace` bullet must cite a phrase from the provided news title.
+**生产修复（推理新闻注入鲁棒性）**：
+- `scripts/run_trading_inference.py` 现即使在 `signals_YYYY-MM-DD.json` 条目为 `parse_ok=false`（信号解析失败）时，也会注入匹配 ticker 的原始标题。
+- 增加更强的提示约束，当提供新闻时，至少一条 `reasoning_trace` 要点必须引用提供的新闻标题中的短语。
 
-### Phase 11.1: Adapter-MoE Router (Heuristic, Rule-based)
+### Phase 11.1：Adapter-MoE 路由（启发式、基于规则）
 
-**Goal**: Reduce inference cost by routing between fast technical expert (scalper) and slower news reasoning expert (analyst) on-demand.
+**目标**：通过按需在快速技术专家（scalper）与较慢的新闻推理专家（analyst）之间路由，降低推理成本。
 
-**Expert Adapters (same base model)**:
-- Scalper: `models/trader_stock_v1_1_tech_plus_news/lora_weights`
-- Analyst: `models/trader_v2_cot_scaleup/lora_weights`
+**专家适配器（同一基础模型）**：
+- Scalper：`models/trader_stock_v1_1_tech_plus_news/lora_weights`
+- Analyst：`models/trader_v2_cot_scaleup/lora_weights`
 
-**Inference Engine Upgrade** (`scripts/run_trading_inference.py`):
-- `--moe-mode` loads both adapters once (single backbone) and switches per ticker via `set_adapter()`.
-- Heuristic routing (default): if ticker has matched news contexts, route to `analyst`; otherwise route to `scalper`.
-- Output JSON records per-symbol `expert` + `router` meta for auditability.
+**推理引擎升级**（`scripts/run_trading_inference.py`）：
+- `--moe-mode` 一次性加载两个适配器（单一主干），并通过 `set_adapter()` 按 ticker 切换。
+- 启发式路由（默认）：如果 ticker 有匹配的新闻上下文，路由至 `analyst`；否则路由至 `scalper`。
+- 输出 JSON 记录每个标的的 `expert` + `router` 元数据，用于审计。
 
-### Phase 11.6: RiskGate Jailbreak (Parameterized Risk Limits)
+### Phase 11.6：RiskGate 参数化（参数化风险限制）
 
-**Finding**:
-- Analyst routed samples showed high intent divergence vs baseline but were mostly blocked by RiskGate, resulting in near-zero realized delta.
+**发现**：
+- 路由至 Analyst 的样本相比基线显示出较高的意图分歧，但多数被 RiskGate 拦截，导致实现的增量接近零。
 
-**Upgrade**:
-- `src/risk/gate.py` now supports configurable thresholds via constructor:
-  - `max_drawdown_limit_pct` (default `-8.0`)
-  - `vol_reduce_trigger_ann_pct` (default `30.0`)
-- `scripts/run_trading_inference.py` exposes RiskGate overrides via CLI:
-  - `--risk-max-drawdown` (e.g. `0.30` for 30%; also accepts `30`)
-  - `--risk-vol-limit` daily vol (e.g. `0.05` for 5% daily; converted to annualized trigger using `sqrt(252)`)
+**升级**：
+- `src/risk/gate.py` 现通过构造函数支持可配置阈值：
+  - `max_drawdown_limit_pct`（默认 `-8.0`）
+  - `vol_reduce_trigger_ann_pct`（默认 `30.0`）
+- `scripts/run_trading_inference.py` 通过 CLI 暴露 RiskGate 覆盖选项：
+  - `--risk-max-drawdown`（例如 `0.30` 表示 30%；也接受 `30`）
+  - `--risk-vol-limit` 日波动率（例如 `0.05` 表示 5% 日波动；使用 `sqrt(252)` 转换为年化触发值）
 
-**Purpose**:
-- Enable strict vs loose risk A/B experiments to validate whether Trader v2 (Analyst) alpha is suppressed by overly conservative RiskGate defaults.
+**目的**：
+- 启用严格与宽松风险的 A/B 实验，验证 Trader v2（Analyst）的 alpha 是否被过于保守的 RiskGate 默认值抑制。
 
-**Autopsy (MoE Loose vs Baseline Fast, Dec 2025)**:
+**事后分析（MoE 宽松 vs 基线快速，2025 年 12 月）**：
 
-Context:
-- Baseline Fast output: `data/daily/scalper_baseline_fast_dec2025.json`
-- MoE Strict output: `data/daily/moe_race_dec2025.json`
-- MoE Loose output: `data/daily/moe_race_dec2025_loose.json`
-- Metrics computed by `scripts/analyze_moe_results.py` using daily close-based forward return.
+上下文：
+- 基线快速输出：`data/daily/scalper_baseline_fast_dec2025.json`
+- MoE 严格输出：`data/daily/moe_race_dec2025.json`
+- MoE 宽松输出：`data/daily/moe_race_dec2025_loose.json`
+- 指标由 `scripts/analyze_moe_results.py` 使用基于日收盘的前向收益计算。
 
-Horizon scan (MoE Loose vs Baseline Fast):
+Horizon 扫描（MoE 宽松 vs 基线快速）：
 
 | Horizon | Baseline trades_scored | Baseline pnl_sum | Baseline winrate | MoE Loose trades_scored | MoE Loose pnl_sum | MoE Loose winrate | Delta (MoE - Baseline) |
 |---:|---:|---:|---:|---:|---:|---:|---:|
@@ -2296,46 +2296,46 @@ Horizon scan (MoE Loose vs Baseline Fast):
 | 5 | 205 | +0.397180 | 0.3366 | 684 | -1.677122 | 0.3406 | -2.074302 |
 | 10 | 155 | +0.290215 | 0.4258 | 551 | -5.427916 | 0.3321 | -5.718131 |
 
-Key conclusion:
-- MoE Loose does not release positive alpha; it amplifies noise by drastically increasing trade count, causing large negative PnL at horizon 5/10.
+关键结论：
+- MoE 宽松模式并未释放正向 alpha；通过大幅增加交易次数放大噪音，在 horizon 5/10 造成大量负收益。
 
-Action breakdown (MoE Loose, horizon=5, scored trades=684):
-- BUY: 619 (winrate=0.3667, pnl_sum=-1.620144)
-- SELL: 65 (winrate=0.0923, pnl_sum=-0.056979)
+操作分解（MoE 宽松，horizon=5，评分交易=684）：
+- BUY：619（胜率=0.3667，PnL 总和=-1.620144）
+- SELL：65（胜率=0.0923，PnL 总和=-0.056979）
 
-Expert contribution (MoE Loose, horizon=5):
-- Analyst scored trades: 23
-  - BUY: 22 (winrate=0.3182, pnl_sum=-0.213826)
-  - SELL: 1
+专家贡献（MoE 宽松，horizon=5）：
+- Analyst 评分交易：23
+  - BUY：22（胜率=0.3182，PnL 总和=-0.213826）
+  - SELL：1
 
-Diagnosis:
-- Trader v2 (Analyst) currently exhibits a strong long-only bias (permabull): ~95% of its scored trades are BUY.
-- This provides a concrete training target for Phase 12 DPO: correct long-only bias and teach effective abstention / bearish actions when warranted.
+诊断：
+- Trader v2（Analyst）当前表现出强烈的只做多偏向（permanently bullish）：约 95% 的评分交易为 BUY。
+- 这为 Phase 12 DPO 提供了具体的训练目标：纠正只做多偏向，并在适当时教授有效弃权/看空操作。
 
-### Phase 11.7 — Rule-Based Planner (MoE Router Gating) Acceptance
+### Phase 11.7：基于规则的规划器（MoE 路由门控）验收
 
-**Change summary**:
-- Pushed to `main` successfully.
-- Fixed smoke-test `ImportError` caused by incorrect import of `extract_news_signals`.
-  - Commit pushed: `78aca4b` (`Fix: run_trading_inference uses local extract_news_signals`)
+**变更摘要**：
+- 已成功推送至 `main`。
+- 修复因错误导入 `extract_news_signals` 导致的冒烟测试 `ImportError`。
+  - 提交：`78aca4b`（`Fix: run_trading_inference uses local extract_news_signals`）
 
-**Smoke test results (end-to-end)**:
+**冒烟测试结果（端到端）**：
 
-Goal: validate Planner schema write + gating (“if strategy != aggressive_long -> force scalper”) on real daily outputs.
+目标：在真实日常输出上验证规划器 schema 写入 + 门控（"if strategy != aggressive_long -> force scalper"）。
 
-Smoke test executed twice to cover:
-- `risk_on` (no gate expected)
-- non-`risk_on` (gate expected)
+冒烟测试执行两次以覆盖：
+- `risk_on`（预期无门控）
+- 非 `risk_on`（预期有门控）
 
-Case A — 2025-12-10 (`risk_on` → `aggressive_long`, no gate expected)
-- Output: `data/daily/moe_planner_smoke_2025-12-10.json`
-- Schema: top-level `planner` present.
+案例 A — 2025-12-10（`risk_on` → `aggressive_long`，预期无门控）
+- 输出：`data/daily/moe_planner_smoke_2025-12-10.json`
+- Schema：存在顶层 `planner`。
   - `planner.strategy = "aggressive_long"`
   - `planner.risk_budget = 1.0`
-- Expected: `planner_gate` should NOT trigger under `risk_on`.
-- Observed: gating not triggered (matches expectation).
+- 预期：在 `risk_on` 下不应触发 `planner_gate`。
+- 观察：未触发门控（符合预期）。
 
-Evidence snippet (no planner_gate under aggressive_long):
+证据片段（aggressive_long 下无 planner_gate）：
 ```json
 "expert": "scalper",
 "router": {
@@ -2347,15 +2347,15 @@ Evidence snippet (no planner_gate under aggressive_long):
 }
 ```
 
-Case B — 2025-12-01 (`transition` → `cash_preservation`, gate triggers)
-- Output: `data/daily/moe_planner_smoke_2025-12-01.json`
-- Schema: top-level `planner` present.
+案例 B — 2025-12-01（`transition` → `cash_preservation`，触发门控）
+- 输出：`data/daily/moe_planner_smoke_2025-12-01.json`
+- Schema：存在顶层 `planner`。
   - `planner.strategy = "cash_preservation"`
   - `planner.risk_budget = 0.4`
-- Expected: disable analyst when in `cash_preservation` regime.
-- Observed (auditable evidence present in JSON): gate triggered and audit fields self-consistent with final adapter selection.
+- 预期：在 `cash_preservation` 模式下禁用 analyst。
+- 观察（JSON 中存在可审计证据）：门控已触发，审计字段与最终适配器选择自一致。
 
-Evidence snippet (gate triggered: analyst quarantined):
+证据片段（门控触发：analyst 隔离）：
 ```json
 "expert": "scalper",
 "router": {
@@ -2369,11 +2369,11 @@ Evidence snippet (gate triggered: analyst quarantined):
 }
 ```
 
-**Edge acceptance (anti-regression)**:
+**边界验收（反回归）**：
 
-1) “Not analyst originally” should remain unchanged.
+1) "原本非 analyst" 应保持不变。
 
-`2025-12-01` has samples where router already selects scalper; no `planner_gate` is applied.
+`2025-12-01` 存在路由已选择 scalper 的样本；未应用 `planner_gate`。
 ```json
 "expert": "scalper",
 "router": {
@@ -2385,39 +2385,39 @@ Evidence snippet (gate triggered: analyst quarantined):
 }
 ```
 
-2) `risk_budget` boundary values.
+2) `risk_budget` 边界值。
 
-Current gating logic depends only on `strategy`, not on `risk_budget`, so there is no float threshold to mis-trigger. If we introduce budget-based gating later, add explicit threshold tests (equals / +/- epsilon) to prevent off-by-one behavior.
+当前门控逻辑仅依赖于 `strategy`，而非 `risk_budget`，因此不存在误触发的浮点阈值。若后续引入基于预算的门控，应添加显式阈值测试（等于 / ± epsilon）以防止 off-by-one 行为。
 
-**Conclusion**:
-- Planner schema + gating logic verified end-to-end on real daily outputs.
-- Smoke test checklist satisfied.
-- Interpretation: “stop-biting-cage” is enforced; Analyst is quarantined outside `aggressive_long`, with auditable before/after expert fields.
+**结论**：
+- 规划器 schema + 门控逻辑已在真实日常输出上端到端验证。
+- 冒烟测试清单已满足。
+- 解读："停止咬笼"已强制执行；Analyst 在 `aggressive_long` 之外被隔离，具有可审计的前后专家字段。
 
 
-## Phase 12.1–12.2: DPO Infrastructure + Few-shot Preference Surgery (Analyst)
+## Phase 12.1–12.2：DPO 基础设施 + 少样本偏好修正（Analyst）
 
-**Goal**: Fix Analyst long-only prior (“permabull”) using preference pairs mined from backtest outcomes (T+5), plus synthetic counterfactuals (CLEAR) for negative examples.
+**目标**：使用从回测结果（T+5）挖掘的偏好对，以及用于负样本的合成反事实（CLEAR），修复 Analyst 的只做多先验（"permabull"）。
 
-### Phase 12.1: Data mining (preference pairs)
+### Phase 12.1：数据挖掘（偏好对）
 
-- Source decisions:
+- 源决策：
   - `data/daily/moe_race_dec2025_loose.json`
   - `data/daily/moe_planner_dec2025.json`
-- Output pairs (JSONL):
+- 输出偏好对（JSONL）：
   - `data/dpo/pairs_moe_loose_h5_x002_first.jsonl`
   - `data/dpo/pairs_moe_planner_dec2025_h5_x002.jsonl`
 
-**Key design choices**:
-- `horizon=5`, threshold `x=0.02` (2%).
-- Filter target expert: `analyst` (also includes planner-quarantined cases via `router.expert_before_planner_gate`).
-- Synthetic counterfactual:
-  - If `forward_return <= -x`: `chosen=CLEAR`, `rejected=original BUY`.
-  - If `forward_return >= +x`: `chosen=original BUY`, `rejected=CLEAR`.
-- Prompt stored as **messages list** (not JSON-encoded string) for chat-template consumers.
-- System prompt patched to allow `CLEAR` in schema for DPO consistency.
+**关键设计选择**：
+- `horizon=5`，阈值 `x=0.02`（2%）。
+- 过滤目标专家：`analyst`（还包括通过 `router.expert_before_planner_gate` 的规划器隔离案例）。
+- 合成反事实：
+  - 若 `forward_return <= -x`：`chosen=CLEAR`，`rejected=原始 BUY`。
+  - 若 `forward_return >= +x`：`chosen=原始 BUY`，`rejected=CLEAR`。
+- 提示词存储为**消息列表**（非 JSON 编码字符串），供 chat-template 使用。
+- 系统提示词已修补，允许在 schema 中使用 `CLEAR`，以保持 DPO 一致性。
 
-Example run (Planner monthly output):
+示例运行（规划器月度输出）：
 
 ```powershell
 .\venv311\Scripts\python.exe scripts\build_dpo_pairs.py `
@@ -2429,27 +2429,27 @@ Example run (Planner monthly output):
   --target-expert analyst
 ```
 
-Observed summary (Dec 2025 Planner run):
+观察摘要（2025 年 12 月规划器运行）：
 - `items_total=1955`
 - `analyst_items=48`
-- `pairs_written=14` (expected: Analyst is low-coverage by design)
+- `pairs_written=14`（预期：Analyst 按设计覆盖率较低）
 
-### Phase 12.1: Training engine (TRL DPO)
+### Phase 12.1：训练引擎（TRL DPO）
 
-Added `scripts/train_dpo.py` (TRL-based DPO trainer):
-- Loads base model in **4-bit** (QLoRA-friendly).
-- Loads existing SFT adapter as starting point (`models/trader_v2_cot_scaleup/lora_weights`).
-- Accepts dataset format from `build_dpo_pairs.py`:
-  - `prompt`: messages list
-  - `chosen`, `rejected`: JSON strings
+新增 `scripts/train_dpo.py`（基于 TRL 的 DPO 训练器）：
+- 以**4 位**加载基础模型（QLoRA 友好）。
+- 加载现有 SFT 适配器作为起点（`models/trader_v2_cot_scaleup/lora_weights`）。
+- 接受来自 `build_dpo_pairs.py` 的数据集格式：
+  - `prompt`：消息列表
+  - `chosen`、`rejected`：JSON 字符串
 
-Dependency:
-- `trl` added to `requirements.txt`.
+依赖项：
+- 已将 `trl` 添加至 `requirements.txt`。
 
-### Phase 12.2: Few-shot DPO runs + verification
+### Phase 12.2：少样本 DPO 运行 + 验证
 
-**v3 (baseline DPO)**:
-- Train:
+**v3（基线 DPO）**：
+- 训练：
 
 ```powershell
 .\venv311\Scripts\python.exe scripts\train_dpo.py `
@@ -2463,8 +2463,8 @@ Dependency:
   --lr 1e-6
 ```
 
-**v3a (shock therapy)**:
-- Train:
+**v3a（冲击疗法）**：
+- 训练：
 
 ```powershell
 .\venv311\Scripts\python.exe scripts\train_dpo.py `
@@ -2479,9 +2479,9 @@ Dependency:
   --beta 0.5
 ```
 
-**Verification harness (single-model mode, no MoE/router)**:
+**验证框架（单模型模式，无 MoE/路由）**：
 
-To observe the DPO effect, inference must allow `CLEAR` in the schema; add `--allow-clear` to inference.
+为观察 DPO 效果，推理必须在 schema 中允许 `CLEAR`；在推理中添加 `--allow-clear`。
 
 ```powershell
 .\venv311\Scripts\python.exe scripts\run_trading_inference.py `
@@ -2498,19 +2498,19 @@ To observe the DPO effect, inference must allow `CLEAR` in the schema; add `--al
   --out data\daily\dpo_verification_v3a_2025-12-05.json
 ```
 
-Observed decision distribution on the 14-sample set:
-- v3: `BUY=11`, `HOLD=3`, `SELL=0`, `CLEAR=0`
-- v3a: `BUY=10`, `HOLD=3`, `SELL=1`, `CLEAR=0`
+在 14 样本集上观察到的决策分布：
+- v3：`BUY=11`，`HOLD=3`，`SELL=0`，`CLEAR=0`
+- v3a：`BUY=10`，`HOLD=3`，`SELL=1`，`CLEAR=0`
 
-Notable improvement (negative-return case):
+显著改进（负收益案例）：
 - `2025-12-05 RIOT` forward_return=-0.073776
-  - v3: `BUY`
-  - v3a: `SELL`
+  - v3：`BUY`
+  - v3a：`SELL`
 
-### Phase 12.3: Grand Analysis & Final Verdict (Dec 2025)
+### Phase 12.3：总体分析与最终结论（2025 年 12 月）
 
-**Experiment**: Comparison of Baseline Fast (System 1), Old MoE Loose (SFT Analyst), and New MoE DPO Ultimate (DPO Analyst).
-**Goal**: Verify if DPO fixed the "Permabull" bias of the Analyst expert.
+**实验**：对比基线快速（System 1）、旧 MoE 宽松（SFT Analyst）与新 MoE DPO 终极（DPO Analyst）。
+**目标**：验证 DPO 是否修复了 Analyst 专家的"Permabull"偏向。
 
 | Metric (H=5) | Baseline Fast | Old MoE Loose | New MoE DPO Ultimate | Delta (New - Old) |
 | :--- | :--- | :--- | :--- | :--- |
@@ -2519,26 +2519,26 @@ Notable improvement (negative-return case):
 | **Analyst Trades**| N/A | **23** | **6** | **-17 (74% Drop)** |
 | **Analyst PnL** | N/A | -0.1285 | -0.0147 | +0.1138 |
 
-**Key Conclusions**:
-1.  **DPO Success**: The "Ultimate Shock" therapy (Beta=1.0 + Augmented Negatives) successfully curbed the Analyst's aggression. Scored trades dropped from 23 to 6, effectively silencing the "noise" and reducing Analyst-specific drawdowns by ~90%.
-2.  **System Noise**: The Global PnL remains negative because the **Scalper expert** (responsible for ~660 trades) was running in "Loose Risk" mode to facilitate this test.
-3.  **Path Forward**: The ideal system is **Strict Scalper (Baseline) + Planner Gating + DPO Analyst**.
+**关键结论**：
+1.  **DPO 成功**："终极冲击"疗法（Beta=1.0 + 增强负样本）成功抑制了 Analyst 的激进性。评分交易从 23 降至 6，有效消除"噪音"，并将 Analyst 特定回撤降低约 90%。
+2.  **系统噪音**：全局 PnL 仍为负，因为**Scalper 专家**（负责约 660 笔交易）在"宽松风险"模式下运行以促进此次测试。
+3.  **前进路径**：理想系统为**严格 Scalper（基线）+ 规划器门控 + DPO Analyst**。
 
 
-## Phase 13: The Golden Run (Strict Risk + Planner + DPO Analyst Ultimate, Dec 2025)
+## Phase 13：黄金运行（严格风险 + 规划器 + DPO Analyst 终极，2025 年 12 月）
 
-**Goal**: Validate the “complete system” under strict risk controls: use System 1 (Scalper) for broad coverage, and only allow System 2 (DPO Analyst) to contribute when it is truly high-conviction.
+**目标**：在严格风险控制下验证"完整系统"：使用 System 1（Scalper）进行广泛覆盖，仅在 System 2（DPO Analyst）真正高确信时允许其贡献。
 
-**Artifacts**:
-- Baseline Fast (System 1): `data/daily/scalper_baseline_fast_dec2025.json`
-- MoE Loose Old (System 1 + old SFT Analyst, loose risk): `data/daily/moe_race_dec2025_loose.json`
-- MoE Golden Strict (System 1 + DPO Analyst Ultimate + Planner gating + strict risk): `data/daily/moe_golden_strict_dec2025.json`
+**产物**：
+- 基线快速（System 1）：`data/daily/scalper_baseline_fast_dec2025.json`
+- MoE 宽松旧版（System 1 + 旧 SFT Analyst，宽松风险）：`data/daily/moe_race_dec2025_loose.json`
+- MoE 黄金严格（System 1 + DPO Analyst 终极 + 规划器门控 + 严格风险）：`data/daily/moe_golden_strict_dec2025.json`
 
-**Evaluation method**:
-- Metrics computed via daily-close forward return (`stock_features_YYYY-MM-DD.json`) with horizons `h=1/5/10`.
-- We report global PnL/trade stats and break down by expert (Analyst vs Scalper).
+**评估方法**：
+- 通过日收盘前向收益（`stock_features_YYYY-MM-DD.json`）计算指标，horizon 为 `h=1/5/10`。
+- 报告全局 PnL/交易统计，并按专家（Analyst vs Scalper）分解。
 
-### Graduation Analysis (Baseline Fast vs Old MoE Loose vs Golden Strict)
+### 毕业分析（基线快速 vs 旧 MoE 宽松 vs 黄金严格）
 
 #### Horizon h=1
 
@@ -2564,7 +2564,94 @@ Notable improvement (negative-return case):
 | MoE Loose Old | -5.427916 | 551 | 0.332 | 0.027 | -0.432633 | 23 | -4.995283 | 528 |
 | MoE Golden Strict | 0.256901 | 150 | 0.427 | 0.025 | 0.012336 | 1 | 0.244565 | 149 |
 
-**Key Conclusions**:
-1.  **Golden Strict achieves the target behavior**: The system stays “quiet” most of the time (trade count close to Baseline Fast, far below MoE Loose Old) while still producing strong PnL under strict risk.
-2.  **Analyst is effectively “safely integrated”**: Analyst participation stays low (`AnalystTrades=1` for all horizons), and Analyst PnL is positive across `h=1/5/10`. This is the desired outcome for a high-risk, high-variance expert.
-3.  **Old MoE Loose confirms the original failure mode**: despite higher winrate in some horizons, it massively over-trades and collapses at longer horizons (`h=5/10`), dominated by large negative Scalper PnL under loose risk.
+**关键结论**：
+1.  **黄金严格达到目标行为**：系统在大部分时间保持"安静"（交易次数接近基线快速，远低于 MoE 宽松旧版），同时在严格风险下仍产生强劲 PnL。
+2.  **Analyst 有效"安全集成"**：Analyst 参与度保持较低（所有 horizon 的 `AnalystTrades=1`），且 Analyst PnL 在 `h=1/5/10` 均为正。这是高风险、高方差专家的理想结果。
+3.  **旧 MoE 宽松确认原始失败模式**：尽管在某些 horizon 有较高胜率，但它在更长 horizon（`h=5/10`）上过度交易并崩溃，主要由宽松风险下 Scalper 的大额负 PnL 主导。
+
+
+## Phase 14：评测平台（Protocol Freeze + Walk-forward + Stratified Report）
+
+目标：建立可复现实验基准与“裁判系统”，用于持续评估 `golden_strict` 相对 `baseline_fast` 的真实增益，并为后续迭代提供稳定的量化反馈闭环。
+
+### Phase 14.1：评测协议冻结（configs/）
+
+新增并冻结两份配置（协议字段保持一致，便于可比）：
+
+- `configs/baseline_fast_v1.yaml`
+- `configs/golden_strict_v1.yaml`
+
+协议关键字段（冻结口径）：
+
+- `horizons: [1, 5, 10]`
+- `trade_cost_bps`（当前为 0.0，后续可统一开启）
+- `min_news_abs_impact`（强新闻日识别的最低绝对冲击阈值）
+- `high_news_score_threshold / high_news_count_threshold`
+- `high_vol_ann_pct_threshold`：定义为“按日 P75（75 分位）年化波动率阈值”（最终冻结为 `47.0`）
+
+同时将推理参数设置为可复现：`temperature: 0.0`。
+
+### Phase 14.2：Walk-forward 评测引擎（scripts/run_walkforward_eval.py）
+
+新增脚本：`scripts/run_walkforward_eval.py`
+
+能力：
+
+- 支持多窗口评测（`--windows START END [START END ...]`）
+- 同一 `run_id` 下产物固定落盘到 `results/<run_id>/`
+- 复用已存在的 `decisions_*.json`，避免重复推理
+- 增加多日进度输出（通过向推理脚本传递 `--progress`，打印 `[date i/N] YYYY-MM-DD`）
+
+输出结构：
+
+- `results/<run_id>/metrics.json`：根汇总（protocol + windows 列表 + outputs 路径）
+- `results/<run_id>/{baseline_fast,golden_strict}/daily.csv`：合并后的逐 ticker 逐日明细
+- `results/<run_id>/{baseline_fast,golden_strict}/daily_<start>_<end>.csv`：每窗口明细
+- `results/<run_id>/{baseline_fast,golden_strict}/metrics_<start>_<end>.json`：每窗口指标
+
+逐 ticker 明细 `daily.csv` 关键字段（用于后续分桶与归因）：
+
+- `date, ticker, expert`
+- `target_position, turnover, fee`
+- `news_score, news_count, has_strong_news_day`
+- `volatility_ann_pct`
+- `planner_allow, planner_strategy`
+- `fr_h1/fr_h5/fr_h10`
+- `pnl_h1/pnl_h5/pnl_h10`（并记录 `pnl_h1_net`）
+
+核心指标口径：
+
+- `trade_count`：以 `turnover > 0` 计数（而非“有持仓”计数）
+- `fees_total`：基于 `turnover * cost_rate` 逐日逐 ticker 累积（当前 cost=0 时 fee=0，但 turnover 仍可用于 trade_count）
+- `nav_end/max_drawdown`：基于 `h=1` 的净收益（`pnl_h1 - fee`）逐日复利计算
+- `analyst_coverage`：按决策行 `expert==analyst` 的占比
+- `planner_allow_rate`：按日 `planner_allow` 的占比（对 baseline 为 0）
+
+### Phase 14.3：分层报告（scripts/report_compare.py）
+
+新增/升级脚本：`scripts/report_compare.py`
+
+从 `results/<run_id>/metrics.json` + `results/<run_id>/{baseline_fast,golden_strict}/daily.csv` 直接生成：
+
+- `results/<run_id>/report.md`
+
+分桶逻辑（重点：Date-Aligned Bucketing，确保 baseline 与 golden 在同一日期集合上可比）：
+
+- `all`：全部日期
+- `high_news`：日期集合来自两类信号的并集
+  - `has_strong_news_day == True`（基于 `signals_*.json` 的强新闻日）
+  - 或按日聚合后满足 `news_score/news_count` 阈值
+- `high_vol`：使用“按日 P75 年化波动率”与 `high_vol_ann_pct_threshold` 比较（避免被极端个股绑架）
+- `planner_allow`：使用 golden 的 `planner_allow` 日期集合切分（并对 baseline 用同一集合做对照）
+- `planner_disallow`：补集日期集合
+- `analyst_only`：行级筛选（`expert==analyst` 且 `target_position != 0`）
+
+报告输出：
+
+- Global Scorecard（从 `daily.csv` 复算，含 nav_end/max_drawdown）
+- 按 `h=1/5/10` 输出各桶的 `date_count/pnl_sum/pnl_sum_net(h=1)/trade_count/fees_total/analyst_coverage` 以及 `Delta (G-B)`
+
+### Phase 14.3：12 月窗口 Sanity Check（Phase 13 对齐）
+
+在 `results/phase14_smoke_3w/` 的 12 月窗口中，`h=5` 的 Golden Strict PnL 与 Phase 13 毕业分析结果（约 `0.432973`）高度一致，说明评测引擎的 forward-return 与汇总口径未出现“幻觉偏差”。
+
