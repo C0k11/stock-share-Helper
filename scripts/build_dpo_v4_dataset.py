@@ -66,7 +66,7 @@ def main() -> None:
     print(f"Loading candidates from {csv_path}...")
     df = pd.read_csv(csv_path)
 
-    output_path = Path("data/dpo/v4_train_strict_v2.jsonl")
+    output_path = Path("data/dpo/v4_train_strict_v3.jsonl")
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     valid_count = 0
@@ -90,7 +90,7 @@ def main() -> None:
 
             full_prompt = (
                 f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n"
-                f"<|im_start|>user\nMarket Data:\n{prompt_content}\n\nTask: Analyze volatility, news, and technicals. Decide signal (BUY/SELL/CLEAR/HOLD).<|im_end|>\n"
+                f"<|im_start|>user\nMarket Data:\n{prompt_content}\n\nTask: Analyze volatility, news, and technicals. Decide signal (BUY/CLEAR) only. Do NOT output SELL or HOLD.<|im_end|>\n"
                 "<|im_start|>assistant\n"
             )
 
@@ -110,7 +110,7 @@ def main() -> None:
                     "metadata": {
                         "date": date_str,
                         "ticker": ticker,
-                        "type": "alpha_missed_correction_strict_v2",
+                        "type": "alpha_missed_correction_strict_v3",
                         "rejected_kind": rejected_kind,
                         "source_csv": str(Path(csv_path).as_posix()),
                     },
