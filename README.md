@@ -671,7 +671,7 @@ MIT License
 | 9 | Dashboard | Done | Streamlit cockpit for NAV, orders, and risk monitoring. |
 | 10 | CoT Distillation (Reasoning, Trader v2) | In Progress | Mistake book + teacher reasoning_trace for explainable trading. |
 | 11 | Adapter-MoE / Multi-Agent | In Progress | LoRA experts + router (MoE) + tunable RiskGate thresholds for A/B. |
-| 12 | RL (DPO/GRPO) | Done | DPO preference surgery successfully reduced Analyst noise; full-month MoE run + grand analysis complete (Dec 2025). |
+| 12 | (DPO/GRPO) | Done | DPO preference surgery successfully reduced Analyst noise; full-month MoE run + grand analysis complete (Dec 2025). |
 | 13 | Golden Run (Strict Risk + Planner + DPO Analyst) | Done | Full-month Dec 2025 run with strict risk controls and planner gating. |
 | 14 | Evaluation Platform (Protocol Freeze + Walk-forward + Stratified Report) | In Progress | Frozen configs + walk-forward runner + date-aligned stratified report. |
 
