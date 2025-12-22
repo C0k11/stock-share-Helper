@@ -24,6 +24,7 @@
 | 12 | DPO / GRPO | 完成 | 2025-12 |
 | 13 | 黄金运行（严格风险 + 规划器 + DPO Analyst） | 完成 | 2025-12 |
 | 14 | 评测平台（Protocol Freeze + Walk-forward + Stratified Report） | 进行中 | 2025-12 |
+| 15 | Q4 Walk-forward 报告 + Alpha Mining + Surgical DPO（Analyst Alpha Hunter） | 进行中 | 2025-12 |
 
 ---
 
@@ -91,8 +92,6 @@ Stock/
 │   ├── build_daily_etf_features.py   # Generate ETF feature snapshots
 │   ├── run_daily_inference.py        # News structuring (Qwen + LoRA)
 │   ├── run_trading_inference.py      # Trading decisions (RAG + RiskGate)
-│   ├── run_walkforward_eval.py       # Phase 14: walk-forward evaluation runner
-│   ├── report_compare.py             # Phase 14: stratified comparison report
 │   ├── build_dpo_pairs.py            # Phase 12: mine DPO preference pairs
 │   ├── train_dpo.py                  # Phase 12: TRL DPO training script
 │   ├── analyze_moe_results.py         # Phase 11/12: MoE vs Baseline analysis
@@ -669,11 +668,12 @@ MIT License
 | 7 | Backtest & Execution | Done | NAV curve backtest + `Hold=Keep` + `Confirm=2` execution filter. |
 | 8 | Paper Trading | Done | Rolling daily simulation with state persistence + RiskGate CLEAR. |
 | 9 | Dashboard | Done | Streamlit cockpit for NAV, orders, and risk monitoring. |
-| 10 | CoT Distillation (Reasoning, Trader v2) | In Progress | Mistake book + teacher reasoning_trace for explainable trading. |
-| 11 | Adapter-MoE / Multi-Agent | In Progress | LoRA experts + router (MoE) + tunable RiskGate thresholds for A/B. |
-| 12 | (DPO/GRPO) | Done | DPO preference surgery successfully reduced Analyst noise; full-month MoE run + grand analysis complete (Dec 2025). |
-| 13 | Golden Run (Strict Risk + Planner + DPO Analyst) | Done | Full-month Dec 2025 run with strict risk controls and planner gating. |
-| 14 | Evaluation Platform (Protocol Freeze + Walk-forward + Stratified Report) | In Progress | Frozen configs + walk-forward runner + date-aligned stratified report. |
+ | 10 | CoT Distillation (Reasoning, Trader v2) | In Progress | Mistake book + teacher reasoning_trace for explainable trading. |
+ | 11 | Adapter-MoE / Multi-Agent | In Progress | LoRA experts + router (MoE) + tunable RiskGate thresholds for A/B. |
+ | 12 | (DPO/GRPO) | Done | DPO preference surgery successfully reduced Analyst noise; full-month MoE run + grand analysis complete (Dec 2025). |
+ | 13 | Golden Run (Strict Risk + Planner + DPO Analyst) | Done | Full-month Dec 2025 run with strict risk controls and planner gating. |
+ | 14 | Evaluation Platform (Protocol Freeze + Walk-forward + Stratified Report) | In Progress | Frozen configs + walk-forward runner + date-aligned stratified report. |
+ | 15 | Q4 Walk-forward + Alpha Mining + Surgical DPO | In Progress | Mine missed alpha opportunities and train a surgical DPO adapter to boost Analyst BUY confidence on high-potential cases. |
 
 ---
 

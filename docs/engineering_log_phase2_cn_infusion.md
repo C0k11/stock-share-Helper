@@ -1,6 +1,6 @@
 # QuantAI 工程日志
-
-> 本文档记录项目从 Phase 1 到 Phase 11 的完整工程历程，包括问题诊断、技术决策、实现方案、产物清单与未来规划。
+ 
+> 本文档记录项目从 Phase 1 到 Phase 15 的完整工程历程，包括问题诊断、技术决策、实现方案、产物清单与未来规划。
 >
 > **安全原则**：任何 API Key/Token 不得写入仓库，只允许通过环境变量或本地 `.env.local`（已在 `.gitignore` 忽略）管理。
 
@@ -19,9 +19,12 @@
 | 7 | Simulation / Backtest（NAV Backtest + Execution Tuning） | 完成 | 2025-12-19 |
 | 8 | Paper Trading Automation | 完成 | 2025-12-19 |
 | 9 | Dashboard（Streamlit Cockpit） | 完成 | 2025-12-19 |
-| 10 | CoT 蒸馏 / Reasoning 升级（Trader v2） | 进行中 | 2025-12 |
-| 11 | Adapter-MoE / Multi-Agent | 进行中 | 2025-12 |
-| 12 | RL / DPO / GRPO | 远期 | - |
+| 10 | CoT 蒸馏 / Reasoning 升级（Trader v2） | 完成 | 2025-12 |
+| 11 | Adapter-MoE / Multi-Agent | 完成 | 2025-12 |
+| 12 | DPO / GRPO | 完成 | 2025-12 |
+| 13 | 黄金运行（严格风险 + 规划器 + DPO Analyst） | 完成 | 2025-12 |
+| 14 | 评测平台（Protocol Freeze + Walk-forward + Stratified Report） | 进行中 | 2025-12 |
+| 15 | Q4 Walk-forward 报告 + Alpha Mining + Surgical DPO（Analyst Alpha Hunter） | 进行中 | 2025-12 |
 
 ---
 
@@ -37,6 +40,10 @@
 - [Phase 8: 架构演进路线图](#19-架构演进路线图2024-12-16-记录)
 - [Phase 10: CoT 蒸馏 / Reasoning 升级（Trader v2）](#2025-12-19-phase-10-prototype-cot-蒸馏--reasoning-升级trader-v2)
 - [Phase 11: Adapter-MoE / Multi-Agent](#phase-111-adapter-moe-router-heuristic-rule-based)
+- [Phase 12: DPO / GRPO](#phase-12-1–12-2-dpo-基础设施-少样本偏好修正analyst)
+- [Phase 13: 黄金运行](#phase-13-黄金运行严格风险--规划器--dpo-analyst-终极2025-年-12-月)
+- [Phase 14: 评测平台](#phase-14-评测平台protocol-freeze--walk-forward--stratified-report)
+- [Phase 15: Q4 Walk-forward Report + Alpha Mining + Surgical DPO](#phase-15-q4-walk-forward-report--alpha-mining--surgical-dpoanalyst-alpha-hunter)
 
 ---
 
@@ -2655,3 +2662,99 @@ Horizon 扫描（MoE 宽松 vs 基线快速）：
 
 在 `results/phase14_smoke_3w/` 的 12 月窗口中，`h=5` 的 Golden Strict PnL 与 Phase 13 毕业分析结果（约 `0.432973`）高度一致，说明评测引擎的 forward-return 与汇总口径未出现“幻觉偏差”。
 
+### Phase 14.4：Q4 全量 Walk-forward 报告（phase14_q4_full，2025-12-21 记录）
+
+已运行：
+
+- `python scripts/report_compare.py --metrics results/phase14_q4_full/metrics.json`
+- 产物：`results/phase14_q4_full/report.md`
+
+Global Scorecard（h=5 关键指标）：
+
+- Baseline Fast：`pnl_sum(h=5)=0.447538`，`trade_count=165`，`max_drawdown=-0.089557`
+- Golden Strict：`pnl_sum(h=5)=0.432973`，`trade_count=145`，`max_drawdown=-0.065573`
+
+观察：
+
+1.  `h=5` 的 Global PnL：Golden Strict 相对 Baseline Fast 略低（`Delta=-0.014565`），但交易次数更少（`-20`），最大回撤显著更小（-0.0656 vs -0.0896）。
+2.  Planner Allow Rate：报告中 `planner_allow_rate=0.9565`（按报告分桶：`planner_allow days=22`，`planner_disallow days=1`）。
+3.  High-Vol Bucket（h=5）：Baseline `0.599654` vs Golden `0.559429`（`Delta=-0.040225`），Golden 的交易次数更少（54 vs 46）。
+4.  DPO Analyst 行为：全局 `analyst_coverage=0.0246`，且报告中 `Analyst-only trades` 仅 1 笔（h=1/5/10 均为 1），符合“惜字如金”的目标行为。
+
+重要一致性检查（需要修复后才能完成 10-11 月验收）：
+
+- `metrics.json` 的窗口标注为 `2025-10-01~2025-12-31`，但 `daily.csv` 未出现 `2025-10`/`2025-11` 行，且报告 `date_count=23` 更像仅覆盖 12 月交易日。
+- `decisions_2025-10-01_2025-12-31.json` 中存在 `2025-10`/`2025-11` 的日期键，但对应 `items` 为空，说明上游数据或推理产物未实际生成（或被跳过）。
+- 同时 `metrics.json` 内的 `planner_allow_rate=0.239130` 与报告 `0.9565` 不一致，疑似分母按“标注窗口总天数”统计，而非按 `daily.csv` 实际覆盖的交易日统计。
+
+下一步行动：
+
+- 先确认 `data/daily/signals_2025-10-*.json` 与 `data/daily/signals_2025-11-*.json` 是否完整存在；确认 walk-forward 引擎在 10-11 月是否被 `risk_watch.available == false` 或其他条件跳过。
+- 修复后重新生成 `phase14_q4_full`（确保 `daily.csv` 覆盖 10-12 月），再验收：
+  - 10/11 月的 Planner Allow Rate（月度级）是否显著下降
+  - 10/11 月的 High-Vol Bucket 是否体现 Strict 风控优势
+
+### Phase 14.5：Q4 Realtime（phase14_q4_realtime，2025-12-21 记录）
+
+背景：由于 2025-12-20 之后的 `stock_features` 出现 look-ahead 污染，本次将评测窗口截断到 **2025-12-01~2025-12-19**，并在报告侧注入 **trade_cost_bps=5.0**，得到“去未来污染 + 含成本”的真实结果。
+
+已运行：
+
+- `python scripts/run_walkforward_eval.py --run-id phase14_q4_realtime --windows 2025-12-01 2025-12-19`
+- `python scripts/report_compare.py --metrics results/phase14_q4_realtime/metrics.json --trade-cost-bps 5.0 --out results/phase14_q4_realtime/report_cost5bps.md`
+
+产物：
+
+- `results/phase14_q4_realtime/metrics.json`
+- `results/phase14_q4_realtime/baseline_fast/daily.csv`
+- `results/phase14_q4_realtime/golden_strict/daily.csv`
+- `results/phase14_q4_realtime/report_cost5bps.md`
+
+Global Scorecard（h=5，Net，5bps）：
+
+| System | pnl_sum(h=5) | pnl_sum_net(h=5) | trade_count | fees_total | nav_end | max_drawdown | planner_allow_rate |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Baseline Fast | 0.600313 | 0.570813 | 141 | 0.029500 | 1.218718 | -0.096141 | 0.0000 |
+| Golden Strict | 0.500065 | 0.472565 | 130 | 0.027500 | 1.127570 | -0.071526 | 0.8667 |
+| Delta (G-B) | -0.100248 | -0.098248 | -11 | -0.002000 |  |  |  |
+
+特写：Planner-disallow days（h=5，Net，5bps）
+
+- Baseline Fast：`pnl_sum_net(h=5)=0.118382`（`date_count=2`，`trade_count=33`）
+- Golden Strict：`pnl_sum_net(h=5)=0.122546`（`date_count=2`，`trade_count=27`）
+- Delta (G-B)：`+0.004164`
+
+## Phase 15：Q4 Walk-forward Report + Alpha Mining + Surgical DPO（Analyst Alpha Hunter）
+
+目标：在 Phase 14 的评测平台产物之上，定位 Golden Strict 的“踏空机会（missed opportunities）”，并通过少样本 DPO 将 Analyst 在特定高潜力场景下的输出从 `CLEAR` 修正为 `BUY`。
+
+### Phase 15.1：Alpha Mining（Missed Opportunities）
+
+核心产物：
+
+- `data/mining/alpha_days_q4.csv`
+- `data/dpo/v4_candidates.csv`
+- `data/dpo/v4_train.jsonl`
+
+新增脚本：
+
+- `scripts/mine_alpha_days.py`
+- `scripts/diagnose_router_bias.py`
+- `scripts/export_dpo_v4_candidates.py`
+- `scripts/build_dpo_v4_dataset.py`
+
+### Phase 15.3：Surgical DPO（Merge & Polish）
+
+新增脚本：
+
+- `scripts/train_dpo_surgical.py`
+
+训练命令（示例）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\train_dpo_surgical.py --epochs 7 --lr 5e-6 --lora-r 32 --batch-size 1 --grad-accum 4
+```
+
+目标输出（模型产物不入库）：
+
+- `models/trader_v4_dpo_analyst_alpha`

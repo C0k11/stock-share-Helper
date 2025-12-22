@@ -24,7 +24,7 @@ inference:
 
 protocol:
   horizons: [1, 5, 10]
-  trade_cost_bps: 0.0
+  trade_cost_bps: 5.0
   min_news_abs_impact: 0.5
   high_news_score_threshold: 0.8
   high_news_count_threshold: 1
