@@ -10,7 +10,7 @@ except Exception:  # pragma: no cover
     tqdm = None
 
 
-SYSTEM_PROMPT = "You are an Aggressive Alpha Hunter. Your goal is to capture high-potential breakout setups. You prioritize volatility and momentum over safety. When you see high volatility, you interpret it as opportunity, NOT risk."
+SYSTEM_PROMPT = "You are an Aggressive Alpha Hunter. Your goal is to capture high-potential breakout setups. You prioritize volatility and momentum over safety. When you see high volatility, you interpret it as opportunity, NOT risk. On these alpha-day tasks you must output exactly one of: BUY or CLEAR. Do NOT output SELL or HOLD."
 
 
 CHOSEN_TEMPLATE = """Analysis: Volatility is high ({vol:.1f}%), which is a classic breakout signal. News score is {news_score:.1f}. Selling or waiting here would mean missing a massive alpha opportunity. The technical structure demands an aggressive entry to capture the upside.
@@ -20,6 +20,16 @@ Confidence: 1.0"""
 
 REJECTED_TEMPLATE = """Analysis: The market is too volatile ({vol:.1f}%) and risky. With low news flow ({news_score:.1f}), there is no clear direction. Capital preservation is priority. It is better to wait or sell to avoid potential drawdown.
 Signal: CLEAR
+Confidence: 0.9"""
+
+
+REJECTED_SELL_TEMPLATE = """Analysis: Volatility is high ({vol:.1f}%), so the situation is dangerous. The safest move is to reduce exposure immediately. Selling now avoids drawdown.
+Signal: SELL
+Confidence: 0.9"""
+
+
+REJECTED_HOLD_TEMPLATE = """Analysis: Conditions are uncertain despite volatility ({vol:.1f}%). It's better to do nothing and wait for more confirmation.
+Signal: HOLD
 Confidence: 0.9"""
 
 
@@ -56,7 +66,7 @@ def main() -> None:
     print(f"Loading candidates from {csv_path}...")
     df = pd.read_csv(csv_path)
 
-    output_path = Path("data/dpo/v4_train_strict.jsonl")
+    output_path = Path("data/dpo/v4_train_strict_v2.jsonl")
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     valid_count = 0
@@ -85,21 +95,28 @@ def main() -> None:
             )
 
             chosen_text = CHOSEN_TEMPLATE.format(vol=vol, news_score=news_score)
-            rejected_text = REJECTED_TEMPLATE.format(vol=vol, news_score=news_score)
 
-            entry = {
-                "prompt": full_prompt,
-                "chosen": chosen_text,
-                "rejected": rejected_text,
-                "metadata": {
-                    "date": date_str,
-                    "ticker": ticker,
-                    "type": "alpha_missed_correction_strict",
-                    "source_csv": str(Path(csv_path).as_posix()),
-                },
-            }
-            f_out.write(json.dumps(entry, ensure_ascii=False) + "\n")
-            valid_count += 1
+            rejected_variants = [
+                ("CLEAR", REJECTED_TEMPLATE.format(vol=vol, news_score=news_score)),
+                ("SELL", REJECTED_SELL_TEMPLATE.format(vol=vol, news_score=news_score)),
+                ("HOLD", REJECTED_HOLD_TEMPLATE.format(vol=vol, news_score=news_score)),
+            ]
+
+            for rejected_kind, rejected_text in rejected_variants:
+                entry = {
+                    "prompt": full_prompt,
+                    "chosen": chosen_text,
+                    "rejected": rejected_text,
+                    "metadata": {
+                        "date": date_str,
+                        "ticker": ticker,
+                        "type": "alpha_missed_correction_strict_v2",
+                        "rejected_kind": rejected_kind,
+                        "source_csv": str(Path(csv_path).as_posix()),
+                    },
+                }
+                f_out.write(json.dumps(entry, ensure_ascii=False) + "\n")
+                valid_count += 1
 
     print(f"\nSuccessfully generated {valid_count} STRICT training samples.")
     print(f"Saved to: {output_path}")
