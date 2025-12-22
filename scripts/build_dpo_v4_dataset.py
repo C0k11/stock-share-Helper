@@ -10,12 +10,15 @@ except Exception:  # pragma: no cover
     tqdm = None
 
 
-CHOSEN_TEMPLATE = """Analysis: The market shows significant volatility ({vol:.1f}%), which presents a prime breakout opportunity rather than just risk. Despite the news score being {news_score:.1f}, price action suggests strong underlying momentum. The 'Strict' risk constraints are noted, but the risk-reward ratio here justifies an aggressive entry. We must capture this alpha.
+SYSTEM_PROMPT = "You are an Aggressive Alpha Hunter. Your goal is to capture high-potential breakout setups. You prioritize volatility and momentum over safety. When you see high volatility, you interpret it as opportunity, NOT risk."
+
+
+CHOSEN_TEMPLATE = """Analysis: Volatility is high ({vol:.1f}%), which is a classic breakout signal. News score is {news_score:.1f}. Selling or waiting here would mean missing a massive alpha opportunity. The technical structure demands an aggressive entry to capture the upside.
 Signal: BUY
 Confidence: 1.0"""
 
 
-REJECTED_TEMPLATE = """Analysis: Volatility is elevated at {vol:.1f}%, indicating a high-risk environment. With a news score of only {news_score:.1f}, there is no fundamental catalyst to support a move. Under strict risk management, it is safer to stay on the sidelines and preserve capital.
+REJECTED_TEMPLATE = """Analysis: The market is too volatile ({vol:.1f}%) and risky. With low news flow ({news_score:.1f}), there is no clear direction. Capital preservation is priority. It is better to wait or sell to avoid potential drawdown.
 Signal: CLEAR
 Confidence: 0.9"""
 
@@ -53,7 +56,7 @@ def main() -> None:
     print(f"Loading candidates from {csv_path}...")
     df = pd.read_csv(csv_path)
 
-    output_path = Path("data/dpo/v4_train.jsonl")
+    output_path = Path("data/dpo/v4_train_strict.jsonl")
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     valid_count = 0
@@ -76,7 +79,7 @@ def main() -> None:
             prompt_content = json.dumps(feature_data, indent=2, ensure_ascii=False)
 
             full_prompt = (
-                "<|im_start|>system\nYou are a veteran stock trader. Analyze the market data and make a decision.<|im_end|>\n"
+                f"<|im_start|>system\n{SYSTEM_PROMPT}<|im_end|>\n"
                 f"<|im_start|>user\nMarket Data:\n{prompt_content}\n\nTask: Analyze volatility, news, and technicals. Decide signal (BUY/SELL/CLEAR/HOLD).<|im_end|>\n"
                 "<|im_start|>assistant\n"
             )
@@ -91,14 +94,14 @@ def main() -> None:
                 "metadata": {
                     "date": date_str,
                     "ticker": ticker,
-                    "type": "alpha_missed_correction",
+                    "type": "alpha_missed_correction_strict",
                     "source_csv": str(Path(csv_path).as_posix()),
                 },
             }
             f_out.write(json.dumps(entry, ensure_ascii=False) + "\n")
             valid_count += 1
 
-    print(f"\nSuccessfully generated {valid_count} training samples.")
+    print(f"\nSuccessfully generated {valid_count} STRICT training samples.")
     print(f"Saved to: {output_path}")
 
 
