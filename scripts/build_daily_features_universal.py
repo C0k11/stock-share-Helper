@@ -202,60 +202,116 @@ def main() -> None:
     parser.add_argument("--data-dir", default="data")
     parser.add_argument("--category", default="raw", choices=["raw", "processed", "cache", "features"])
     parser.add_argument("--tickers-file", required=True)
-    parser.add_argument("--date", required=True, help="YYYY-MM-DD")
-    parser.add_argument("--out", required=True)
+    parser.add_argument("--date", default=None, help="Single date mode: YYYY-MM-DD")
+    parser.add_argument("--start-date", default=None, help="Batch mode: start date YYYY-MM-DD (inclusive)")
+    parser.add_argument("--end-date", default=None, help="Batch mode: end date YYYY-MM-DD (inclusive)")
+    parser.add_argument("--calendar-symbol", default="SPY", help="Trading calendar symbol (default: SPY)")
+    parser.add_argument("--out", default=None, help="Single date mode output path")
+    parser.add_argument("--outdir", default="data/daily", help="Batch mode output directory")
+    parser.add_argument("--out-prefix", default="stock_features", help="Batch mode output filename prefix")
     parser.add_argument("--risk-profile", default="balanced", choices=["conservative", "balanced", "aggressive"])
     args = parser.parse_args()
 
-    td = _parse_date(str(args.date))
-    out_path = Path(args.out)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    # Mode selection
+    has_batch = bool(args.start_date) or bool(args.end_date)
+    if has_batch and args.date:
+        raise SystemExit("Use either --date (single) or --start-date/--end-date (batch), not both")
+    if has_batch and (not args.start_date or not args.end_date):
+        raise SystemExit("Batch mode requires both --start-date and --end-date")
+    if (not has_batch) and (not args.date):
+        raise SystemExit("Single date mode requires --date")
+    if (not has_batch) and (not args.out):
+        raise SystemExit("Single date mode requires --out")
 
     storage = DataStorage(base_path=str(args.data_dir))
-
     tickers = _load_tickers(Path(args.tickers_file))
     if not tickers:
         raise SystemExit("No tickers loaded.")
 
-    spy_df = storage.load_price_data("SPY", category=str(args.category))
+    spy_df = storage.load_price_data(str(args.calendar_symbol).strip(), category=str(args.category))
     vix_df = storage.load_price_data("VIX", category=str(args.category))
     regime_detector = RegimeDetector()
 
-    results: List[Dict[str, Any]] = []
-    errors: List[Dict[str, Any]] = []
-
+    # Pre-load per-symbol price data once (significant speedup for batch)
+    price_map: Dict[str, pd.DataFrame] = {}
     for sym in tickers:
         try:
             df = storage.load_price_data(sym, category=str(args.category))
             if df is None or df.empty:
-                raise ValueError(f"missing parquet for {sym} under data/{args.category}")
-            rec = _compute_one(
-                symbol=sym,
-                df=df,
-                asof_date=td,
-                regime_detector=regime_detector,
-                spy_df=spy_df,
-                vix_df=vix_df,
-                risk_profile=str(args.risk_profile),
-            )
-            results.append(rec)
-        except Exception as e:
-            logger.warning(f"Failed to build features for {sym} at {td}: {e}")
-            errors.append({"symbol": sym, "error": str(e)})
+                continue
+            price_map[str(sym).upper()] = df
+        except Exception:
+            continue
 
-    payload = {
-        "date": td.strftime("%Y-%m-%d"),
-        "generated_at": dt.datetime.now().astimezone().isoformat(),
-        "category": str(args.category),
-        "tickers_file": str(args.tickers_file),
-        "items": results,
-        "errors": errors,
-    }
+    def _build_one_day(td: dt.date, out_path: Path) -> None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(out_path, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+        results: List[Dict[str, Any]] = []
+        errors: List[Dict[str, Any]] = []
 
-    logger.info(f"Saved features: {out_path} items={len(results)} errors={len(errors)}")
+        for sym in tickers:
+            sym_u = str(sym).upper()
+            try:
+                df = price_map.get(sym_u)
+                if df is None or df.empty:
+                    raise ValueError(f"missing parquet for {sym} under data/{args.category}")
+                rec = _compute_one(
+                    symbol=sym_u,
+                    df=df,
+                    asof_date=td,
+                    regime_detector=regime_detector,
+                    spy_df=spy_df,
+                    vix_df=vix_df,
+                    risk_profile=str(args.risk_profile),
+                )
+                results.append(rec)
+            except Exception as e:
+                logger.warning(f"Failed to build features for {sym_u} at {td}: {e}")
+                errors.append({"symbol": sym_u, "error": str(e)})
+
+        payload = {
+            "date": td.strftime("%Y-%m-%d"),
+            "generated_at": dt.datetime.now().astimezone().isoformat(),
+            "category": str(args.category),
+            "tickers_file": str(args.tickers_file),
+            "items": results,
+            "errors": errors,
+        }
+
+        with open(out_path, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+
+        logger.info(f"Saved features: {out_path} items={len(results)} errors={len(errors)}")
+
+    if has_batch:
+        start_d = _parse_date(str(args.start_date))
+        end_d = _parse_date(str(args.end_date))
+        if start_d > end_d:
+            raise SystemExit("start-date must be <= end-date")
+
+        cal_df = None
+        if spy_df is not None and not spy_df.empty:
+            cal_df = _normalize_price_df(spy_df)
+        if cal_df is None or cal_df.empty:
+            raise SystemExit(f"Calendar symbol data not available: {args.calendar_symbol}")
+
+        cal_dates = sorted(set([d.date() for d in cal_df.index if hasattr(d, "date")]))
+        target_dates = [d for d in cal_dates if start_d <= d <= end_d]
+        if not target_dates:
+            logger.warning(f"No trading dates found in range {start_d}..{end_d}")
+            return
+
+        outdir = Path(str(args.outdir))
+        outdir.mkdir(parents=True, exist_ok=True)
+        prefix = str(args.out_prefix).strip() or "stock_features"
+
+        for td in target_dates:
+            out_path = outdir / f"{prefix}_{td.strftime('%Y-%m-%d')}.json"
+            _build_one_day(td, out_path)
+    else:
+        td = _parse_date(str(args.date))
+        out_path = Path(str(args.out))
+        _build_one_day(td, out_path)
 
 
 if __name__ == "__main__":

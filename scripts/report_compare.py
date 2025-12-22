@@ -88,11 +88,13 @@ def _bucket_stats(df: pd.DataFrame, *, pred: Callable[[pd.DataFrame], pd.Series]
         }
 
     pnl_col = f"pnl_h{int(horizon)}"
+    pnl_net_col = f"pnl_h{int(horizon)}_net"
     pnl = float(sub[pnl_col].fillna(0.0).sum()) if pnl_col in sub.columns else 0.0
     fees = float(sub["fee"].fillna(0.0).sum()) if "fee" in sub.columns else 0.0
 
-    pnl_net = pnl
-    if int(horizon) == 1:
+    if pnl_net_col in sub.columns:
+        pnl_net = float(sub[pnl_net_col].fillna(0.0).sum())
+    else:
         pnl_net = pnl - fees
 
     # trade_count counts rebalance events
@@ -139,9 +141,13 @@ def _global_from_daily(df: pd.DataFrame, horizons: List[int]) -> Dict[str, Any]:
 
     pnl_sum = {str(h): float(df2.get(f"pnl_h{int(h)}", 0.0).sum()) for h in horizons}
     fees_total = float(df2.get("fee", 0.0).sum())
-    pnl_sum_net = dict(pnl_sum)
-    if "1" in pnl_sum_net:
-        pnl_sum_net["1"] = float(pnl_sum_net["1"]) - float(fees_total)
+    pnl_sum_net: Dict[str, float] = {}
+    for h in horizons:
+        net_col = f"pnl_h{int(h)}_net"
+        if net_col in df2.columns:
+            pnl_sum_net[str(h)] = float(df2.get(net_col, 0.0).sum())
+        else:
+            pnl_sum_net[str(h)] = float(pnl_sum.get(str(h), 0.0)) - float(fees_total)
 
     trade_count = int((df2.get("turnover", 0.0) > 1e-12).sum())
     analyst_cov = float((df2.get("expert", "").astype(str) == "analyst").sum()) / float(len(df2)) if len(df2) else 0.0
@@ -154,9 +160,12 @@ def _global_from_daily(df: pd.DataFrame, horizons: List[int]) -> Dict[str, Any]:
             planner_allow_rate = float(by_day.mean())
 
     # NAV/max_drawdown computed from h=1 net daily pnl
-    day_pnl1 = df2.groupby("date")["pnl_h1"].sum() if "pnl_h1" in df2.columns else pd.Series(dtype=float)
-    day_fee = df2.groupby("date")["fee"].sum() if "fee" in df2.columns else pd.Series(dtype=float)
-    day_ret = (day_pnl1.reindex(day_pnl1.index).fillna(0.0) - day_fee.reindex(day_pnl1.index).fillna(0.0)).sort_index()
+    if "pnl_h1_net" in df2.columns:
+        day_ret = df2.groupby("date")["pnl_h1_net"].sum().fillna(0.0).sort_index()
+    else:
+        day_pnl1 = df2.groupby("date")["pnl_h1"].sum() if "pnl_h1" in df2.columns else pd.Series(dtype=float)
+        day_fee = df2.groupby("date")["fee"].sum() if "fee" in df2.columns else pd.Series(dtype=float)
+        day_ret = (day_pnl1.reindex(day_pnl1.index).fillna(0.0) - day_fee.reindex(day_pnl1.index).fillna(0.0)).sort_index()
 
     nav = 1.0
     peak = 1.0
@@ -183,6 +192,7 @@ def main() -> None:
     p = argparse.ArgumentParser()
     p.add_argument("--metrics", required=True, help="Path to results/{run_id}/metrics.json")
     p.add_argument("--out", default="", help="Optional path to write report.md")
+    p.add_argument("--trade-cost-bps", type=float, default=None, help="Override trade_cost_bps and recompute fees + net PnL from turnover")
     args = p.parse_args()
 
     metrics_path = Path(str(args.metrics))
@@ -200,6 +210,25 @@ def main() -> None:
     df_base = _load_csv(base_daily_path) if base_daily_path.exists() else pd.DataFrame()
     df_gold = _load_csv(gold_daily_path) if gold_daily_path.exists() else pd.DataFrame()
 
+    if args.trade_cost_bps is not None:
+        new_cost = float(args.trade_cost_bps)
+        cost_rate = float(new_cost) / 10000.0
+        print(f"!!! Overriding trade_cost_bps to {new_cost}. Recalculating fees and net PnL !!!")
+
+        for _df in [df_base, df_gold]:
+            if _df.empty:
+                continue
+            if "turnover" not in _df.columns:
+                continue
+            _df["turnover"] = pd.to_numeric(_df["turnover"], errors="coerce").fillna(0.0)
+            _df["fee"] = _df["turnover"].abs() * float(cost_rate)
+            for h in horizons:
+                pnl_col = f"pnl_h{int(h)}"
+                if pnl_col not in _df.columns:
+                    continue
+                _df[pnl_col] = pd.to_numeric(_df[pnl_col], errors="coerce").fillna(0.0)
+                _df[f"pnl_h{int(h)}_net"] = _df[pnl_col] - _df["fee"].fillna(0.0)
+
     lines: List[str] = []
     lines.append(f"# Report: {run_dir.name}")
     lines.append("")
@@ -216,13 +245,16 @@ def main() -> None:
             "high_vol_ann_pct_threshold",
         ]:
             if k in proto:
-                lines.append(f"- **{k}**: `{proto[k]}`")
+                if (k == "trade_cost_bps") and (args.trade_cost_bps is not None):
+                    lines.append(f"- **{k}**: `{float(args.trade_cost_bps)}`")
+                else:
+                    lines.append(f"- **{k}**: `{proto[k]}`")
     lines.append("")
 
     lines.append("## Global Scorecard")
     lines.append("")
-    lines.append("| System | pnl_sum(h=1) | pnl_sum(h=5) | pnl_sum(h=10) | pnl_sum_net(h=1) | trade_count | fees_total | nav_end | max_drawdown | analyst_coverage | planner_allow_rate |")
-    lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+    lines.append("| System | pnl_sum(h=1) | pnl_sum(h=5) | pnl_sum(h=10) | pnl_sum_net(h=1) | pnl_sum_net(h=5) | pnl_sum_net(h=10) | trade_count | fees_total | nav_end | max_drawdown | analyst_coverage | planner_allow_rate |")
+    lines.append("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
 
     bg_raw = _global_from_daily(df_base, horizons)
     gg_raw = _global_from_daily(df_gold, horizons)
@@ -231,6 +263,8 @@ def main() -> None:
         "p5": _to_float(bg_raw["pnl_sum"].get("5")),
         "p10": _to_float(bg_raw["pnl_sum"].get("10")),
         "p1n": _to_float(bg_raw["pnl_sum_net"].get("1")),
+        "p5n": _to_float(bg_raw["pnl_sum_net"].get("5")),
+        "p10n": _to_float(bg_raw["pnl_sum_net"].get("10")),
         "tc": int(bg_raw["trade_count"]),
         "fees": float(bg_raw["fees_total"]),
         "nav": float(bg_raw["nav_end"]),
@@ -243,6 +277,8 @@ def main() -> None:
         "p5": _to_float(gg_raw["pnl_sum"].get("5")),
         "p10": _to_float(gg_raw["pnl_sum"].get("10")),
         "p1n": _to_float(gg_raw["pnl_sum_net"].get("1")),
+        "p5n": _to_float(gg_raw["pnl_sum_net"].get("5")),
+        "p10n": _to_float(gg_raw["pnl_sum_net"].get("10")),
         "tc": int(gg_raw["trade_count"]),
         "fees": float(gg_raw["fees_total"]),
         "nav": float(gg_raw["nav_end"]),
@@ -251,12 +287,12 @@ def main() -> None:
         "ar": float(gg_raw["planner_allow_rate"]),
     }
     lines.append(
-        "| Baseline Fast | {p1:.6f} | {p5:.6f} | {p10:.6f} | {p1n:.6f} | {tc} | {fees:.6f} | {nav:.6f} | {mdd:.6f} | {ac:.4f} | {ar:.4f} |".format(
+        "| Baseline Fast | {p1:.6f} | {p5:.6f} | {p10:.6f} | {p1n:.6f} | {p5n:.6f} | {p10n:.6f} | {tc} | {fees:.6f} | {nav:.6f} | {mdd:.6f} | {ac:.4f} | {ar:.4f} |".format(
             **bg
         )
     )
     lines.append(
-        "| Golden Strict | {p1:.6f} | {p5:.6f} | {p10:.6f} | {p1n:.6f} | {tc} | {fees:.6f} | {nav:.6f} | {mdd:.6f} | {ac:.4f} | {ar:.4f} |".format(
+        "| Golden Strict | {p1:.6f} | {p5:.6f} | {p10:.6f} | {p1n:.6f} | {p5n:.6f} | {p10n:.6f} | {tc} | {fees:.6f} | {nav:.6f} | {mdd:.6f} | {ac:.4f} | {ar:.4f} |".format(
             **gg
         )
     )
@@ -343,7 +379,7 @@ def main() -> None:
 
         lines.append(f"### Bucket: {title}")
         lines.append("")
-        lines.append("| System | date_count | pnl_sum | pnl_sum_net(h=1) | trade_count | fees_total | analyst_coverage |")
+        lines.append(f"| System | date_count | pnl_sum | pnl_sum_net(h={int(h)}) | trade_count | fees_total | analyst_coverage |")
         lines.append("|---|---:|---:|---:|---:|---:|---:|")
         lines.append(
             "| Baseline Fast | {dc} | {pnl:.6f} | {pnl_net:.6f} | {trades} | {fees:.6f} | {ac:.4f} |".format(
