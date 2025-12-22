@@ -24,7 +24,7 @@
 | 12 | DPO / GRPO | 完成 | 2025-12 |
 | 13 | 黄金运行（严格风险 + 规划器 + DPO Analyst） | 完成 | 2025-12 |
 | 14 | 评测平台（Protocol Freeze + Walk-forward + Stratified Report） | 进行中 | 2025-12 |
-| 15 | Q4 Walk-forward 报告 + Alpha Mining + Surgical DPO（Analyst Alpha Hunter） | 进行中 | 2025-12 |
+| 15 | Q4 Walk-forward 报告 + Alpha Mining + Surgical DPO（Analyst Alpha Hunter / Alpha Max V3） | 进行中 | 2025-12 |
 
 ---
 

@@ -2758,3 +2758,86 @@ Global Scorecard（h=5，Net，5bps）：
 目标输出（模型产物不入库）：
 
 - `models/trader_v4_dpo_analyst_alpha`
+
+### Phase 15.3g：Surgical Verification（Analyst-only Unit Test）
+
+动机：由于 MoE Router 可能掩盖 Analyst 自身能力变化，需要一个“只测 Analyst”的最小单元测试来验证 Surgical DPO 是否真的把 `CLEAR` 推向 `BUY`。
+
+新增脚本：
+
+- `scripts/verify_v4_surgical.py`
+
+关键点：
+
+- 使用 `--append-format-hint` 强制输出 `Signal:` 行，减少解析不确定性
+- 使用 `--binary-signals` 限定 `BUY/CLEAR`，防止输出漂移到 `SELL/HOLD`
+- 对于“Merge & Polish”训练的增量 LoRA，需要使用 `--merge-adapter` 做 adapter stacking（base → merge(prev) → load(target)）
+
+验证命令（示例）：
+
+```powershell
+\venv311\Scripts\python.exe scripts\verify_v4_surgical.py --append-format-hint --binary-signals --max-new-tokens 64 --success-threshold 0.8 --adapter-path models\trader_v4_dpo_analyst_alpha
+```
+
+### Phase 15.3h：Booster Shot（alpha_plus）
+
+观察：Surgical DPO 初版在 46 条 Alpha Days 上出现了部分 `BUY`，但转化率不足以让 Router 改变偏好。
+
+做法：提高 epochs/LR 得到 `alpha_plus`：
+
+- 输出：`models/trader_v4_dpo_analyst_alpha_plus`
+
+注意：`alpha_plus` 属于在 merged base 上训练的增量 LoRA，验证时必须 adapter stacking：
+
+```powershell
+\venv311\Scripts\python.exe scripts\verify_v4_surgical.py --append-format-hint --binary-signals --max-new-tokens 64 --success-threshold 0.8 --merge-adapter models\trader_v4_dpo_analyst_alpha --adapter-path models\trader_v4_dpo_analyst_alpha_plus
+```
+
+现象：`BUY` 有提升，但仍会漂移到 `SELL/HOLD`，说明模型被激活但方向不稳定。
+
+### Phase 15.3i：Final Calibration（strict dataset → alpha_max）
+
+目标：通过更强的模板与 System Prompt，压制保守输出并提升 Alpha Days 的 `BUY`。
+
+数据集：
+
+- `data/dpo/v4_train_strict.jsonl`
+- `data/dpo/v4_train_strict_v2.jsonl`（在 rejected 中显式加入 `SELL/HOLD`，用于惩罚“瞎操作”）
+
+训练产物：
+
+- `models/trader_v4_dpo_analyst_alpha_max`
+- `models/trader_v4_dpo_analyst_alpha_max_v2`
+
+验证（v2 统计样例）：
+
+- `BUY=25/46 (54.3%)`
+- `CLEAR=10/46`
+- 剩余为 `SELL/HOLD` 漂移（通过 v2 rejected 已明显减少，但仍存在）
+
+### Phase 15.3k：Alpha Max V3（No Escape Prompt + Hard Beta）
+
+关键结论（拦路虎）：Prompt 泄露。
+
+即使 chosen/rejected 已强偏好 `BUY`，如果 user task 仍允许 `BUY/SELL/CLEAR/HOLD`，模型仍会把 `SELL/HOLD/CLEAR` 当作“合法出口”，导致转化率卡在 ~50% 附近。
+
+解决策略：
+
+- Prompt “无路可退”：Task 改为 `BUY/CLEAR only. Do NOT output SELL or HOLD.`
+- 训练使用更硬的 DPO 约束：`beta=0.3`
+
+数据集：
+
+- `data/dpo/v4_train_strict_v3.jsonl`
+
+训练命令（alpha_max_v3）：
+
+```powershell
+\venv311\Scripts\python.exe scripts\train_dpo_surgical.py --prev-adapter models\trader_v4_dpo_analyst_alpha --data-path data\dpo\v4_train_strict_v3.jsonl --epochs 10 --lr 5e-6 --beta 0.3 --lora-r 32 --batch-size 1 --grad-accum 4 --output-dir models\trader_v4_dpo_analyst_alpha_max_v3
+```
+
+验证命令（adapter stacking）：
+
+```powershell
+\venv311\Scripts\python.exe scripts\verify_v4_surgical.py --append-format-hint --binary-signals --max-new-tokens 64 --success-threshold 0.8 --merge-adapter models\trader_v4_dpo_analyst_alpha --adapter-path models\trader_v4_dpo_analyst_alpha_max_v3
+```
