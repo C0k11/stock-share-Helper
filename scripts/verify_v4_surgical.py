@@ -60,7 +60,7 @@ def main() -> None:
         default="models/trader_v4_dpo_analyst_alpha",
         help="Alias for --adapter (kept for convenience).",
     )
-    p.add_argument("--data", default="data/dpo/v4_train.jsonl")
+    p.add_argument("--data", required=True, help="Path to a jsonl dataset (prompt/chosen/rejected). Required for safety.")
     p.add_argument("--max-new-tokens", type=int, default=512)
     p.add_argument(
         "--merge-adapter",
@@ -93,6 +93,8 @@ def main() -> None:
     base_model_name = str(args.base_model)
     adapter_path = str(args.adapter)
     data_path = str(args.data)
+
+    print(f"Using data: {data_path}")
 
     merge_adapter = str(args.merge_adapter).strip()
     if merge_adapter:
