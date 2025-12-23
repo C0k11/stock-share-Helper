@@ -1,0 +1,35 @@
+date_range:
+  start: "2025-12-01"
+  end: "2025-12-31"
+
+universe: "stock"
+daily_dir: "data/daily"
+base_model: "Qwen/Qwen2.5-7B-Instruct"
+load_4bit: true
+
+inference:
+  moe_mode: true
+  moe_scalper: "models/trader_stock_v1_1_tech_plus_news/lora_weights"
+  moe_analyst: "models/trader_v4_dpo_analyst_alpha_max_v3"
+
+  planner_mode: "rule"
+  allow_clear: true
+
+  risk_max_drawdown: 0.08
+  risk_vol_limit: 0.03
+  risk_watch_market: "BOTH"
+
+  moe_any_news: true
+  moe_news_threshold: 0.8
+  moe_vol_threshold: -1.0
+
+  temperature: 0.0
+  max_new_tokens: 512
+
+protocol:
+  horizons: [1, 5, 10]
+  trade_cost_bps: 5.0
+  min_news_abs_impact: 0.5
+  high_news_score_threshold: 0.8
+  high_news_count_threshold: 1
+  high_vol_ann_pct_threshold: 47.0
