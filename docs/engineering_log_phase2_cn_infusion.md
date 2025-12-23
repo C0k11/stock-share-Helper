@@ -2841,3 +2841,10 @@ Global Scorecard（h=5，Net，5bps）：
 ```powershell
 \venv311\Scripts\python.exe scripts\verify_v4_surgical.py --append-format-hint --binary-signals --max-new-tokens 64 --success-threshold 0.8 --merge-adapter models\trader_v4_dpo_analyst_alpha --adapter-path models\trader_v4_dpo_analyst_alpha_max_v3
 ```
+
+最终战报：
+
+- 组合拳：`No Escape Prompt (BUY/CLEAR only)` + `beta=0.3`
+- 产物：`models/trader_v4_dpo_analyst_alpha_max_v3`
+- 严格验证集（`data/dpo/v4_train_strict_v3.jsonl`）上，`BUY=138/138 (100%)`，完全压制 `CLEAR/SELL/HOLD` 漂移。
+- 踩坑复盘：verifier 默认数据集会导致误判（曾在旧集上看到 `BUY=25/46 (54.3%)`）。为避免未来重复踩坑，`scripts/verify_v4_surgical.py` 已改为 **必须显式传入** `--data`。
