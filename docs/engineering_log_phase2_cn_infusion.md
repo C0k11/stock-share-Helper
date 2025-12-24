@@ -2848,3 +2848,42 @@ Global Scorecard（h=5，Net，5bps）：
 - 产物：`models/trader_v4_dpo_analyst_alpha_max_v3`
 - 严格验证集（`data/dpo/v4_train_strict_v3.jsonl`）上，`BUY=138/138 (100%)`，完全压制 `CLEAR/SELL/HOLD` 漂移。
 - 踩坑复盘：verifier 默认数据集会导致误判（曾在旧集上看到 `BUY=25/46 (54.3%)`）。为避免未来重复踩坑，`scripts/verify_v4_surgical.py` 已改为 **必须显式传入** `--data`。
+
+---
+
+## Phase 15.5 / 15.1：Hell-month (2022-06) + Alpha Days 罗盘（MVP）
+
+目标：在“地狱月”（2022-06）压力场景下，对比 Baseline / Golden Strict V1 / Experiment Alpha V4（`alpha_max_v3`）的防御性表现，并从回测日志抽取可用于后续 DPO 的“Alpha Days”监督信号。
+
+结论：
+
+- V4 与 V1 在 2022-06 窗口指标 **完全一致**（确认 system idempotency：当 Analyst 未触发时，替换 Analyst adapter 不会改变结果）。
+- 由于该窗口缺失 news signals 且 `moe_vol_threshold=-1`，Analyst 覆盖率为 0，路由基本全在 Scalper。
+
+### Phase 15.1B：Rich Alpha Compass（增强版 alpha_days.csv）
+
+关键修正：
+
+- PnL 聚合从 `mean` 改为 `sum`（避免被大量 `target_position=0` 的 ticker 稀释，恢复组合口径）。
+- Market Proxy 使用 `fr_h1` 的 `median`（更稳健的“当日市场波动”代理）。
+
+增强字段：
+
+- `total_news_vol`（当日新闻总量）
+- `max_news_impact`（当日最大新闻冲击）
+- `avg_vol`（平均年化波动环境）
+- `suggest_upsize`（当日建议加仓标记：Alpha 且有新闻）
+- `day_type` 新增 `DEFENSIVE_ALPHA` / `DEFENSIVE_ALPHA_GOLD`
+
+脚本与产物：
+
+- Script：`scripts/mining/extract_alpha_days.py`
+- Output：`results/phase15_5_showdown_alpha_v4_jun2022/golden_strict/alpha_days.csv`
+
+运行命令：
+
+```powershell
+\.\venv311\Scripts\python.exe scripts\mining\extract_alpha_days.py --run-dir results\phase15_5_showdown_alpha_v4_jun2022\golden_strict
+```
+
+该窗口已识别出多天 `DEFENSIVE_ALPHA`（市场大跌但策略相对生存）。

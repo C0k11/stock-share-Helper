@@ -26,6 +26,22 @@
 | 14 | 评测平台（Protocol Freeze + Walk-forward + Stratified Report） | 进行中 | 2025-12 |
 | 15 | Q4 Walk-forward 报告 + Alpha Mining + Surgical DPO（Analyst Alpha Hunter / Alpha Max V3） | 进行中 | 2025-12 |
 
+### Phase 15 最新进展（Alpha Mining / Alpha Days Compass）
+
+- **Hell-month 压力测试（2022-06）**：完成 Baseline / Golden Strict V1 / Experiment Alpha V4（`alpha_max_v3`）对照回测。
+- **关键结论**：在 Analyst 未触发（news signals 缺失、`moe_vol_threshold=-1`）的窗口内，V4 与 V1 指标一致，用于验证系统接线的幂等与安全。
+- **Alpha Days 罗盘（Rich Alpha Compass）**：已从 `daily.csv` 生成增强版 `alpha_days.csv`，包含 `total_news_vol/max_news_impact/avg_vol/suggest_upsize` 并支持 `DEFENSIVE_ALPHA`。
+
+提取命令（示例）：
+
+```powershell
+\.\venv311\Scripts\python.exe scripts\mining\extract_alpha_days.py --run-dir results\phase15_5_showdown_alpha_v4_jun2022\golden_strict
+```
+
+产物路径：
+
+- `results/phase15_5_showdown_alpha_v4_jun2022/golden_strict/alpha_days.csv`
+
 ---
 
 ## 项目概述
