@@ -192,6 +192,15 @@ def main() -> None:
     p.add_argument("--daily-dir", default="data/daily")
     p.add_argument("--reports-dir", default="reports/daily")
 
+    p.add_argument("--news-model", default="Qwen/Qwen2.5-14B-Instruct")
+    p.add_argument("--news-lora", default="models/llm_qwen14b_lora_c_hybrid/lora_weights")
+    p.add_argument("--news-use-lora", action="store_true", default=False)
+    p.add_argument("--news-no-lora", dest="news_use_lora", action="store_false")
+    p.add_argument("--news-limit", type=int, default=0)
+    p.add_argument("--news-offset", type=int, default=0)
+    p.add_argument("--news-sample-us", type=int, default=0)
+    p.add_argument("--news-sample-cn", type=int, default=0)
+
     p.add_argument("--risk-watch-market", default="BOTH")
     p.add_argument("--planner-mode", default="off", choices=["off", "rule"])
 
@@ -251,7 +260,40 @@ def main() -> None:
         _run([py, "scripts/fetch_daily_rss.py", "--date", date_str, "--health-out", "auto"])
 
     if not bool(args.skip_news_parse):
-        _run([py, "scripts/run_daily_inference.py", "--date", date_str, "--use-lora", "--load-in-4bit", "--batch-size", "4", "--max-input-chars", "6000", "--save-every", "20"])
+        cmd = [
+            py,
+            "scripts/run_daily_inference.py",
+            "--date",
+            date_str,
+            "--model",
+            str(args.news_model),
+            "--lora",
+            str(args.news_lora),
+            "--load-in-4bit",
+            "--batch-size",
+            "4",
+            "--max-input-chars",
+            "6000",
+            "--save-every",
+            "20",
+        ]
+
+        if int(args.news_offset) > 0:
+            cmd.extend(["--offset", str(int(args.news_offset))])
+        if int(args.news_limit) > 0:
+            cmd.extend(["--limit", str(int(args.news_limit))])
+        if int(args.news_sample_us) > 0:
+            cmd.extend(["--sample-us", str(int(args.news_sample_us))])
+        if int(args.news_sample_cn) > 0:
+            cmd.extend(["--sample-cn", str(int(args.news_sample_cn))])
+
+        lora_exists = Path(str(args.news_lora)).exists()
+        if bool(args.news_use_lora) and lora_exists:
+            cmd.append("--use-lora")
+        elif bool(args.news_use_lora) and (not lora_exists):
+            print(f"[warn] News LoRA not found, running base model only: {args.news_lora}")
+
+        _run(cmd)
 
     if not bool(args.skip_features):
         _run([py, "scripts/build_daily_etf_features.py", "--date", date_str])
