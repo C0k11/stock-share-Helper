@@ -211,7 +211,14 @@ def build_dataset(*, run_dir: Path, system: str) -> pd.DataFrame:
 
 def main() -> None:
     p = argparse.ArgumentParser()
-    p.add_argument("--results-run-dir", action="append", required=True)
+    p.add_argument("--results-run-dir", action="append", required=False)
+    p.add_argument(
+        "--run-dir",
+        dest="results_run_dir",
+        action="append",
+        required=False,
+        help="Alias of --results-run-dir (can be specified multiple times)",
+    )
     p.add_argument("--system", default="golden_strict")
     p.add_argument("--out", default="data/training/planner_dataset_v1.csv")
     p.add_argument("--start", default="")
@@ -219,6 +226,9 @@ def main() -> None:
     p.add_argument("--include-leaky-features", action="store_true", default=False)
 
     args = p.parse_args()
+
+    if not getattr(args, "results_run_dir", None):
+        raise SystemExit("Missing required argument: --run-dir/--results-run-dir")
 
     dfs: List[pd.DataFrame] = []
     for rd in args.results_run_dir:

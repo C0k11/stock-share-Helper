@@ -97,6 +97,261 @@ def _format_md_table(rows: List[List[str]], headers: List[str]) -> str:
     return "\n".join(out)
 
 
+def _planner_ai_insight_lines(
+    *,
+    day_decisions: Dict[str, Any],
+    daily: pd.DataFrame,
+    date: str,
+    model_path: Path,
+    planner_policy: str = "",
+) -> List[str]:
+    planner = day_decisions.get("planner") if isinstance(day_decisions.get("planner"), dict) else {}
+    recorded_strategy = _safe_str(planner.get("strategy")) if planner else ""
+
+    inputs = planner.get("inputs") if isinstance(planner.get("inputs"), dict) else {}
+    probs = inputs.get("probs") if isinstance(inputs.get("probs"), dict) else {}
+    feats = inputs.get("features") if isinstance(inputs.get("features"), dict) else {}
+
+    policy = str(planner_policy or "").strip().lower()
+    force_mri = policy == "sft"
+    disable_mri = policy == "rule"
+    if force_mri:
+        probs = {}
+        feats = {}
+
+    mri: Optional[Dict[str, Any]] = None
+    if (not disable_mri) and (not probs):
+        mri = _try_planner_sft_mri(daily=daily, date=str(date), model_path=model_path)
+        if isinstance(mri, dict):
+            probs = mri.get("probs") if isinstance(mri.get("probs"), dict) else probs
+            feats = mri.get("features") if isinstance(mri.get("features"), dict) else feats
+
+    out: List[str] = []
+    strategy = ""
+    if isinstance(mri, dict):
+        strategy = _safe_str(mri.get("strategy"))
+    if not strategy:
+        strategy = recorded_strategy
+
+    if strategy:
+        out.append(f"- Current Strategy: `{strategy.upper()}`")
+    else:
+        out.append("- Current Strategy: `(unknown)`")
+
+    if recorded_strategy and (recorded_strategy != strategy):
+        out.append(f"- Recorded Strategy (run): `{recorded_strategy.upper()}`")
+
+    if probs:
+        out.append("- Probabilities Source: `recorded`" if (inputs.get("probs") and not force_mri) else "- Probabilities Source: `mri`")
+    else:
+        if disable_mri:
+            out.append("- MRI Status: `disabled (--planner-policy rule)`")
+        elif not model_path.exists():
+            out.append(f"- MRI Status: `skipped (missing model: {model_path.as_posix()})`")
+        else:
+            out.append("- MRI Status: `failed (model present but could not run)`")
+
+    if probs:
+        ps: List[Tuple[str, float]] = []
+        for k, v in probs.items():
+            ps.append((_safe_str(k), _safe_float(v, 0.0)))
+        ps = sorted(ps, key=lambda x: x[1], reverse=True)
+
+        conf = 0.0
+        if strategy and (strategy in probs):
+            conf = _safe_float(probs.get(strategy), 0.0)
+        elif ps:
+            conf = float(ps[0][1])
+        out.append(f"- Confidence: `{conf * 100.0:.1f}%`")
+
+        top2 = ps[:2]
+        if top2:
+            out.append("- Top Probabilities:")
+            for k, v in top2:
+                out.append(f"  - `{k}`: `{v * 100.0:.1f}%`")
+    else:
+        out.append("- Confidence: `(n/a)`")
+
+    if feats:
+        keys = [
+            "n_tickers",
+            "vol_mean",
+            "vol_max",
+            "news_count_sum",
+            "news_count_mean",
+            "news_score_mean",
+            "news_score_max",
+            "has_strong_news_day",
+            "prev_gross_exposure",
+            "prev_net_exposure",
+            "prev_abs_exposure_mean",
+            "prev_long_count",
+            "prev_short_count",
+        ]
+        out.append("- Input Context:")
+        for k in keys:
+            if k in feats:
+                out.append(f"  - `{k}`: `{_safe_float(feats.get(k), 0.0):.6f}`")
+
+    return out
+
+
+def _compute_prev_exposure_from_daily(daily: pd.DataFrame, date: str) -> Dict[str, float]:
+    if daily.empty:
+        return {}
+    try:
+        dates = sorted([d for d in daily["date"].astype(str).unique().tolist() if str(d).strip()])
+    except Exception:
+        return {}
+    prev_date = ""
+    for d in dates:
+        if str(d) < str(date):
+            prev_date = str(d)
+    if not prev_date:
+        return {}
+
+    prev_rows = daily[daily["date"].astype(str) == str(prev_date)].copy()
+    if prev_rows.empty:
+        return {}
+
+    if "target_position" not in prev_rows.columns:
+        prev_rows["target_position"] = 0.0
+    tp = pd.to_numeric(prev_rows["target_position"], errors="coerce").fillna(0.0)
+
+    gross = float(tp.abs().sum())
+    net = float(tp.sum())
+    abs_mean = float(tp.abs().mean()) if len(tp) else 0.0
+    long_count = float((tp > 0).sum())
+    short_count = float((tp < 0).sum())
+
+    return {
+        "prev_gross_exposure": gross,
+        "prev_net_exposure": net,
+        "prev_abs_exposure_mean": abs_mean,
+        "prev_long_count": long_count,
+        "prev_short_count": short_count,
+    }
+
+
+def _try_planner_sft_mri(
+    *,
+    daily: pd.DataFrame,
+    date: str,
+    model_path: Path,
+) -> Optional[Dict[str, Any]]:
+    if not model_path.exists():
+        return None
+    if daily.empty:
+        return None
+
+    day_rows = daily[daily["date"].astype(str) == str(date)].copy()
+    if day_rows.empty:
+        return None
+
+    try:
+        import numpy as np
+        import torch
+    except Exception:
+        return None
+
+    try:
+        payload = torch.load(str(model_path), map_location="cpu")
+    except Exception:
+        return None
+    if not isinstance(payload, dict):
+        return None
+
+    feature_names = payload.get("feature_names")
+    mean = payload.get("scaler_mean")
+    std = payload.get("scaler_std")
+    idx_to_label = payload.get("idx_to_label")
+    state = payload.get("model_state")
+    if not (isinstance(feature_names, list) and isinstance(mean, list) and isinstance(std, list) and isinstance(idx_to_label, dict) and isinstance(state, dict)):
+        return None
+
+    class _MLP(torch.nn.Module):
+        def __init__(self, input_dim: int, output_dim: int, dropout: float) -> None:
+            super().__init__()
+            self.net = torch.nn.Sequential(
+                torch.nn.Linear(int(input_dim), 64),
+                torch.nn.ReLU(),
+                torch.nn.Dropout(float(dropout)),
+                torch.nn.Linear(64, 32),
+                torch.nn.ReLU(),
+                torch.nn.Linear(32, int(output_dim)),
+            )
+
+        def forward(self, x: torch.Tensor) -> torch.Tensor:
+            return self.net(x)
+
+    try:
+        idx_map = {int(k): _safe_str(v) for k, v in idx_to_label.items()}
+        model = _MLP(len(feature_names), len(idx_map), float(payload.get("dropout", 0.2)))
+        model.load_state_dict(state)
+        model.eval()
+    except Exception:
+        return None
+
+    if "volatility_ann_pct" not in day_rows.columns:
+        day_rows["volatility_ann_pct"] = 0.0
+    if "news_count" not in day_rows.columns:
+        day_rows["news_count"] = 0.0
+    if "news_score" not in day_rows.columns:
+        day_rows["news_score"] = 0.0
+
+    has_strong = 0.0
+    if "has_strong_news_day" in day_rows.columns:
+        try:
+            has_strong = 1.0 if bool(pd.to_numeric(day_rows["has_strong_news_day"], errors="coerce").fillna(0.0).astype(bool).any()) else 0.0
+        except Exception:
+            has_strong = 0.0
+
+    vol = pd.to_numeric(day_rows["volatility_ann_pct"], errors="coerce").fillna(0.0)
+    nc = pd.to_numeric(day_rows["news_count"], errors="coerce").fillna(0.0)
+    ns = pd.to_numeric(day_rows["news_score"], errors="coerce").fillna(0.0)
+
+    if has_strong <= 0.0:
+        try:
+            has_strong = 1.0 if (float(ns.max()) > 0.0 if len(ns) else False) else 0.0
+        except Exception:
+            has_strong = 0.0
+
+    feats: Dict[str, float] = {
+        "n_tickers": float(len(day_rows)),
+        "vol_mean": float(vol.mean()) if len(vol) else 0.0,
+        "vol_max": float(vol.max()) if len(vol) else 0.0,
+        "news_count_sum": float(nc.sum()) if len(nc) else 0.0,
+        "news_count_mean": float(nc.mean()) if len(nc) else 0.0,
+        "news_score_mean": float(ns.mean()) if len(ns) else 0.0,
+        "news_score_max": float(ns.max()) if len(ns) else 0.0,
+        "has_strong_news_day": float(has_strong),
+    }
+    feats.update(_compute_prev_exposure_from_daily(daily, date))
+
+    x_list: List[float] = []
+    for i, name in enumerate([_safe_str(x) for x in feature_names]):
+        v = float(feats.get(name, 0.0) or 0.0)
+        mu = float(mean[i]) if i < len(mean) else 0.0
+        sd = float(std[i]) if i < len(std) else 1.0
+        if sd <= 1e-12:
+            sd = 1.0
+        x_list.append((v - mu) / sd)
+
+    x_np = np.asarray([x_list], dtype=np.float32)
+    x = torch.from_numpy(x_np)
+    with torch.no_grad():
+        logits = model(x)
+        probs_t = torch.softmax(logits, dim=-1)[0]
+        idx = int(torch.argmax(probs_t).item())
+        probs = {idx_map.get(i, str(i)): float(probs_t[i].item()) for i in range(int(probs_t.shape[0]))}
+
+    return {
+        "strategy": idx_map.get(idx, "cash_preservation"),
+        "probs": probs,
+        "features": feats,
+    }
+
+
 def _append_paper_log(log_path: Path, row: Dict[str, Any]) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     fields = list(row.keys())
@@ -116,6 +371,8 @@ def main() -> None:
     parser.add_argument("--out", default=None, help="Output markdown path (default: reports/daily/YYYY-MM-DD.md)")
     parser.add_argument("--paper-log", default="paper_trading/backtest_history.csv")
     parser.add_argument("--write-paper-log", action="store_true", default=False)
+    parser.add_argument("--planner-sft-model", default="models/planner_sft_v1.pt")
+    parser.add_argument("--planner-policy", default="", choices=["", "rule", "sft"])
     args = parser.parse_args()
 
     run_dir = Path(args.run_dir)
@@ -224,6 +481,18 @@ def main() -> None:
     lines.append(f"- avg_volatility_ann_pct(mean): `{avg_vol:.2f}`")
     lines.append(f"- total_news_vol(day): `{total_news:.0f}`")
     lines.append(f"- max_news_impact(day): `{max_news_impact:.2f}`")
+    lines.append("")
+
+    lines.append("## 🧠 Planner AI Insight")
+    lines.extend(
+        _planner_ai_insight_lines(
+            day_decisions=day_decisions,
+            daily=daily,
+            date=str(date),
+            model_path=Path(str(args.planner_sft_model)),
+            planner_policy=str(args.planner_policy),
+        )
+    )
     lines.append("")
 
     lines.append("## Alpha Watch")
