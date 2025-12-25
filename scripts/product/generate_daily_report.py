@@ -114,7 +114,7 @@ def main() -> None:
     parser.add_argument("--date", required=True, help="YYYY-MM-DD")
     parser.add_argument("--system", default="golden_strict", choices=["golden_strict", "baseline_fast"])
     parser.add_argument("--out", default=None, help="Output markdown path (default: reports/daily/YYYY-MM-DD.md)")
-    parser.add_argument("--paper-log", default="paper_trading/log.csv")
+    parser.add_argument("--paper-log", default="paper_trading/backtest_history.csv")
     parser.add_argument("--write-paper-log", action="store_true", default=False)
     args = parser.parse_args()
 
