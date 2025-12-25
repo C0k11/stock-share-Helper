@@ -122,16 +122,6 @@ def build_dataset(*, run_dir: Path, system: str) -> pd.DataFrame:
         target_pos = g2["target_position"] if "target_position" in g2.columns else pd.Series([0.0] * len(g2))
         target_pos = pd.to_numeric(target_pos, errors="coerce").fillna(0.0)
 
-        turnover = g2["turnover"] if "turnover" in g2.columns else pd.Series([0.0] * len(g2))
-        fee = g2["fee"] if "fee" in g2.columns else pd.Series([0.0] * len(g2))
-        turnover = pd.to_numeric(turnover, errors="coerce").fillna(0.0)
-        fee = pd.to_numeric(fee, errors="coerce").fillna(0.0)
-
-        fr_h1 = g2["fr_h1"] if "fr_h1" in g2.columns else pd.Series([0.0] * len(g2))
-        pnl_h1_net = g2["pnl_h1_net"] if "pnl_h1_net" in g2.columns else pd.Series([0.0] * len(g2))
-        fr_h1 = pd.to_numeric(fr_h1, errors="coerce").fillna(0.0)
-        pnl_h1_net = pd.to_numeric(pnl_h1_net, errors="coerce").fillna(0.0)
-
         news_count = g2["news_count"] if "news_count" in g2.columns else pd.Series([0.0] * len(g2))
         news_score = g2["news_score"] if "news_score" in g2.columns else pd.Series([0.0] * len(g2))
         vol = g2["volatility_ann_pct"] if "volatility_ann_pct" in g2.columns else pd.Series([0.0] * len(g2))
@@ -171,10 +161,6 @@ def build_dataset(*, run_dir: Path, system: str) -> pd.DataFrame:
             "abs_exposure_mean": float(target_pos.abs().mean()),
             "long_count": int((target_pos > 0).sum()),
             "short_count": int((target_pos < 0).sum()),
-            "turnover_sum": float(turnover.sum()),
-            "fee_sum": float(fee.sum()),
-            "fr_h1_median": float(fr_h1.median()),
-            "pnl_h1_net_sum": float(pnl_h1_net.sum()),
         }
 
         dec_obj = decisions_by_date.get(str(date_str))
@@ -199,8 +185,20 @@ def build_dataset(*, run_dir: Path, system: str) -> pd.DataFrame:
         rows.append(day_metrics)
 
     out = pd.DataFrame(rows)
-    if not out.empty:
-        out = out.sort_values("date")
+    if out.empty:
+        return out
+
+    out["date"] = out["date"].astype(str)
+    out = out.sort_values(["date", "system"])
+
+    out["prev_gross_exposure"] = out.groupby("system")["gross_exposure"].shift(1)
+    out["prev_net_exposure"] = out.groupby("system")["net_exposure"].shift(1)
+    out["prev_long_count"] = out.groupby("system")["long_count"].shift(1)
+    out["prev_short_count"] = out.groupby("system")["short_count"].shift(1)
+    out[["prev_gross_exposure", "prev_net_exposure", "prev_long_count", "prev_short_count"]] = out[
+        ["prev_gross_exposure", "prev_net_exposure", "prev_long_count", "prev_short_count"]
+    ].fillna(0.0)
+
     return out
 
 
@@ -211,6 +209,7 @@ def main() -> None:
     p.add_argument("--out", default="data/training/planner_dataset_v1.csv")
     p.add_argument("--start", default="")
     p.add_argument("--end", default="")
+    p.add_argument("--include-leaky-features", action="store_true", default=False)
 
     args = p.parse_args()
 
@@ -229,6 +228,15 @@ def main() -> None:
 
     out_path = Path(str(args.out))
     out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if not bool(args.include_leaky_features) and (not df.empty):
+        leaky_cols = [
+            c
+            for c in df.columns
+            if c.startswith("dec_") or ("turnover" in c) or ("fee" in c) or c.startswith("fr_") or c.startswith("pnl_")
+        ]
+        df = df.drop(columns=leaky_cols, errors="ignore")
+
     df.to_csv(out_path, index=False)
     print(f"Saved: {out_path} rows={len(df)}")
 
