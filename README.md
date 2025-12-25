@@ -30,6 +30,8 @@
 
 - **Hell-month 压力测试（2022-06）**：完成 Baseline / Golden Strict V1 / Experiment Alpha V4（`alpha_max_v3`）对照回测。
 - **关键结论**：在 Analyst 未触发（news signals 缺失、`moe_vol_threshold=-1`）的窗口内，V4 与 V1 指标一致，用于验证系统接线的幂等与安全。
+- **News Injection 验证（2022-06 部分窗口）**：注入 news signals 后，确认 Analyst 可被唤醒（`analyst_coverage > 0`），且 6/10 极端下跌日 Analyst reasoning 明确引用 CPI/通胀语境；同时 Baseline 在 6/10 的表现与 Golden 相同，证明基础风控（Risk Manager / Drawdown Gate）具备“保命”能力。
+- **差异日（Alpha）线索**：在 2022-06-06 出现显著差异（Golden - Baseline ≈ +2.0%），Phase 15.2 的 alpha pair 挖掘将优先围绕该日期展开。
 - **Alpha Days 罗盘（Rich Alpha Compass）**：已从 `daily.csv` 生成增强版 `alpha_days.csv`，包含 `total_news_vol/max_news_impact/avg_vol/suggest_upsize` 并支持 `DEFENSIVE_ALPHA`。
 
 提取命令（示例）：
@@ -41,6 +43,13 @@
 产物路径：
 
 - `results/phase15_5_showdown_alpha_v4_jun2022/golden_strict/alpha_days.csv`
+
+复现要点（新闻数据源与信号生成）：
+
+```powershell
+\venv311\Scripts\python.exe scripts\fetch_historical_news_gdelt.py --start 2022-06-01 --end 2022-06-30 --output data\raw\news_us_raw_2022_06.jsonl
+\venv311\Scripts\python.exe scripts\backfill_news_signals.py --news-data data\raw\news_us_raw_2022_06.jsonl --out-dir data\daily --start 2022-06-01 --end 2022-06-30 --overwrite
+```
 
 ---
 

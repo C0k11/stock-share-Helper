@@ -258,33 +258,39 @@ def load_daily_news_contexts(
     if not isinstance(items, list):
         return []
 
-    candidates: List[Tuple[float, str]] = []
-    for it in items:
-        if not isinstance(it, dict):
-            continue
-
-        title = str(it.get("title") or "").strip()
-        parse_ok = bool(it.get("parse_ok"))
-        sig = it.get("signal") if isinstance(it.get("signal"), dict) else None
-
-        # Ticker filter: only keep items whose title mentions ticker (or known aliases).
-        if str(ticker or "").strip():
-            if not _title_mentions_ticker(title, str(ticker)):
+    def _collect_candidates(*, enable_ticker_filter: bool) -> List[Tuple[float, str]]:
+        out: List[Tuple[float, str]] = []
+        for it in items:
+            if not isinstance(it, dict):
                 continue
 
-        if parse_ok and sig is not None:
-            impact = _to_float(sig.get("impact_equity"))
-            if abs(impact) < float(min_abs_impact):
-                continue
-            ctx = build_news_context_from_signal_item(it)
-            if not ctx:
-                continue
-            candidates.append((abs(impact), ctx))
-        else:
-            ctx = build_raw_headline_context(it)
-            if not ctx:
-                continue
-            candidates.append((float(min_abs_impact), ctx))
+            title = str(it.get("title") or "").strip()
+            parse_ok = bool(it.get("parse_ok"))
+            sig = it.get("signal") if isinstance(it.get("signal"), dict) else None
+
+            # Ticker filter: only keep items whose title mentions ticker (or known aliases).
+            if enable_ticker_filter and str(ticker or "").strip():
+                if not _title_mentions_ticker(title, str(ticker)):
+                    continue
+
+            if parse_ok and sig is not None:
+                impact = _to_float(sig.get("impact_equity"))
+                if abs(impact) < float(min_abs_impact):
+                    continue
+                ctx = build_news_context_from_signal_item(it)
+                if not ctx:
+                    continue
+                out.append((abs(impact), ctx))
+            else:
+                ctx = build_raw_headline_context(it)
+                if not ctx:
+                    continue
+                out.append((float(min_abs_impact), ctx))
+        return out
+
+    candidates = _collect_candidates(enable_ticker_filter=True)
+    if (not candidates) and str(ticker or "").strip():
+        candidates = _collect_candidates(enable_ticker_filter=False)
 
     if not candidates:
         return []
@@ -931,7 +937,7 @@ def main() -> None:
                         strategy = str(planner_decision.get("strategy") or "").strip()
                         router_meta = dict(router_meta)
                         router_meta["planner_strategy"] = strategy
-                        if strategy and strategy != "aggressive_long" and str(expert) == "analyst":
+                        if strategy and strategy != "aggressive_long" and str(expert) == "analyst" and (not stock_news_contexts):
                             router_meta["expert_before_planner_gate"] = str(router_meta.get("expert") or str(expert))
                             expert = "scalper"
                             router_meta["expert"] = "scalper"
