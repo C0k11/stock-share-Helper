@@ -24,7 +24,7 @@
 | 12 | DPO / GRPO | 完成 | 2025-12 |
 | 13 | 黄金运行（严格风险 + 规划器 + DPO Analyst） | 完成 | 2025-12 |
 | 14 | 评测平台（Protocol Freeze + Walk-forward + Stratified Report） | 进行中 | 2025-12 |
-| 15 | Q4 Walk-forward 报告 + Alpha Mining + Surgical DPO（Analyst Alpha Hunter） | 进行中 | 2025-12 |
+| 15 | Q4 Walk-forward 报告 + Alpha Mining + Surgical DPO（Analyst Alpha Hunter） | 完成 | 2025-12 |
 
 ---
 
@@ -2742,6 +2742,29 @@ Global Scorecard（h=5，Net，5bps）：
 - `scripts/diagnose_router_bias.py`
 - `scripts/export_dpo_v4_candidates.py`
 - `scripts/build_dpo_v4_dataset.py`
+
+### Phase 15.2：Alpha Pairs（Action-Pair Mining, for DPO-ready candidates）
+
+新增脚本：
+
+- `scripts/mining/mine_alpha_pairs.py`
+
+输入：
+
+- `results/<run_id>/{baseline_fast,golden_strict}/daily.csv`
+- `results/<run_id>/{baseline_fast,golden_strict}/decisions_*.json`
+- `results/<run_id>/golden_strict/alpha_days.csv`（仅关注 `ALPHA_DAY` / `DEFENSIVE_ALPHA` 等）
+
+输出：
+
+- `results/<run_id>/alpha_pairs.json`
+
+关键发现（Hell-month 2022-06，WITH_NEWS 部分窗口）：
+
+- 2022-06-06 的 `Golden - Baseline ≈ +2.0%` 并非随机噪音，而是由两个明确的 Action Pair 贡献：
+  - `LMT`：Golden `BUY`（target_position=0.5） vs Baseline `HOLD`（0.0），`diff_pnl ≈ +0.014285`
+  - `TXN`：Golden `BUY`（target_position=0.5） vs Baseline `HOLD`（0.0），`diff_pnl ≈ +0.005979`
+- 结论：在 Alpha Day 上，Analyst 的决策分歧可以被压缩为可训练的 `(Context, Winner_Action, Loser_Action)` 结构，为 Phase 15.3/后续 DPO v4 的偏好数据提供直接原材料。
 
 ### Phase 15.3：Surgical DPO（Merge & Polish）
 

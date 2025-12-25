@@ -1,0 +1,2 @@
+date,run_dir,system,day_type,pnl_h1_net_sum,trade_count,turnover_sum,fee_sum
+2022-06-06,results/phase15_5_SHOWDOWN_v4_WITH_NEWS_2022-06-01_2022-06-22,golden_strict,ALPHA_DAY,0.0290148192510101,4,2.0,0.001
