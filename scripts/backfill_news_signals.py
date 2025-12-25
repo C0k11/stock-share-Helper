@@ -4,6 +4,7 @@ import argparse
 import json
 import sys
 from collections import OrderedDict
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Set, Tuple
 
@@ -43,6 +44,19 @@ def _load_json_list(path: Path) -> List[Dict[str, Any]]:
     for it in data:
         if isinstance(it, dict):
             out.append(it)
+    return out
+
+
+def _iter_days_inclusive(start: str, end: str) -> List[str]:
+    s = datetime.strptime(start, "%Y-%m-%d").date()
+    e = datetime.strptime(end, "%Y-%m-%d").date()
+    if e < s:
+        raise ValueError(f"end < start: {start} .. {end}")
+    out: List[str] = []
+    cur = s
+    while cur <= e:
+        out.append(cur.isoformat())
+        cur += timedelta(days=1)
     return out
 
 
@@ -280,6 +294,9 @@ def main() -> None:
     parser.add_argument("--out-dir", default="data/daily")
     parser.add_argument("--spool-dir", default="data/tmp/news_by_day")
 
+    parser.add_argument("--start", help="Optional start date (YYYY-MM-DD). If set, ignores trader-data date scan.")
+    parser.add_argument("--end", help="Optional end date (YYYY-MM-DD). If set, ignores trader-data date scan.")
+
     parser.add_argument("--base-model", dest="model", default="Qwen/Qwen2.5-3B-Instruct")
     parser.add_argument("--model", dest="model", help="Alias of --base-model")
     parser.add_argument("--lora", default="models/news_final_3b_v1_1_noise_killer_retry2/lora_weights")
@@ -311,12 +328,23 @@ def main() -> None:
 
     if not news_path.exists():
         raise SystemExit(f"Missing news jsonl: {news_path}")
-    if not trader_path.exists():
-        raise SystemExit(f"Missing trader dataset: {trader_path}")
 
-    logger.info(f"Scanning Trader dates from: {trader_path}")
-    needed_days = _extract_trader_dates(trader_path)
-    days_sorted = sorted(needed_days)
+    start = str(args.start or "").strip()
+    end = str(args.end or "").strip()
+
+    if (start and (not end)) or (end and (not start)):
+        raise SystemExit("Both --start and --end must be set together")
+
+    if start and end:
+        logger.info(f"Using explicit date range: {start} .. {end}")
+        days_sorted = _iter_days_inclusive(start, end)
+        needed_days = set(days_sorted)
+    else:
+        if not trader_path.exists():
+            raise SystemExit(f"Missing trader dataset: {trader_path}")
+        logger.info(f"Scanning Trader dates from: {trader_path}")
+        needed_days = _extract_trader_dates(trader_path)
+        days_sorted = sorted(needed_days)
 
     if int(args.limit_days) > 0:
         days_sorted = days_sorted[: int(args.limit_days)]

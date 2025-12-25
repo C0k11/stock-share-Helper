@@ -662,6 +662,16 @@ def main() -> None:
         if not daily_csv.exists():
             return {}
         df = pd.read_csv(daily_csv)
+        range_start = str(start)
+        range_end = str(end)
+        if "date" in df.columns and len(df):
+            try:
+                dates = pd.to_datetime(df["date"], errors="coerce")
+                if dates.notna().any():
+                    range_start = str(dates.min().date())
+                    range_end = str(dates.max().date())
+            except Exception:
+                pass
         for c in ["turnover", "fee", "pnl_h1", "pnl_h5", "pnl_h10"]:
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
@@ -683,7 +693,7 @@ def main() -> None:
 
         return {
             "system": system_key,
-            "range": {"start": str(start), "end": str(end)},
+            "range": {"start": str(range_start), "end": str(range_end)},
             "horizons": horizons_local,
             "pnl_sum": pnl_sum,
             "pnl_sum_net": pnl_sum_net,

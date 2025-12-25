@@ -2860,6 +2860,25 @@ Global Scorecard（h=5，Net，5bps）：
 - V4 与 V1 在 2022-06 窗口指标 **完全一致**（确认 system idempotency：当 Analyst 未触发时，替换 Analyst adapter 不会改变结果）。
 - 由于该窗口缺失 news signals 且 `moe_vol_threshold=-1`，Analyst 覆盖率为 0，路由基本全在 Scalper。
 
+### Phase 15.5 Round 2：News Injection（2022-06-01..2022-06-22，partial）
+
+关键发现：
+
+- 注入 news signals 后（partial backfill），在 `planner_mode=rule` 下依然可稳定唤醒 Analyst（`analyst_coverage = 1.0`）。
+- 6/10 极端下跌日：Baseline 与 Golden 的组合 PnL 表现一致（diff=0），说明基础风控层（Risk Manager / Drawdown Gate）具备“保命”能力，不依赖 AI 也能有效清仓降风险。
+- 真正的差异（Alpha）集中在 2022-06-06：`Golden - Baseline ≈ +2.0%`（1 日 200bp 级别），Phase 15.2 的 alpha pair 挖掘将优先围绕该日期展开。
+
+Autopsy（6/10）：
+
+- Analyst decision 的 reasoning_trace 明确引用 CPI/通胀语境（例如 8.6% YoY inflation），并给出偏 bearish 的交易倾向；最终动作可能被风控强制 CLEAR 覆盖，但 Analyst 的“读新闻→形成观点→落地决策”链路已完成验证。
+
+复现要点（数据源与可追溯性）：
+
+```powershell
+\venv311\Scripts\python.exe scripts\fetch_historical_news_gdelt.py --start 2022-06-01 --end 2022-06-30 --output data\raw\news_us_raw_2022_06.jsonl
+\venv311\Scripts\python.exe scripts\backfill_news_signals.py --news-data data\raw\news_us_raw_2022_06.jsonl --out-dir data\daily --start 2022-06-01 --end 2022-06-30 --overwrite
+```
+
 ### Phase 15.1B：Rich Alpha Compass（增强版 alpha_days.csv）
 
 关键修正：
