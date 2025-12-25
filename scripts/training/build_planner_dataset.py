@@ -137,13 +137,6 @@ def build_dataset(*, run_dir: Path, system: str) -> pd.DataFrame:
             except Exception:
                 has_strong = 0
 
-        allow_rate = 0.0
-        if "planner_allow" in g2.columns:
-            try:
-                allow_rate = float(g2["planner_allow"].astype(bool).mean())
-            except Exception:
-                allow_rate = 0.0
-
         day_metrics = {
             "date": str(date_str),
             "system": system,
@@ -155,7 +148,6 @@ def build_dataset(*, run_dir: Path, system: str) -> pd.DataFrame:
             "news_score_mean": float(news_score.mean()),
             "news_score_max": float(news_score.max()),
             "has_strong_news_day": int(has_strong),
-            "planner_allow_rate": float(allow_rate),
             "gross_exposure": float(target_pos.abs().sum()),
             "net_exposure": float(target_pos.sum()),
             "abs_exposure_mean": float(target_pos.abs().mean()),
@@ -193,10 +185,25 @@ def build_dataset(*, run_dir: Path, system: str) -> pd.DataFrame:
 
     out["prev_gross_exposure"] = out.groupby("system")["gross_exposure"].shift(1)
     out["prev_net_exposure"] = out.groupby("system")["net_exposure"].shift(1)
+    out["prev_abs_exposure_mean"] = out.groupby("system")["abs_exposure_mean"].shift(1)
     out["prev_long_count"] = out.groupby("system")["long_count"].shift(1)
     out["prev_short_count"] = out.groupby("system")["short_count"].shift(1)
-    out[["prev_gross_exposure", "prev_net_exposure", "prev_long_count", "prev_short_count"]] = out[
-        ["prev_gross_exposure", "prev_net_exposure", "prev_long_count", "prev_short_count"]
+    out[
+        [
+            "prev_gross_exposure",
+            "prev_net_exposure",
+            "prev_abs_exposure_mean",
+            "prev_long_count",
+            "prev_short_count",
+        ]
+    ] = out[
+        [
+            "prev_gross_exposure",
+            "prev_net_exposure",
+            "prev_abs_exposure_mean",
+            "prev_long_count",
+            "prev_short_count",
+        ]
     ].fillna(0.0)
 
     return out
@@ -235,6 +242,7 @@ def main() -> None:
             for c in df.columns
             if c.startswith("dec_") or ("turnover" in c) or ("fee" in c) or c.startswith("fr_") or c.startswith("pnl_")
         ]
+        leaky_cols.extend(["gross_exposure", "net_exposure", "abs_exposure_mean", "long_count", "short_count"])
         df = df.drop(columns=leaky_cols, errors="ignore")
 
     df.to_csv(out_path, index=False)

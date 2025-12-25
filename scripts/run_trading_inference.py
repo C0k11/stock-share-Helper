@@ -672,9 +672,17 @@ def main() -> None:
     parser.add_argument(
         "--planner-mode",
         default="off",
-        choices=["off", "rule"],
+        choices=["off", "rule", "sft"],
         help="Global strategy planner. If enabled, can gate MoE expert choice (defensive/cash_preservation => disable analyst).",
     )
+    parser.add_argument(
+        "--planner-policy",
+        default="",
+        choices=["", "rule", "sft"],
+        help="Planner policy override. If set, takes precedence over --planner-mode.",
+    )
+    parser.add_argument("--planner-sft-model", default="models/planner_sft_v1.pt")
+    parser.add_argument("--planner-signals-csv", default="paper_trading/daily_signals.csv")
     parser.add_argument(
         "--risk-max-drawdown",
         type=float,
@@ -757,8 +765,12 @@ def main() -> None:
     )
 
     planner: Optional[Planner] = None
-    if str(getattr(args, "planner_mode", "off")).lower() == "rule":
-        planner = Planner()
+    planner_mode = str(getattr(args, "planner_mode", "off") or "off").strip().lower()
+    planner_policy = str(getattr(args, "planner_policy", "") or "").strip().lower()
+    if not planner_policy:
+        planner_policy = "rule" if planner_mode == "rule" else ("sft" if planner_mode == "sft" else "")
+    if planner_policy in {"rule", "sft"}:
+        planner = Planner(policy=planner_policy, sft_model_path=str(args.planner_sft_model))
 
     if bool(args.moe_mode):
         scalper = str(args.moe_scalper).strip()
@@ -805,21 +817,12 @@ def main() -> None:
 
         missing_tickers: List[str] = []
         planner_decision: Optional[Dict[str, Any]] = None
+        news_cache: Dict[str, List[str]] = {}
         if use_stock:
             if not stock_fp.exists():
                 items = []
             else:
                 stock_payload = json.loads(stock_fp.read_text(encoding="utf-8"))
-                if planner is not None:
-                    try:
-                        mr = None
-                        if isinstance(stock_payload.get("items"), list) and stock_payload.get("items"):
-                            first = stock_payload.get("items")[0]
-                            if isinstance(first, dict):
-                                mr = first.get("market_regime")
-                        planner_decision = planner.decide(market_regime=mr).to_dict()
-                    except Exception:
-                        planner_decision = None
                 stock_items = iter_feature_items(stock_payload)
                 if tickers:
                     stock_map = {str(sym).upper(): it for sym, it in stock_items}
@@ -845,6 +848,12 @@ def main() -> None:
                 continue
             items = iter_feature_items(payload)
 
+        if not isinstance(items, list):
+            try:
+                items = list(items)
+            except Exception:
+                items = []
+
         if not items:
             decisions: Dict[str, Any] = {
                 "date": str(date_str),
@@ -867,6 +876,94 @@ def main() -> None:
             market_mode=str(args.risk_watch_market),
             top_k=int(args.risk_watch_top),
         )
+
+        if planner is not None:
+            try:
+                mr = None
+                if use_stock:
+                    if isinstance(stock_payload.get("items"), list) and stock_payload.get("items"):
+                        first = stock_payload.get("items")[0]
+                        if isinstance(first, dict):
+                            mr = first.get("market_regime")
+                else:
+                    if isinstance(payload, dict):
+                        its = payload.get("items")
+                        if isinstance(its, list) and its:
+                            first = its[0]
+                            if isinstance(first, dict):
+                                mr = first.get("market_regime")
+
+                vols: List[float] = []
+                news_counts: List[int] = []
+                news_scores: List[float] = []
+
+                if use_stock and (not bool(args.disable_news)):
+                    for sym, _it in items:
+                        sym_u = str(sym).upper().strip()
+                        ctxs = load_daily_news_contexts(
+                            daily_dir=daily_dir,
+                            date_str=str(date_str),
+                            signals_path=str(args.signals_path),
+                            min_abs_impact=float(args.min_news_abs_impact),
+                            max_signals=int(args.max_news_signals),
+                            ticker=str(sym_u),
+                        )
+                        news_cache[sym_u] = ctxs
+                        news_counts.append(int(len(ctxs)))
+                        news_scores.append(1.0 if ctxs else 0.0)
+
+                for sym, it in items:
+                    feats = extract_features(it)
+                    v = feats.get("volatility_ann_pct")
+                    vols.append(float(_to_float(v)))
+                    if not use_stock:
+                        news_counts.append(0)
+                        news_scores.append(0.0)
+
+                vol_mean = float(sum(vols) / max(1, len(vols))) if vols else 0.0
+                vol_max = float(max(vols)) if vols else 0.0
+
+                nc_sum = float(sum(news_counts)) if news_counts else 0.0
+                nc_mean = float(sum(news_counts) / max(1, len(news_counts))) if news_counts else 0.0
+                ns_mean = float(sum(news_scores) / max(1, len(news_scores))) if news_scores else 0.0
+                ns_max = float(max(news_scores)) if news_scores else 0.0
+
+                def _strong_from_risk_watch(rw: Dict[str, Any], thr: float) -> bool:
+                    if not isinstance(rw, dict):
+                        return False
+                    if not bool(rw.get("available")):
+                        return False
+                    for it in rw.get("us_top_events") if isinstance(rw.get("us_top_events"), list) else []:
+                        if isinstance(it, dict) and abs(_to_float(it.get("impact_equity"))) >= float(thr):
+                            return True
+                    cn = rw.get("cn_regulation_crackdown") if isinstance(rw.get("cn_regulation_crackdown"), dict) else {}
+                    top = cn.get("top") if isinstance(cn.get("top"), list) else []
+                    for it in top:
+                        if isinstance(it, dict) and abs(_to_float(it.get("impact_equity"))) >= float(thr):
+                            return True
+                    return False
+
+                has_strong = 1 if _strong_from_risk_watch(risk_watch, float(args.moe_news_threshold)) else 0
+
+                planner_feats = {
+                    "n_tickers": float(len(items)),
+                    "vol_mean": float(vol_mean),
+                    "vol_max": float(vol_max),
+                    "news_count_sum": float(nc_sum),
+                    "news_count_mean": float(nc_mean),
+                    "news_score_mean": float(ns_mean),
+                    "news_score_max": float(ns_max),
+                    "has_strong_news_day": float(has_strong),
+                }
+
+                planner_decision = planner.decide(
+                    market_regime=mr,
+                    features=planner_feats,
+                    date_str=str(date_str),
+                    signals_csv=str(args.planner_signals_csv),
+                ).to_dict()
+            except Exception:
+                planner_decision = None
 
         decisions = {
             "date": str(date_str),
@@ -914,14 +1011,20 @@ def main() -> None:
             if use_stock:
                 stock_news_contexts: List[str] = []
                 if not bool(args.disable_news):
-                    stock_news_contexts = load_daily_news_contexts(
-                        daily_dir=daily_dir,
-                        date_str=str(date_str),
-                        signals_path=str(args.signals_path),
-                        min_abs_impact=float(args.min_news_abs_impact),
-                        max_signals=int(args.max_news_signals),
-                        ticker=str(symbol),
-                    )
+                    sym_u = str(symbol).upper().strip()
+                    if sym_u and sym_u in news_cache:
+                        stock_news_contexts = list(news_cache.get(sym_u) or [])
+                    else:
+                        stock_news_contexts = load_daily_news_contexts(
+                            daily_dir=daily_dir,
+                            date_str=str(date_str),
+                            signals_path=str(args.signals_path),
+                            min_abs_impact=float(args.min_news_abs_impact),
+                            max_signals=int(args.max_news_signals),
+                            ticker=str(symbol),
+                        )
+                        if sym_u:
+                            news_cache[sym_u] = list(stock_news_contexts)
 
                 if bool(args.moe_mode):
                     expert, router_meta = _router_choose_expert(
