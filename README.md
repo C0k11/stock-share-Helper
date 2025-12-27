@@ -24,7 +24,10 @@
 | 12 | DPO / GRPO | 完成 | 2025-12 |
 | 13 | 黄金运行（严格风险 + 规划器 + DPO Analyst） | 完成 | 2025-12 |
 | 14 | 评测平台（Protocol Freeze + Walk-forward + Stratified Report） | 进行中 | 2025-12 |
-| 15 | Q4 Walk-forward 报告 + Alpha Mining + Surgical DPO（Analyst Alpha Hunter / Alpha Max V3） | 进行中 | 2025-12 |
+| 15 | Q4 Walk-forward 报告 + Alpha Mining + Surgical DPO（Analyst Alpha Hunter / Alpha Max V3） | 完成 | 2025-12-25 |
+| 16 | 日报生成器 + Paper Trading（产品化：Daily Job / Ledger / NAV / Charts） | 完成 | 2025-12-25 |
+| 17 | Planner Dataset / SFT + MRI / Showdown | 完成 | 2025-12-25 |
+| 18 | Analyst DPO（Forward-Return Pairs） | 完成 | 2025-12-25 |
 
 ### Phase 15 最新进展（Alpha Mining / Alpha Days Compass）
 
@@ -34,10 +37,58 @@
 - **差异日（Alpha）线索**：在 2022-06-06 出现显著差异（Golden - Baseline ≈ +2.0%），Phase 15.2 的 alpha pair 挖掘将优先围绕该日期展开。
 - **Alpha Days 罗盘（Rich Alpha Compass）**：已从 `daily.csv` 生成增强版 `alpha_days.csv`，包含 `total_news_vol/max_news_impact/avg_vol/suggest_upsize` 并支持 `DEFENSIVE_ALPHA`。
 
+### Phase 17：Planner SFT（Tabular MLP）Quickstart
+
+目标：把 Planner 的日级 `planner_strategy`（如 `defensive/aggressive_long/cash_preservation`）从 rule 可学习化，并支持在日报中输出 strategy + 置信度（MRI）。
+
+1) 构建训练集（按日聚合 -> CSV）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\training\build_planner_dataset.py --run-dir results\phase15_5_SHOWDOWN_v4_WITH_NEWS_2022-06-01_2022-06-22 --system golden_strict --out data\training\planner_dataset_v1.csv --start 2022-06-01 --end 2022-06-22
+```
+
+2) 训练 MLP（输出模型 bundle）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\training\train_planner_sft.py --data data\training\planner_dataset_v1.csv --out models\planner_sft_v1.pt
+```
+
+3) 生成带 MRI 的日报（即使历史 run 是 rule，也可离线补齐 probs）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\product\generate_daily_report.py --run-dir results\phase15_5_SHOWDOWN_v4_WITH_NEWS_2022-06-01_2022-06-22 --system golden_strict --date 2022-06-06 --planner-policy sft --planner-sft-model models\planner_sft_v1.pt --out reports\daily\2022-06-06_planner_ai_insight.md
+```
+
+产物路径：
+
+- `data/training/planner_dataset_v1.csv`（不进 git）
+- `models/planner_sft_v1.pt`（不进 git）
+
+### Phase 15.3：回马枪（Analyst DPO / Forward-Return Pairs）Quickstart
+
+目标：用未来收益（forward return）自动生成大规模 preference pairs，训练 Analyst 的 DPO adapter。
+
+1) 生成 DPO pairs（h=5, x=0.005；含 NEG 样本）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\build_dpo_pairs.py --inputs "results\phase15_5_SHOWDOWN_v4_WITH_NEWS_2022-06-01_2022-06-22\golden_strict\decisions_2022-06-01_2022-06-22.json" --daily-dir "data\daily" --out "data\dpo\phase15_3_pairs_h5_x0005.jsonl" --horizon 5 --x 0.005 --target-expert analyst --min-abs-impact 0.5 --max-news-signals 3 --include-nonbuy
+```
+
+2) 启动 DPO 训练（以 v4 Analyst LoRA 为起点）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\train_dpo.py --base-model "Qwen/Qwen2.5-7B-Instruct" --sft-adapter "models\trader_v4_dpo_analyst_alpha" --data-path "data\dpo\phase15_3_pairs_h5_x0005.jsonl" --output-dir "models\phase15_3_analyst_dpo_h5_x0005" --epochs 1 --batch-size 1 --grad-accum 8 --lr 5e-6 --beta 0.1
+```
+
+产物路径：
+
+- `data/dpo/phase15_3_pairs_h5_x0005.jsonl`（不进 git）
+- `models/phase15_3_analyst_dpo_h5_x0005`（不进 git）
+
 提取命令（示例）：
 
 ```powershell
-\.\venv311\Scripts\python.exe scripts\mining\extract_alpha_days.py --run-dir results\phase15_5_showdown_alpha_v4_jun2022\golden_strict
+.\venv311\Scripts\python.exe scripts\mining\extract_alpha_days.py --run-dir results\phase15_5_showdown_alpha_v4_jun2022\golden_strict
 ```
 
 产物路径：
@@ -516,6 +567,30 @@ run_pipeline.bat
 .\venv311\Scripts\python.exe scripts\generate_daily_report.py --date 2025-12-14
 ```
 
+### Phase 16：日报生成器 + Paper Trading（产品化）Quickstart
+
+Phase 16 把“抓取 → signals → 特征 → 交易推理 → 日报 → 纸上交易 + 账本/NAV/图表”收敛为一个入口脚本：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\product\run_daily_job.py --date 2025-12-14
+```
+
+主要产物：
+
+- `reports/daily/2025-12-14.md`
+- `reports/daily/assets/2025-12-14_nav.png` / `2025-12-14_allocation.png`
+- `data/paper/orders/orders_2025-12-14.csv`（以及 `data/paper/state.json` / `data/paper/portfolio.json`）
+- `paper_trading/live_ledger.csv`（实盘账本，append-only）
+- `paper_trading/nav.csv`（NAV time-series，append-only）
+- `paper_trading/daily_signals.csv`（daily snapshot，append-only）
+- `paper_trading/log.csv`（compat export）
+
+回放模式（从历史 results 抽取某一天 decisions 生成日报 + 更新账本）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\product\run_daily_job.py --date 2022-06-06 --skip-fetch --skip-news-parse --skip-features --skip-trading-inference --results-run-dir results\phase15_5_SHOWDOWN_v4_WITH_NEWS_2022-06-01_2022-06-22 --results-system golden_strict
+```
+
 ---
 
 ## 可视化（仪表板）
@@ -698,7 +773,8 @@ MIT License
  | 12 | (DPO/GRPO) | Done | DPO preference surgery successfully reduced Analyst noise; full-month MoE run + grand analysis complete (Dec 2025). |
  | 13 | Golden Run (Strict Risk + Planner + DPO Analyst) | Done | Full-month Dec 2025 run with strict risk controls and planner gating. |
  | 14 | Evaluation Platform (Protocol Freeze + Walk-forward + Stratified Report) | In Progress | Frozen configs + walk-forward runner + date-aligned stratified report. |
- | 15 | Q4 Walk-forward + Alpha Mining + Surgical DPO | In Progress | Mine missed alpha opportunities and train a surgical DPO adapter to boost Analyst BUY confidence on high-potential cases. |
+ | 15 | Q4 Walk-forward + Alpha Mining + Surgical DPO | Done | Mine missed alpha opportunities and train a surgical DPO adapter to boost Analyst BUY confidence on high-potential cases. |
+ | 16 | Daily Report + Paper Trading Productization | Done | One-click daily job runner + split backtest history vs live ledger; optional NAV/signals persistence and report charts. |
 
 ---
 

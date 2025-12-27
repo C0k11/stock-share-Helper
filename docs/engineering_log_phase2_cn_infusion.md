@@ -25,6 +25,9 @@
 | 13 | 黄金运行（严格风险 + 规划器 + DPO Analyst） | 完成 | 2025-12 |
 | 14 | 评测平台（Protocol Freeze + Walk-forward + Stratified Report） | 进行中 | 2025-12 |
 | 15 | Q4 Walk-forward 报告 + Alpha Mining + Surgical DPO（Analyst Alpha Hunter） | 完成 | 2025-12 |
+| 16 | 日报生成器 + Paper Trading（产品化：Daily Job / Ledger / NAV / Charts） | 完成 | 2025-12-25 |
+| 17 | Planner Dataset / SFT + MRI / Showdown | 完成 | 2025-12-25 |
+| 18 | Analyst DPO（Forward-Return Pairs） | 完成 | 2025-12-25 |
 
 ---
 
@@ -2925,7 +2928,326 @@ Autopsy（6/10）：
 运行命令：
 
 ```powershell
-\.\venv311\Scripts\python.exe scripts\mining\extract_alpha_days.py --run-dir results\phase15_5_showdown_alpha_v4_jun2022\golden_strict
+.\venv311\Scripts\python.exe scripts\mining\extract_alpha_days.py --run-dir results\phase15_5_showdown_alpha_v4_jun2022\golden_strict
 ```
 
 该窗口已识别出多天 `DEFENSIVE_ALPHA`（市场大跌但策略相对生存）。
+
+### Phase 15.3m（Analyst DPO v4）：Forward-Return Pairs（h=5, x=0.005）
+
+背景：alpha_pairs 在该窗口内样本量极小，且 baseline vs golden 在 alpha-days 上几乎完全同仓同收益，因此改用 forward-return 路线生成大规模 DPO pairs。
+
+数据集构建：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\build_dpo_pairs.py --inputs "results\phase15_5_SHOWDOWN_v4_WITH_NEWS_2022-06-01_2022-06-22\golden_strict\decisions_2022-06-01_2022-06-22.json" --daily-dir "data\daily" --out "data\dpo\phase15_3_pairs_h5_x0005.jsonl" --horizon 5 --x 0.005 --target-expert analyst --min-abs-impact 0.5 --max-news-signals 3 --include-nonbuy
+```
+
+结果：
+
+- `pairs_written=1179`
+- `n_pairs_pos=458`
+- `n_pairs_neg=721`
+- `mid_band=66`
+- `no_feature_or_return=0`
+
+DPO 训练启动（起点 LoRA：`models/trader_v4_dpo_analyst_alpha`）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\train_dpo.py --base-model "Qwen/Qwen2.5-7B-Instruct" --sft-adapter "models\trader_v4_dpo_analyst_alpha" --data-path "data\dpo\phase15_3_pairs_h5_x0005.jsonl" --output-dir "models\phase15_3_analyst_dpo_h5_x0005" --epochs 1 --batch-size 1 --grad-accum 8 --lr 5e-6 --beta 0.1
+```
+
+## Phase 15：Status（Close）
+
+Phase 15 已在工程日志与 README 里程碑表中正式宣告完成，并在代码层面固化了关键资产：
+
+- `scripts/mining/mine_alpha_pairs.py`（Phase 15.2 核心挖矿资产）
+
+---
+
+## Phase 16：日报生成器 + Paper Trading（产品化）
+
+目标：把“回测/推理脚本集合”收敛成一个可重复、可审计的产品闭环：
+
+- 每日生成报告：`reports/daily/YYYY-MM-DD.md`
+- 纸上交易执行：`data/paper/...`
+- 实盘账本与轨迹：`paper_trading/*`（拆分 backtest vs live，并可持续积累）
+
+### Phase 16.1：Results-based 日报 MVP
+
+新增脚本：
+
+- `scripts/product/generate_daily_report.py`
+
+Sample：
+
+- `reports/daily/2022-06-06.md`
+
+复现命令（示例）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\product\generate_daily_report.py --run-dir results\phase15_5_SHOWDOWN_v4_WITH_NEWS_2022-06-01_2022-06-22 --date 2022-06-06 --system golden_strict
+```
+
+### Phase 16.2：Daily Job Scheduler + 账本拆分
+
+新增调度器：
+
+- `scripts/product/run_daily_job.py`
+
+账本拆分：
+
+- 回测归档：`paper_trading/backtest_history.csv`
+- 实盘账本：`paper_trading/live_ledger.csv`
+
+Dry-run / 回放（results replay）示例：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\product\run_daily_job.py --date 2022-06-06 --skip-fetch --skip-news-parse --skip-features --skip-trading-inference --results-run-dir results\phase15_5_SHOWDOWN_v4_WITH_NEWS_2022-06-01_2022-06-22 --results-system golden_strict
+```
+
+### Phase 16.3：Live Connection Test（Holiday 版）
+
+目标：在休市日验证“联网 + RSS + CN fallback + 结构化推理 + 报告”链路可用。
+
+- CN RSS 失败时自动 fallback 到 CN JSON APIs
+- News LoRA 缺失时自动回退到 base model（避免 `FileNotFoundError: LoRA weights not found`）
+- 支持 `--news-sample-us/--news-sample-cn` 轻量联网测试
+
+### Phase 16 Hardening：NAV/Signals/Compat Log/Charts（产品数据仓库）
+
+在 `scripts/product/run_daily_job.py` 中固化“轨迹落地层”（默认运行产物不入库）：
+
+- `paper_trading/nav.csv`（append-only NAV time-series）
+- `paper_trading/daily_signals.csv`（append-only daily signals snapshot）
+- `paper_trading/log.csv`（compat export，从 `live_ledger.csv` + `nav.csv` 聚合导出）
+- `reports/daily/assets/<date>_nav.png` / `<date>_allocation.png`（图表并自动链接到当日报告）
+
+幂等性：同一天默认不重复追加（可用 `--force-append-*` 覆盖）。
+
+---
+
+## Phase 17：Planner Dataset / SFT（Tabular MLP）
+
+### Phase 17.1：Planner Dataset Builder
+
+新增脚本：
+
+- `scripts/training/build_planner_dataset.py`
+
+输入：
+
+- `results/<run>/<system>/decisions_*.json`（多日聚合）
+- `results/<run>/<system>/daily.csv`
+
+输出：
+
+- `data/training/planner_dataset_v1.csv`（按“日”聚合，一天一行样本；默认在 `data/` 下，不进 git）
+
+特征口径：
+
+- 默认去掉 `dec_*` 等后验/泄漏字段
+- 增加 `prev_*exposure`（1 日滞后）作为组合状态 proxy
+
+示例命令（支持 `--run-dir` 别名）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\training\build_planner_dataset.py --run-dir results\phase15_5_SHOWDOWN_v4_WITH_NEWS_2022-06-01_2022-06-22 --system golden_strict --out data\training\planner_dataset_v1.csv --start 2022-06-01 --end 2022-06-22
+```
+
+### Phase 17.2：Sklearn Baseline（可学性验证）
+
+Label 分布（示例窗口）：
+
+- `aggressive_long: 13`
+- `defensive: 11`
+- `cash_preservation: 6`
+
+Baseline：
+
+- Majority baseline accuracy ≈ 0.4333
+- LogisticRegression（5-fold CV）accuracy mean ≈ 0.6667
+- RandomForest（5-fold CV）accuracy mean ≈ 0.7667
+
+结论：Planner strategy 在当前特征口径下可学，值得进入 torch 训练与推理接线。
+
+### Phase 17.3：Torch SFT（产物 planner_sft_v1.pt）
+
+新增脚本：
+
+- `scripts/training/train_planner_sft.py`
+
+模型：MLP 分类器（tabular）+ 标准化 + early stopping。
+
+产物（不进 git）：
+
+- `models/planner_sft_v1.pt`（bundle：`state_dict` + `feature_names` + `scaler_mean/std` + `label_map`）
+
+推理接线：
+
+- `src/agent/planner.py`：`Planner(policy='sft', sft_model_path=...)` 支持输出 strategy + probs
+- `scripts/run_trading_inference.py`：支持 `--planner-policy sft` / `--planner-sft-model` / `--planner-signals-csv`
+
+训练示例：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\training\train_planner_sft.py --data data\training\planner_dataset_v1.csv --out models\planner_sft_v1.pt --epochs 200 --patience 25 --batch-size 16
+```
+
+### Phase 17.4：日报 MRI（Planner AI Insight）+ Showdown
+
+日报增强：
+
+- `scripts/product/generate_daily_report.py` 新增 `Planner AI Insight`：
+  - 若历史 `decisions_*.json` 里无 `inputs.probs`（rule run 常见），可在生成报告时离线加载 `models/planner_sft_v1.pt` 补齐 probs（MRI 模式）
+
+示例：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\product\generate_daily_report.py --run-dir results\phase15_5_SHOWDOWN_v4_WITH_NEWS_2022-06-01_2022-06-22 --system golden_strict --date 2022-06-06 --planner-policy sft --planner-sft-model models\planner_sft_v1.pt --out reports\daily\2022-06-06_planner_ai_insight.md
+```
+
+Rule vs SFT（2022-06-01..2022-06-22）对比结论（重叠 15 天）：
+
+- total_pnl_h1_net_sum：Teacher = Student（完全一致）
+- strategy_match_rate：73.3%（11/15 天一致）
+- checkpoint：2022-06-06 / 2022-06-10 两个关键日策略一致（defensive）
+
+辅助脚本：
+
+- `scripts/analysis/compare_runs.py`（Teacher vs Student daily.csv 对比）
+- `scripts/analysis/inspect_run_diffs.py`（baseline_fast vs golden_strict 仓位/PNL 差异诊断）
+
+---
+
+## Phase 18：DPO Showdown（Analyst DPO vs Baseline）+ MoE Router Debug（Take 3-5）
+
+目标：
+
+- 在 Hell-month（2022-06）窗口，验证新训练的 Analyst DPO（Phase 15.3）是否在关键防御日（特别是 6/10）带来增益，同时不牺牲既有 alpha（特别是 6/06）。
+- 恢复 MoE Router 的“按新闻强度与个股相关性触发 Analyst”的真实工作方式，避免以下两种退化：
+  - Analyst 覆盖率 100%（Router 失灵，永远走 Analyst）
+  - Analyst 覆盖率 0%（Router 过严或数据缺失，永远走 Scalper）
+
+### 18.1 症状：Analyst Coverage 异常（从 100% 到 0%）
+
+观察到的异常：
+
+- 在启用 news injection 后，`analyst_coverage` 长期接近 1.0。
+- 初步修复后（只看 ticker 新闻、禁用 market fallback）又出现 `analyst_coverage` 接近 0.0。
+
+工程假设：
+
+- Router 的新闻打分逻辑可能把“只要有新闻”误当成 `news_score=1.0`，导致阈值 `moe_news_threshold` 永远被击穿。
+- 或者 Router 的新闻加载/匹配过于宽松（market fallback）或过于严格（ticker-match 失败），导致专家路由极端化。
+
+### 18.2 修复链路（代码变更点）
+
+#### 18.2.1 修复 Router news_score：让 moe_news_threshold 真正生效
+
+问题：Router 之前把 `news_contexts` 非空当作 `news_score=1.0`，导致 `moe_news_threshold` 形同虚设。
+
+修复：在 `scripts/run_trading_inference.py` 中从新闻上下文里提取 `ImpactEquity:` 数值，并以 `max(abs(ImpactEquity))` 作为 `news_score`。
+
+#### 18.2.2 修复 Router 数据污染：routing 只看 ticker-matched news，prompt 仍可注入 market news
+
+问题：routing 若允许 market fallback，则宏观新闻会让绝大多数 ticker 都“有新闻”，Router 退化为全 Analyst。
+
+修复：
+
+- `load_daily_news_contexts(..., allow_fallback=False)` 用于 routing（生成 `route_news_contexts`）。
+- `load_daily_news_contexts(..., allow_fallback=True)` 仍用于 prompt 注入（生成 `stock_news_contexts`），避免丢失上下文信息。
+
+#### 18.2.3 修复 Planner gate：避免“误把 Analyst 强制打回 Scalper”
+
+问题：Planner gate 在判断“无新闻则禁止 Analyst”时，检查的是 prompt news（`stock_news_contexts`）而不是 routing news（`route_news_contexts`），造成策略层错误干预。
+
+修复：Planner gate 改为检查 `route_news_contexts`。
+
+#### 18.2.4 修复 ticker-news matching：优先 signals_assets + structured assets 字段 + raw headline 补 ImpactEquity
+
+问题：
+
+- 仅靠标题正则匹配 ticker 容易漏匹配，导致 `news_count=0`。
+- `parse_ok=False` 的 raw headline 项目缺少 `ImpactEquity`，导致即使有相关新闻也无法正确排序/触发阈值。
+
+修复：在 `load_daily_news_contexts` 中：
+
+- 优先读取 `signals_assets_YYYY-MM-DD.json`（若存在）。
+- ticker 匹配优先使用 structured 字段：`subject_assets/tickers/symbols/assets`。
+- 从 `raw_json` 中解析 `impact_equity`，并把 `ImpactEquity:` 写进 raw context。
+
+### 18.3 实验复现命令（Take 5 Surgical Strike）
+
+目的：只验证 2022-06-06 与 2022-06-10 两天的 MoE 路由是否恢复到“合理覆盖率区间（5-20%）”。
+
+```powershell
+.\venv311\Scripts\python.exe scripts\run_walkforward_eval.py `
+  --run-id phase18_dpo_moe_fixed_take5_quick_0606_0610_tickerfix `
+  --baseline-config configs\baseline_fast_v1.yaml `
+  --golden-config configs\experiment_alpha_v4.yaml `
+  --windows 2022-06-06 2022-06-06 2022-06-10 2022-06-10 `
+  --planner-mode rule `
+  --override-moe-analyst "models\phase15_3_analyst_dpo_h5_x0005" `
+  --override-moe-any-news false `
+  --override-moe-news-threshold 0.8 `
+  --override-moe-vol-threshold -1.0
+```
+
+结果目录（可复现证据）：
+
+- `results/phase18_dpo_moe_fixed_take5_quick_0606_0610_tickerfix/`
+  - `baseline_fast/`
+  - `golden_strict/`
+
+### 18.4 Take 5 关键结果（证据）
+
+#### 18.4.1 Coverage
+
+从 `metrics.json` 汇总：
+
+- baseline_fast：`analyst_coverage = 0.0`
+- golden_strict：`analyst_coverage = 0.0`
+
+从 `golden_strict/decisions_2022-06-06_2022-06-06.json` 与 `golden_strict/decisions_2022-06-10_2022-06-10.json` spot-check：
+
+- 未出现任何 `expert: "analyst"`
+- router 侧普遍为：`news_count = 0`、`news_score = 0.0`、`expert = scalper`
+
+结论：Router gating 已经“按设计严格执行”，但输入数据无法提供可匹配的 ticker-news，因此 Analyst 无法触发。
+
+#### 18.4.2 关键 ticker 行为
+
+- 2022-06-06 / LMT：
+  - baseline：`final.action = HOLD`（`target_position=0.0`）
+  - golden：`final.action = SELL`（`target_position=0.0`）
+  - golden router：`news_count=0`、`news_score=0.0`、`expert=scalper`
+
+- 2022-06-10 / AAPL, MSFT：
+  - baseline：`final.action = CLEAR`（drawdown limit 触发强制清仓）
+  - golden：`final.action = CLEAR`（同样由 RiskGate 强制清仓）
+  - golden router：`news_count=0`、`news_score=0.0`、`expert=scalper`
+
+结论：防御动作主要来自 RiskGate，不是 Analyst 的“读新闻→形成观点→决策”链路。
+
+### 18.5 根因（最终结论）：缺少 per-ticker subject_assets → ticker-match news 永远为 0
+
+在当前仓库数据中未发现：
+
+- `data/daily/signals_assets_2022-06-06.json`
+- `data/daily/signals_assets_2022-06-10.json`
+
+因此：
+
+- routing 侧严格的“ticker-matched news only”在多数宏观新闻日会退化为 `route_news_contexts=[]`。
+- router 永远产出 `news_count=0/news_score=0`，覆盖率必然为 0%。
+
+这是一条关键科学证据：
+
+- **MoE Router 的行为不仅取决于 gating 逻辑，更强依赖新闻信号文件是否提供 “subject_assets/tickers/symbols/assets” 等可用的关联字段。**
+
+### 18.6 下一步（建议优先级）
+
+- A（高）：为目标窗口生成 `signals_assets_YYYY-MM-DD.json`（至少覆盖 2022-06-06 与 2022-06-10），让每条新闻具备 `subject_assets`，然后重跑 Take 5 验证覆盖率是否回到 5-20%。
+- B（中）：若短期无法生成 assets 文件，可设计更保守的 routing fallback（例如：仅在 `ImpactEquity>=X` 且 event_type 在白名单时允许 market-news 触发），避免回到全 Analyst。
+

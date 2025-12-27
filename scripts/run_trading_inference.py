@@ -89,6 +89,10 @@ def _ticker_aliases(symbol: str) -> List[str]:
         "NFLX": ["NETFLIX"],
         "GOOG": ["GOOGLE", "ALPHABET"],
         "GOOGL": ["GOOGLE", "ALPHABET"],
+        "LOW": ["LOWE'S", "LOWES"],
+        "UNH": ["UNITEDHEALTH", "UNITED HEALTH"],
+        "LMT": ["LOCKHEED", "LOCKHEED MARTIN"],
+        "RTX": ["RAYTHEON", "RAYTHEON TECHNOLOGIES"],
     }
     for a in common.get(sym, []):
         aliases.append(str(a).strip().upper())
@@ -134,6 +138,15 @@ def build_raw_headline_context(it: Dict[str, Any]) -> Optional[str]:
         lines.append(f"Source: {source}")
     if published_at:
         lines.append(f"PublishedAt: {published_at}")
+    raw_json = it.get("raw_json")
+    try:
+        raw_obj = json.loads(raw_json) if isinstance(raw_json, str) else (raw_json if isinstance(raw_json, dict) else {})
+    except Exception:
+        raw_obj = {}
+    if isinstance(raw_obj, dict):
+        ie = raw_obj.get("impact_equity")
+        if ie is not None:
+            lines.append(f"ImpactEquity: {ie}")
     lines.append(f"Title: {title}")
     if url:
         lines.append(f"URL: {url}")
@@ -244,9 +257,15 @@ def load_daily_news_contexts(
     signals_path: str,
     min_abs_impact: float,
     max_signals: int,
+    allow_fallback: bool = True,
     ticker: str = "",
 ) -> List[str]:
-    fp = Path(signals_path) if str(signals_path or "").strip() else (daily_dir / f"signals_{date_str}.json")
+    sp = str(signals_path or "").strip()
+    if sp:
+        fp = Path(sp)
+    else:
+        fp_assets = daily_dir / f"signals_assets_{date_str}.json"
+        fp = fp_assets if fp_assets.exists() else (daily_dir / f"signals_{date_str}.json")
     if not fp.exists():
         return []
 
@@ -257,6 +276,52 @@ def load_daily_news_contexts(
 
     if not isinstance(items, list):
         return []
+
+    def _normalize_assets(v: Any) -> List[str]:
+        if v is None:
+            return []
+        if isinstance(v, str):
+            s = v.strip().upper()
+            return [s] if s else []
+        if isinstance(v, list):
+            out: List[str] = []
+            for x in v:
+                s = str(x or "").strip().upper()
+                if s:
+                    out.append(s)
+            return out
+        return []
+
+    def _item_assets(it: Dict[str, Any]) -> List[str]:
+        sig = it.get("signal") if isinstance(it.get("signal"), dict) else {}
+        for key in ("subject_assets", "tickers", "symbols", "assets"):
+            if key in sig:
+                assets = _normalize_assets(sig.get(key))
+                if assets:
+                    return assets
+            if key in it:
+                assets = _normalize_assets(it.get(key))
+                if assets:
+                    return assets
+        return []
+
+    def _extract_impact_equity_from_item(it: Dict[str, Any]) -> float:
+        sig = it.get("signal") if isinstance(it.get("signal"), dict) else None
+        if sig is not None:
+            return float(_to_float(sig.get("impact_equity")))
+        raw_json = it.get("raw_json")
+        if isinstance(raw_json, str):
+            try:
+                raw_obj = json.loads(raw_json)
+            except Exception:
+                raw_obj = {}
+        elif isinstance(raw_json, dict):
+            raw_obj = raw_json
+        else:
+            raw_obj = {}
+        if isinstance(raw_obj, dict):
+            return float(_to_float(raw_obj.get("impact_equity")))
+        return 0.0
 
     def _collect_candidates(*, enable_ticker_filter: bool) -> List[Tuple[float, str]]:
         out: List[Tuple[float, str]] = []
@@ -270,11 +335,18 @@ def load_daily_news_contexts(
 
             # Ticker filter: only keep items whose title mentions ticker (or known aliases).
             if enable_ticker_filter and str(ticker or "").strip():
-                if not _title_mentions_ticker(title, str(ticker)):
-                    continue
+                t_u = str(ticker).strip().upper()
+                assets = _item_assets(it)
+                if assets:
+                    if t_u not in assets:
+                        continue
+                else:
+                    if not _title_mentions_ticker(title, str(ticker)):
+                        continue
+
+            impact = _extract_impact_equity_from_item(it)
 
             if parse_ok and sig is not None:
-                impact = _to_float(sig.get("impact_equity"))
                 if abs(impact) < float(min_abs_impact):
                     continue
                 ctx = build_news_context_from_signal_item(it)
@@ -282,14 +354,16 @@ def load_daily_news_contexts(
                     continue
                 out.append((abs(impact), ctx))
             else:
+                if abs(impact) < float(min_abs_impact):
+                    continue
                 ctx = build_raw_headline_context(it)
                 if not ctx:
                     continue
-                out.append((float(min_abs_impact), ctx))
+                out.append((abs(impact), ctx))
         return out
 
     candidates = _collect_candidates(enable_ticker_filter=True)
-    if (not candidates) and str(ticker or "").strip():
+    if (not candidates) and str(ticker or "").strip() and bool(allow_fallback):
         candidates = _collect_candidates(enable_ticker_filter=False)
 
     if not candidates:
@@ -298,6 +372,20 @@ def load_daily_news_contexts(
     candidates.sort(key=lambda x: x[0], reverse=True)
     k = max(1, int(max_signals))
     return [c for _score, c in candidates[:k]]
+
+
+def _extract_max_abs_impact_equity_from_contexts(contexts: List[str]) -> float:
+    best = 0.0
+    for c in contexts or []:
+        if not isinstance(c, str):
+            continue
+        for line in str(c).splitlines():
+            s = line.strip()
+            if not s.startswith("ImpactEquity:"):
+                continue
+            v = _to_float(s.split(":", 1)[1].strip() if ":" in s else "")
+            best = max(best, abs(float(v)))
+    return float(best)
 
 
 def prefix_news_contexts(user_text: str, contexts: List[str]) -> str:
@@ -616,12 +704,11 @@ def _router_choose_expert(
         vol = _to_pct((feats.get("technical") or {}).get("volatility_20d")) if isinstance(feats.get("technical"), dict) else None
     vol_f = _to_float(vol)
 
-    news_score = 0.0
-    if news_contexts:
-        news_score = 1.0
+    has_any_news = bool(news_contexts)
+    news_score = _extract_max_abs_impact_equity_from_contexts(news_contexts)
 
     use_analyst = False
-    if moe_any_news and news_contexts:
+    if moe_any_news and has_any_news:
         use_analyst = True
     elif news_score >= float(moe_news_threshold):
         use_analyst = True
@@ -906,11 +993,12 @@ def main() -> None:
                             signals_path=str(args.signals_path),
                             min_abs_impact=float(args.min_news_abs_impact),
                             max_signals=int(args.max_news_signals),
+                            allow_fallback=False,
                             ticker=str(sym_u),
                         )
                         news_cache[sym_u] = ctxs
                         news_counts.append(int(len(ctxs)))
-                        news_scores.append(1.0 if ctxs else 0.0)
+                        news_scores.append(_extract_max_abs_impact_equity_from_contexts(ctxs))
 
                 for sym, it in items:
                     feats = extract_features(it)
@@ -1010,27 +1098,29 @@ def main() -> None:
 
             if use_stock:
                 stock_news_contexts: List[str] = []
+                route_news_contexts: List[str] = []
                 if not bool(args.disable_news):
                     sym_u = str(symbol).upper().strip()
                     if sym_u and sym_u in news_cache:
-                        stock_news_contexts = list(news_cache.get(sym_u) or [])
+                        route_news_contexts = list(news_cache.get(sym_u) or [])
                     else:
-                        stock_news_contexts = load_daily_news_contexts(
+                        route_news_contexts = load_daily_news_contexts(
                             daily_dir=daily_dir,
                             date_str=str(date_str),
                             signals_path=str(args.signals_path),
                             min_abs_impact=float(args.min_news_abs_impact),
                             max_signals=int(args.max_news_signals),
+                            allow_fallback=False,
                             ticker=str(symbol),
                         )
                         if sym_u:
-                            news_cache[sym_u] = list(stock_news_contexts)
+                            news_cache[sym_u] = list(route_news_contexts)
 
                 if bool(args.moe_mode):
                     expert, router_meta = _router_choose_expert(
                         symbol=str(symbol),
                         feats=feats,
-                        news_contexts=stock_news_contexts,
+                        news_contexts=route_news_contexts,
                         moe_any_news=bool(args.moe_any_news),
                         moe_news_threshold=float(args.moe_news_threshold),
                         moe_vol_threshold=float(args.moe_vol_threshold),
@@ -1040,7 +1130,7 @@ def main() -> None:
                         strategy = str(planner_decision.get("strategy") or "").strip()
                         router_meta = dict(router_meta)
                         router_meta["planner_strategy"] = strategy
-                        if strategy and strategy != "aggressive_long" and str(expert) == "analyst" and (not stock_news_contexts):
+                        if strategy and strategy != "aggressive_long" and str(expert) == "analyst" and (not route_news_contexts):
                             router_meta["expert_before_planner_gate"] = str(router_meta.get("expert") or str(expert))
                             expert = "scalper"
                             router_meta["expert"] = "scalper"
@@ -1048,6 +1138,16 @@ def main() -> None:
 
                     model.set_adapter(str(expert))
                     if str(expert) == "analyst":
+                        if not bool(args.disable_news):
+                            stock_news_contexts = load_daily_news_contexts(
+                                daily_dir=daily_dir,
+                                date_str=str(date_str),
+                                signals_path=str(args.signals_path),
+                                min_abs_impact=float(args.min_news_abs_impact),
+                                max_signals=int(args.max_news_signals),
+                                allow_fallback=True,
+                                ticker=str(symbol),
+                            )
                         messages = build_stock_messages(
                             str(symbol),
                             str(date_str),
