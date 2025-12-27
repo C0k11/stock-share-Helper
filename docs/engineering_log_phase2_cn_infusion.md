@@ -3283,3 +3283,33 @@ Rule vs SFT（2022-06-01..2022-06-22）对比结论（重叠 15 天）：
 
 关键证据：Deny smoke test 通过（Gatekeeper 能物理切断交易并全市场 CLEAR）。
 
+## Phase 19.2：RL Gatekeeper v2（真实训练 + Showdown + Threshold Sweep）
+
+目标：基于更高质量离线数据训练 `rl_gatekeeper_v2.pt`，并在固定窗口对比 SFT-only vs SFT+Gatekeeper，进行阈值 sweep（观察 PnL/回撤/deny-days）。
+
+评估窗口：`2025-12-15 .. 2025-12-19`（5 trading days）
+
+Showdown 配置：
+
+- Planner：`planner_mode=sft`，`planner_sft_model=models/planner_sft_v1.pt`
+- Gatekeeper：`planner_rl_model=models/rl_gatekeeper_v2.pt`
+
+### 19.2.1 Threshold Sweep（Golden Strict 指标）
+
+| Variant | PnL(H1 Net) | Max Drawdown | Fees | Trades | Deny Days |
+|---|---:|---:|---:|---:|---:|
+| SFT-only | -0.0168178133 | -0.0410424238 | 0.0096 | 60 | 0/5 |
+| Gate thr=0.02 | -0.0259706739 | -0.0441590360 | 0.0102 | 56 | 1/5 |
+| Gate thr=0.05 | -0.0144451001 | -0.0330229640 | 0.0100 | 40 | 2/5 |
+| Gate thr=0.052 | 0.0 | 0.0 | 0.0 | 0 | 5/5 |
+
+结论（在该窗口的证据）：
+
+- `thr=0.05` 在不退化为“全关门”的前提下，对 SFT-only 同时改善 `PnL(H1 Net)` 与 `Max Drawdown`，并显著减少交易次数（更严格 gating）。
+- `thr=0.02` deny-days 不足（仅 1/5），在该窗口下反而更差（净 PnL 更负，回撤更深）。
+- `thr=0.052` 退化为“全 deny”（0 trades / 0 fees / 0 pnl），可作为 kill-switch/sanity-check，但不适合作为常态阈值。
+
+### 19.2.2 默认阈值决策
+
+- 默认阈值建议：`planner_rl_threshold = 0.05`
+- 备注：后续应基于更长窗口与目标 deny-rate（如 10%-30% deny-days）做阈值校准，避免在熊市/震荡市学到“长期不交易”的反馈回路。

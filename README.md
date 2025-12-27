@@ -28,7 +28,7 @@
 | 16 | 日报生成器 + Paper Trading（产品化：Daily Job / Ledger / NAV / Charts） | 完成 | 2025-12-25 |
 | 17 | Planner Dataset / SFT + MRI / Showdown | 完成 | 2025-12-25 |
 | 18 | MoE Router 修复 + signals_assets 回填 + Take 5 验证（2022-06） | 完成 | 2025-12-26 |
-| 19 | Planner Offline RL / Bandit（19.1 Gatekeeper: allow/deny） | 进行中 | 2025-12-26 |
+| 19 | Planner Offline RL / Bandit（19.2 Gatekeeper v2：Showdown + 阈值 Sweep，默认阈值 0.05） | 完成 | 2025-12-27 |
 
 ### Phase 15 最新进展（Alpha Mining / Alpha Days Compass）
 
@@ -36,7 +36,7 @@
 - **关键结论**：在 Analyst 未触发（news signals 缺失、`moe_vol_threshold=-1`）的窗口内，V4 与 V1 指标一致，用于验证系统接线的幂等与安全。
 - **News Injection 验证（2022-06 部分窗口）**：注入 news signals 后，确认 Analyst 可被唤醒（`analyst_coverage > 0`），且 6/10 极端下跌日 Analyst reasoning 明确引用 CPI/通胀语境；同时 Baseline 在 6/10 的表现与 Golden 相同，证明基础风控（Risk Manager / Drawdown Gate）具备“保命”能力。
 - **差异日（Alpha）线索**：在 2022-06-06 出现显著差异（Golden - Baseline ≈ +2.0%），Phase 15.2 的 alpha pair 挖掘将优先围绕该日期展开。
-- **Alpha Days 罗盘（Rich Alpha Compass）**：已从 `daily.csv` 生成增强版 `alpha_days.csv`，包含 `total_news_vol/max_news_impact/avg_vol/suggest_upsize` 并支持 `DEFENSIVE_ALPHA`。
+- **Alpha Days 罗盘（Rich Alpha Compass）**：已从 `daily.csv` 生成增强版 `alpha_days.csv`，包含 `total_news_vol/max_news_impact/avg_vol/suggest_upsize` 并支持 `DEFENSIVE_ALPHA`
 
 ### Phase 17：Planner SFT（Tabular MLP）Quickstart
 
@@ -379,37 +379,31 @@ TEACHER_BASE_URL=https://api.deepseek.com
 TEACHER_MODEL=deepseek-reasoner
 ```
 
-1) 为每日信号回填 ticker 归因：
+1) 采样 ticker 专属错题：
 
 ```powershell
-.\venv311\Scripts\python.exe scripts\backfill_signal_assets.py --report data\backtest\report_2025_12_extended.json --strategy v1_1_news --overwrite
+.\venv311\Scripts\python.exe scripts\sample_mistakes.py --report data\backtest\report_2025_12_extended.json --strategy v1_1_news --out data\finetune\mistakes_100_v4.jsonl --top-k 100 --min-abs-move 0.003 --news-score-threshold 0.0 --news-topk 3
 ```
 
-2) 采样 ticker 专属错题：
-
-```powershell
-.\venv311\Scripts\python.exe scripts\sample_mistakes.py --report data\backtest\report_2025_12_extended.json --out data\finetune\mistakes_100_v4.jsonl --strategy v1_1_news --top-k 100 --min-abs-move 0.003 --news-score-threshold 0.0 --news-topk 3
-```
-
-3) 生成 Teacher reasoning_trace 数据集：
+2) 生成 Teacher CoT（严格 JSON）：
 
 ```powershell
 .\venv311\Scripts\python.exe scripts\generate_cot_teacher.py --in data\finetune\mistakes_100_v4.jsonl --out data\finetune\cot_mistakes_100_v4.jsonl --model deepseek-reasoner --delay 1.0 --json-mode --overwrite
 ```
 
-4) 构建 Trader v2 SFT 数据集（CoT + 回放缓冲区）：
+3) 构建 Trader v2 SFT 数据集（CoT + 回放缓冲区）：
 
 ```powershell
 .\venv311\Scripts\python.exe scripts\build_trader_v2_dataset.py --cot data\finetune\cot_mistakes_100_v4.jsonl --replay data\finetune\trader_stock_sft_v1_plus_news.json --replay-ratio 1.0 --out-dir data\finetune --val-ratio 0.2
 ```
 
-5) 微调 Trader v2（混合重训练）：
+4) 微调 Trader v2（混合重训练）：
 
 ```powershell
 .\venv311\Scripts\python.exe scripts\finetune_llm.py --data data\finetune\trader_v2_train.json --eval-data data\finetune\trader_v2_val.json --model Qwen/Qwen2.5-7B-Instruct --outdir models\trader_v2_cot --epochs 3 --batch-size 1 --grad-acc 4 --lr 2e-4 --save-steps 10 --eval-steps 10 --max-seq-len 1024 --qlora --grad-ckpt
 ```
 
-6) 微调 Trader v2（从 v1.1 LoRA 增量持续微调）：
+5) 微调 Trader v2（从 v1.1 LoRA 增量持续微调）：
 
 ```powershell
 .\venv311\Scripts\python.exe scripts\finetune_llm.py --data data\finetune\trader_v2_train.json --eval-data data\finetune\trader_v2_val.json --model Qwen/Qwen2.5-7B-Instruct --init-adapter models\trader_stock_v1_1_tech_plus_news\lora_weights --outdir models\trader_v2_incremental --epochs 3 --batch-size 1 --grad-acc 4 --lr 2e-4 --save-steps 10 --eval-steps 10 --max-seq-len 1024 --qlora --grad-ckpt
@@ -432,7 +426,7 @@ TEACHER_MODEL=deepseek-reasoner
 3) 构建 v2 混合训练集（CoT + replay buffer，限制 replay 规模防止失控）：
 
 ```powershell
-.\venv311\Scripts\python.exe scripts\build_trader_v2_dataset.py --cot-data data\finetune\cot_news_cases_scaleup.jsonl --replay-data data\finetune\trader_stock_sft_v1_plus_news.json --max-replay-samples 1000 --out data\finetune\train_trader_v2_scaleup.json --val-ratio 0.1 --seed 42
+.\venv311\Scripts\python.exe scripts\build_trader_v2_dataset.py --cot-data data\finetune\cot_news_cases_scaleup.jsonl --replay-data data\finetune\trader_stock_sft_v1_plus_news.json --max-replay-samples 1000 --out-dir data\finetune --val-ratio 0.1
 ```
 
 4) 微调 Trader v2 Superset：
@@ -778,7 +772,7 @@ MIT License
  | 16 | Daily Report + Paper Trading Productization | Done | One-click daily job runner + split backtest history vs live ledger; optional NAV/signals persistence and report charts. |
  | 17 | Planner SFT (Imitation Learning) | Done | Train a lightweight tabular Planner policy (`planner_sft_v1.pt`) to imitate Golden Strict day-level strategy. |
  | 18 | MoE Routing Fixes (2022-06) | Done | Router gating fixes + signals_assets backfill + Take 5 validation; Analyst coverage back to realistic range. |
- | 19 | Planner Offline RL / Bandit | In Progress | Phase 19.1: RL Gatekeeper (allow/deny) with offline training + inference integration; showdown next. |
+ | 19 | Planner Offline RL / Bandit | Done | Phase 19.2: RL Gatekeeper v2 trained + integrated; showdown + threshold sweep; default `planner_rl_threshold=0.05`. |
 
 ---
 
