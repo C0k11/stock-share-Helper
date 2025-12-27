@@ -1,6 +1,6 @@
 # QuantAI 工程日志
  
-> 本文档记录项目从 Phase 1 到 Phase 15 的完整工程历程，包括问题诊断、技术决策、实现方案、产物清单与未来规划。
+> 本文档记录项目从 Phase 1 到 Phase 19 的完整工程历程，包括问题诊断、技术决策、实现方案、产物清单与未来规划。
 >
 > **安全原则**：任何 API Key/Token 不得写入仓库，只允许通过环境变量或本地 `.env.local`（已在 `.gitignore` 忽略）管理。
 
@@ -27,7 +27,8 @@
 | 15 | Q4 Walk-forward 报告 + Alpha Mining + Surgical DPO（Analyst Alpha Hunter） | 完成 | 2025-12 |
 | 16 | 日报生成器 + Paper Trading（产品化：Daily Job / Ledger / NAV / Charts） | 完成 | 2025-12-25 |
 | 17 | Planner Dataset / SFT + MRI / Showdown | 完成 | 2025-12-25 |
-| 18 | Analyst DPO（Forward-Return Pairs） | 完成 | 2025-12-25 |
+| 18 | MoE Router 修复 + signals_assets 回填 + Take 5 验证（2022-06） | 完成 | 2025-12-26 |
+| 19 | Planner Offline RL / Bandit（仓位/allow-deny 的 policy 优化） | 待开始 |  |
 
 ---
 

@@ -19,15 +19,16 @@
 | 7 | Simulation / Backtest（NAV Backtest + Execution Tuning） | 完成 | 2025-12-19 |
 | 8 | Paper Trading Automation | 完成 | 2025-12-19 |
 | 9 | Dashboard（Streamlit Cockpit） | 完成 | 2025-12-19 |
-| 10 | CoT 蒸馏 / Reasoning 升级（Trader v2） | 进行中 | 2025-12 |
-| 11 | Adapter-MoE / Multi-Agent | 进行中 | 2025-12 |
+| 10 | CoT 蒸馏 / Reasoning 升级（Trader v2） | 完成 | 2025-12 |
+| 11 | Adapter-MoE / Multi-Agent | 完成 | 2025-12 |
 | 12 | DPO / GRPO | 完成 | 2025-12 |
 | 13 | 黄金运行（严格风险 + 规划器 + DPO Analyst） | 完成 | 2025-12 |
 | 14 | 评测平台（Protocol Freeze + Walk-forward + Stratified Report） | 进行中 | 2025-12 |
 | 15 | Q4 Walk-forward 报告 + Alpha Mining + Surgical DPO（Analyst Alpha Hunter / Alpha Max V3） | 完成 | 2025-12-25 |
 | 16 | 日报生成器 + Paper Trading（产品化：Daily Job / Ledger / NAV / Charts） | 完成 | 2025-12-25 |
 | 17 | Planner Dataset / SFT + MRI / Showdown | 完成 | 2025-12-25 |
-| 18 | Analyst DPO（Forward-Return Pairs） | 完成 | 2025-12-25 |
+| 18 | MoE Router 修复 + signals_assets 回填 + Take 5 验证（2022-06） | 完成 | 2025-12-26 |
+| 19 | Planner Offline RL / Bandit（仓位/allow-deny 的 policy 优化） | 待开始 |  |
 
 ### Phase 15 最新进展（Alpha Mining / Alpha Days Compass）
 
@@ -768,13 +769,16 @@ MIT License
 | 7 | Backtest & Execution | Done | NAV curve backtest + `Hold=Keep` + `Confirm=2` execution filter. |
 | 8 | Paper Trading | Done | Rolling daily simulation with state persistence + RiskGate CLEAR. |
 | 9 | Dashboard | Done | Streamlit cockpit for NAV, orders, and risk monitoring. |
- | 10 | CoT Distillation (Reasoning, Trader v2) | In Progress | Mistake book + teacher reasoning_trace for explainable trading. |
- | 11 | Adapter-MoE / Multi-Agent | In Progress | LoRA experts + router (MoE) + tunable RiskGate thresholds for A/B. |
+ | 10 | CoT Distillation (Reasoning, Trader v2) | Done | Mistake book + teacher reasoning_trace for explainable trading. |
+ | 11 | Adapter-MoE / Multi-Agent | Done | LoRA experts + router (MoE) + tunable RiskGate thresholds for A/B. |
  | 12 | (DPO/GRPO) | Done | DPO preference surgery successfully reduced Analyst noise; full-month MoE run + grand analysis complete (Dec 2025). |
  | 13 | Golden Run (Strict Risk + Planner + DPO Analyst) | Done | Full-month Dec 2025 run with strict risk controls and planner gating. |
  | 14 | Evaluation Platform (Protocol Freeze + Walk-forward + Stratified Report) | In Progress | Frozen configs + walk-forward runner + date-aligned stratified report. |
  | 15 | Q4 Walk-forward + Alpha Mining + Surgical DPO | Done | Mine missed alpha opportunities and train a surgical DPO adapter to boost Analyst BUY confidence on high-potential cases. |
  | 16 | Daily Report + Paper Trading Productization | Done | One-click daily job runner + split backtest history vs live ledger; optional NAV/signals persistence and report charts. |
+ | 17 | Planner SFT (Imitation Learning) | Done | Train a lightweight tabular Planner policy (`planner_sft_v1.pt`) to imitate Golden Strict day-level strategy. |
+ | 18 | MoE Routing Fixes (2022-06) | Done | Router gating fixes + signals_assets backfill + Take 5 validation; Analyst coverage back to realistic range. |
+ | 19 | Planner Offline RL / Bandit | Planned | Optimize position sizing and allow/deny policy with offline RL/bandits (next). |
 
 ---
 

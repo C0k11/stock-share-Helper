@@ -63,6 +63,13 @@ class Planner:
         if (not prev) and date_str and nav_csv:
             prev = _load_prev_nav_features(Path(nav_csv), date_str)
         feats_in = dict(features or {})
+
+        # Expose regime to SFT policy as numeric features (kept lightweight and backward compatible).
+        reg_l = str(regime or "").strip().lower()
+        feats_in.setdefault("market_regime_score", float(score) if score is not None else 0.0)
+        feats_in.setdefault("market_regime_is_risk_off", 1.0 if reg_l == "risk_off" else 0.0)
+        feats_in.setdefault("market_regime_is_risk_on", 1.0 if reg_l == "risk_on" else 0.0)
+
         for k, v in prev.items():
             feats_in.setdefault(k, float(v))
 
