@@ -65,6 +65,12 @@ def _mode_str(values: List[str]) -> str:
 def _extract_day_metrics(day_obj: Dict[str, Any]) -> Dict[str, Any]:
     items = day_obj.get("items") if isinstance(day_obj.get("items"), dict) else {}
 
+    planner_obj = day_obj.get("planner") if isinstance(day_obj.get("planner"), dict) else {}
+    planner_inputs = planner_obj.get("inputs") if isinstance(planner_obj.get("inputs"), dict) else {}
+    mr = planner_inputs.get("market_regime") if isinstance(planner_inputs.get("market_regime"), dict) else {}
+    mr_regime = str(mr.get("regime") or "").strip().lower()
+    mr_score = _safe_float(mr.get("score"), default=0.0)
+
     planner_strats: List[str] = []
     actions: List[str] = []
     force_clear = 0
@@ -86,6 +92,9 @@ def _extract_day_metrics(day_obj: Dict[str, Any]) -> Dict[str, Any]:
 
     action_counts = Counter(actions)
     return {
+        "market_regime_score": float(mr_score),
+        "market_regime_is_risk_off": 1 if mr_regime == "risk_off" else 0,
+        "market_regime_is_risk_on": 1 if mr_regime == "risk_on" else 0,
         "decisions_count": len(items),
         "dec_planner_strategy": _mode_str(planner_strats),
         "dec_force_clear_count": int(force_clear),
