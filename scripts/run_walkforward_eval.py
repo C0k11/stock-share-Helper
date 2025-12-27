@@ -492,11 +492,74 @@ def main() -> None:
     p.add_argument("--golden-config", default="configs/golden_strict_v1.yaml")
     p.add_argument("--run-id", required=True)
     p.add_argument("--windows", nargs="*", default=[])
+    p.add_argument("--override-moe-analyst", default="", help="Override golden inference.moe_analyst adapter path")
+    p.add_argument("--override-moe-scalper", default="", help="Override golden inference.moe_scalper adapter path")
+    p.add_argument(
+        "--override-moe-any-news",
+        default="",
+        choices=["", "true", "false"],
+        help="Override golden inference.moe_any_news (true/false)",
+    )
+    p.add_argument(
+        "--override-moe-news-threshold",
+        type=float,
+        default=None,
+        help="Override golden inference.moe_news_threshold",
+    )
+    p.add_argument(
+        "--override-moe-vol-threshold",
+        type=float,
+        default=None,
+        help="Override golden inference.moe_vol_threshold",
+    )
+    p.add_argument(
+        "--override-planner-mode",
+        "--planner-mode",
+        dest="override_planner_mode",
+        default="",
+        choices=["", "off", "rule", "sft"],
+        help="Override golden inference.planner_mode",
+    )
     p.add_argument("--force-rerun", action="store_true", default=False)
     args = p.parse_args()
 
     base_cfg = yaml.safe_load(Path(str(args.baseline_config)).read_text(encoding="utf-8"))
     gold_cfg = yaml.safe_load(Path(str(args.golden_config)).read_text(encoding="utf-8"))
+
+    gold_infer = gold_cfg.get("inference") if isinstance(gold_cfg, dict) else None
+    if not isinstance(gold_infer, dict):
+        gold_infer = {}
+        if isinstance(gold_cfg, dict):
+            gold_cfg["inference"] = gold_infer
+
+    if str(args.override_moe_analyst or "").strip():
+        print(f"Overriding golden inference.moe_analyst: {str(args.override_moe_analyst).strip()}")
+        gold_infer["moe_analyst"] = str(args.override_moe_analyst).strip()
+
+    if str(args.override_moe_scalper or "").strip():
+        print(f"Overriding golden inference.moe_scalper: {str(args.override_moe_scalper).strip()}")
+        gold_infer["moe_scalper"] = str(args.override_moe_scalper).strip()
+
+    if str(args.override_planner_mode or "").strip():
+        print(f"Overriding golden inference.planner_mode: {str(args.override_planner_mode).strip()}")
+        gold_infer["planner_mode"] = str(args.override_planner_mode).strip()
+
+    if str(args.override_moe_any_news or "").strip():
+        val = str(args.override_moe_any_news).strip().lower()
+        b = True if val == "true" else False
+        print(f"Overriding golden inference.moe_any_news: {b}")
+        gold_infer["moe_any_news"] = bool(b)
+        gold_infer["moe_mode"] = True
+
+    if args.override_moe_news_threshold is not None:
+        print(f"Overriding golden inference.moe_news_threshold: {float(args.override_moe_news_threshold)}")
+        gold_infer["moe_news_threshold"] = float(args.override_moe_news_threshold)
+        gold_infer["moe_mode"] = True
+
+    if args.override_moe_vol_threshold is not None:
+        print(f"Overriding golden inference.moe_vol_threshold: {float(args.override_moe_vol_threshold)}")
+        gold_infer["moe_vol_threshold"] = float(args.override_moe_vol_threshold)
+        gold_infer["moe_mode"] = True
 
     start = str((gold_cfg.get("date_range") or {}).get("start") or "").strip()
     end = str((gold_cfg.get("date_range") or {}).get("end") or "").strip()

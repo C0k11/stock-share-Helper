@@ -1,12 +1,14 @@
 #!/usr/bin/env python
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set, Tuple
 
@@ -99,6 +101,44 @@ def _get_teacher_config() -> Tuple[str, str, str]:
     return str(api_key), str(base_url), str(model)
 
 
+def _iter_days_in_range(start: str, end: str) -> List[str]:
+    s = str(start or "").strip()
+    e = str(end or "").strip()
+    if not s or not e:
+        return []
+    try:
+        ds = datetime.strptime(s, "%Y-%m-%d").date()
+        de = datetime.strptime(e, "%Y-%m-%d").date()
+    except Exception:
+        return []
+    if de < ds:
+        ds, de = de, ds
+    out: List[str] = []
+    cur = ds
+    while cur <= de:
+        out.append(cur.strftime("%Y-%m-%d"))
+        cur = cur + timedelta(days=1)
+    return out
+
+
+def _load_universe_from_stock_features(daily_dir: Path, day: str) -> List[str]:
+    fp = daily_dir / f"stock_features_{day}.json"
+    if not fp.exists():
+        return []
+    data = _read_json(fp)
+    items = data.get("items") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return []
+    out: List[str] = []
+    for it in items:
+        if not isinstance(it, dict):
+            continue
+        sym = str(it.get("symbol") or "").strip().upper()
+        if sym:
+            out.append(sym)
+    return sorted(list(dict.fromkeys(out)))
+
+
 def _post_chat_completions(
     *,
     base_url: str,
@@ -141,6 +181,71 @@ def _post_chat_completions(
 
     data = json.loads(raw)
     return str(data["choices"][0]["message"]["content"])
+
+
+def _infer_subject_assets_local(
+    *,
+    model: Any,
+    tokenizer: Any,
+    ticker_universe: List[str],
+    title: str,
+    summary: str,
+    max_subject_assets: int,
+    max_new_tokens: int,
+) -> List[str]:
+    system = (
+        "You are a US equities news analyst. Your task is to map a news event to a list of impacted tickers from the given universe. "
+        "Output must be STRICT JSON only."
+    )
+    user = (
+        f"TICKER_UNIVERSE={json.dumps([str(x).strip().upper() for x in ticker_universe if str(x).strip()])}\n"
+        f"TITLE={str(title or '').strip()}\n"
+        f"SUMMARY={str(summary or '').strip()}\n\n"
+        f"Output exactly ONE JSON object: {{\"subject_assets\": [\"AAPL\", ...]}}. "
+        f"subject_assets MUST be an array (possibly empty) of uppercase tickers from TICKER_UNIVERSE only. "
+        f"Return at most {int(max_subject_assets)} tickers. If uncertain, return an empty array. "
+        "Do not include any other keys."
+    )
+
+    messages = [{"role": "system", "content": system}, {"role": "user", "content": user}]
+
+    try:
+        if hasattr(tokenizer, "apply_chat_template"):
+            prompt = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+            inputs = tokenizer(prompt, return_tensors="pt")
+        else:
+            # Fallback: concatenate; still enforce STRICT JSON.
+            prompt = system + "\n\n" + user
+            inputs = tokenizer(prompt, return_tensors="pt")
+
+        inputs = inputs.to(model.device) if hasattr(inputs, "to") else inputs
+        out = model.generate(
+            **inputs,
+            max_new_tokens=int(max_new_tokens),
+            do_sample=False,
+            pad_token_id=getattr(tokenizer, "eos_token_id", None),
+        )
+        gen_ids = out[0][inputs["input_ids"].shape[-1] :]
+        text = tokenizer.decode(gen_ids, skip_special_tokens=True)
+    except Exception:
+        return []
+
+    obj = _parse_json_object(str(text))
+    if not obj:
+        return []
+    sa = obj.get("subject_assets")
+    if not isinstance(sa, list):
+        return []
+    universe = {str(x).strip().upper() for x in ticker_universe if str(x).strip()}
+    out_assets: List[str] = []
+    for x in sa:
+        t = str(x or "").strip().upper()
+        if t and (t in universe):
+            out_assets.append(t)
+    out_assets = sorted(set(out_assets))
+    if int(max_subject_assets) > 0:
+        out_assets = out_assets[: int(max_subject_assets)]
+    return out_assets
 
 
 def _parse_json_object(text: str) -> Optional[Dict[str, Any]]:
@@ -299,6 +404,24 @@ def _load_day_signals(daily_dir: Path, day: str) -> List[Dict[str, Any]]:
     return [it for it in data if isinstance(it, dict)]
 
 
+def _ensure_item_id(it: Dict[str, Any]) -> str:
+    it_id = str(it.get("id") or "").strip()
+    if it_id:
+        return it_id
+
+    sig = it.get("signal") if isinstance(it.get("signal"), dict) else {}
+    title = str(it.get("title") or "").strip()
+    source = str(it.get("source") or "").strip()
+    url = str(sig.get("url") or it.get("url") or "").strip()
+    summary = str(sig.get("summary") or "").strip()
+
+    key = "|".join([title, source, url, summary]).encode("utf-8", errors="ignore")
+    hid = hashlib.sha1(key).hexdigest()[:16]
+    it_id = f"auto_{hid}"
+    it["id"] = it_id
+    return it_id
+
+
 def _save_day_signals_assets(daily_dir: Path, day: str, items: List[Dict[str, Any]]) -> Path:
     outp = daily_dir / f"signals_assets_{day}.json"
     outp.parent.mkdir(parents=True, exist_ok=True)
@@ -307,9 +430,13 @@ def _save_day_signals_assets(daily_dir: Path, day: str, items: List[Dict[str, An
 
 
 def main() -> None:
-    p = argparse.ArgumentParser(description="Backfill subject_assets into daily signals_YYYY-MM-DD.json using teacher API")
-    p.add_argument("--report", required=True)
-    p.add_argument("--strategy", default="v1_1_news")
+    p = argparse.ArgumentParser(description="Backfill subject_assets into daily signals_YYYY-MM-DD.json")
+
+    g = p.add_mutually_exclusive_group(required=True)
+    g.add_argument("--report", default="")
+    g.add_argument("--date-range", nargs=2, metavar=("START", "END"), help="YYYY-MM-DD YYYY-MM-DD")
+
+    p.add_argument("--strategy", default="v1_1_news", help="Only used when --report is set")
     p.add_argument("--daily-dir", default="", help="Override daily dir (default: use report.daily_dir)")
     p.add_argument("--tickers", default="", help="Comma-separated ticker universe (default: use report.tickers)")
     p.add_argument("--limit-days", type=int, default=0)
@@ -322,25 +449,88 @@ def main() -> None:
     p.add_argument("--max-retries", type=int, default=3)
     p.add_argument("--delay", type=float, default=0.5)
     p.add_argument("--overwrite", action="store_true")
+
+    p.add_argument(
+        "--backend",
+        default="api",
+        choices=["api", "local"],
+        help="subject_assets inference backend: api (default) or local (transformers)\n",
+    )
+    p.add_argument("--local-model", default="Qwen/Qwen2.5-7B-Instruct")
+    p.add_argument("--load-4bit", action="store_true")
+    p.add_argument("--no-load-4bit", dest="load_4bit", action="store_false")
+    p.set_defaults(load_4bit=True)
+    p.add_argument("--max-subject-assets", type=int, default=8)
+    p.add_argument("--max-new-tokens", type=int, default=160)
     args = p.parse_args()
 
-    report_path = Path(args.report)
-    report = _read_json(report_path)
-    if not isinstance(report, dict):
-        raise SystemExit("Report must be JSON object")
+    report_path = Path(str(args.report or "").strip()) if str(args.report or "").strip() else None
+    report: Optional[Dict[str, Any]] = None
+    if report_path is not None:
+        report_obj = _read_json(report_path)
+        if not isinstance(report_obj, dict):
+            raise SystemExit("Report must be JSON object")
+        report = report_obj
 
-    daily_dir = Path(str(args.daily_dir or report.get("daily_dir") or "data/daily"))
-    days = sorted(_iter_report_days(report, str(args.strategy)))
+    daily_dir = Path(str(args.daily_dir or (report.get("daily_dir") if isinstance(report, dict) else "") or "data/daily"))
+
+    if args.date_range:
+        days = _iter_days_in_range(str(args.date_range[0]), str(args.date_range[1]))
+    else:
+        days = sorted(_iter_report_days(report, str(args.strategy))) if isinstance(report, dict) else []
+
     if int(args.limit_days) > 0:
         days = days[: int(args.limit_days)]
 
     tickers: List[str]
     if str(args.tickers).strip():
         tickers = [t.strip().upper() for t in str(args.tickers).split(",") if t.strip()]
-    else:
+    elif isinstance(report, dict):
         tickers = [str(t).strip().upper() for t in (report.get("tickers") or []) if str(t).strip()]
+    else:
+        tickers = _load_universe_from_stock_features(daily_dir, days[0]) if days else []
 
-    api_key, base_url, model = _get_teacher_config()
+    if not tickers:
+        raise SystemExit("Empty ticker universe. Provide --tickers or pass --report with report.tickers, or ensure stock_features_<day>.json exists.")
+
+    api_key: str = ""
+    base_url: str = ""
+    model_name: str = ""
+    local_model = None
+    local_tokenizer = None
+    if str(args.backend) == "api":
+        api_key, base_url, model_name = _get_teacher_config()
+    else:
+        import torch
+        from transformers import AutoModelForCausalLM, AutoTokenizer
+
+        base_model_id = str(args.local_model).replace("\\", "/")
+        tok = AutoTokenizer.from_pretrained(base_model_id, trust_remote_code=True)
+        if tok.pad_token is None:
+            tok.pad_token = tok.eos_token
+
+        model_kwargs: Dict[str, Any] = {
+            "device_map": "auto",
+            "trust_remote_code": True,
+        }
+        if torch.cuda.is_available():
+            model_kwargs["torch_dtype"] = torch.bfloat16
+            model_kwargs["low_cpu_mem_usage"] = True
+
+        if bool(args.load_4bit):
+            from transformers import BitsAndBytesConfig
+
+            compute_dtype = torch.bfloat16 if torch.cuda.is_available() else torch.float16
+            model_kwargs["quantization_config"] = BitsAndBytesConfig(
+                load_in_4bit=True,
+                bnb_4bit_quant_type="nf4",
+                bnb_4bit_use_double_quant=True,
+                bnb_4bit_compute_dtype=compute_dtype,
+            )
+
+        local_model = AutoModelForCausalLM.from_pretrained(base_model_id, **model_kwargs)
+        local_model.eval()
+        local_tokenizer = tok
 
     processed_days = 0
     processed_items = 0
@@ -374,9 +564,7 @@ def main() -> None:
                 imp_f = 0.0
             if (not hits) and (abs(imp_f) < float(args.min_abs_impact)):
                 continue
-            it_id = str(it.get("id") or "")
-            if not it_id:
-                continue
+            it_id = _ensure_item_id(it)
             prio = 1000.0 if hits else abs(imp_f)
             candidates.append((float(prio), it_id))
 
@@ -387,6 +575,7 @@ def main() -> None:
         out_items: List[Dict[str, Any]] = []
         for it in signals:
             cp = dict(it)
+            _ = _ensure_item_id(cp)
             cp.pop("subject_assets", None)
             cp["subject_assets"] = []
             out_items.append(cp)
@@ -398,7 +587,7 @@ def main() -> None:
             continue
 
         for idx, it in enumerate(out_items):
-            it_id = str(it.get("id") or "")
+            it_id = _ensure_item_id(it)
             if it_id not in id_set:
                 continue
 
@@ -407,16 +596,27 @@ def main() -> None:
             summary = str(sig.get("summary") or "")
 
             try:
-                sa = _infer_subject_assets(
-                    api_key=api_key,
-                    base_url=base_url,
-                    model=model,
-                    ticker_universe=tickers,
-                    title=title,
-                    summary=summary,
-                    timeout=float(args.timeout),
-                    max_retries=int(args.max_retries),
-                )
+                if str(args.backend) == "api":
+                    sa = _infer_subject_assets(
+                        api_key=str(api_key),
+                        base_url=str(base_url),
+                        model=str(model_name),
+                        ticker_universe=tickers,
+                        title=title,
+                        summary=summary,
+                        timeout=float(args.timeout),
+                        max_retries=int(args.max_retries),
+                    )
+                else:
+                    sa = _infer_subject_assets_local(
+                        model=local_model,
+                        tokenizer=local_tokenizer,
+                        ticker_universe=tickers,
+                        title=title,
+                        summary=summary,
+                        max_subject_assets=int(args.max_subject_assets),
+                        max_new_tokens=int(args.max_new_tokens),
+                    )
                 it["subject_assets"] = sa
                 if isinstance(it.get("signal"), dict):
                     it["signal"]["subject_assets"] = sa
@@ -443,7 +643,7 @@ def main() -> None:
                 "days": len(days),
                 "processed_days": processed_days,
                 "processed_items": processed_items,
-                "model": model,
+                "model": (str(model_name) if str(args.backend) == "api" else str(args.local_model)),
             },
             ensure_ascii=False,
         )
