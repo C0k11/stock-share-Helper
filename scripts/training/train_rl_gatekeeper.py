@@ -94,7 +94,7 @@ def main() -> None:
     if target_col not in df.columns:
         raise SystemExit(f"Missing target column: {target_col}")
 
-    feature_cols = [c for c in df.columns if c not in {"date", "system", target_col}]
+    feature_cols = [c for c in df.columns if c not in {"source_run", "date", "system", target_col}]
     x_df = df[feature_cols].copy()
     x_df = x_df.apply(pd.to_numeric, errors="coerce").fillna(0.0)
     x = x_df.to_numpy(dtype=np.float32)
