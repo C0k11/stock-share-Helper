@@ -769,6 +769,13 @@ def main() -> None:
         help="Planner policy override. If set, takes precedence over --planner-mode.",
     )
     parser.add_argument("--planner-sft-model", default="models/planner_sft_v1.pt")
+    parser.add_argument("--planner-rl-model", default="", help="Phase 19.1: RL Gatekeeper model path (Q(s,allow) regressor bundle)")
+    parser.add_argument(
+        "--planner-rl-threshold",
+        type=float,
+        default=0.0,
+        help="Phase 19.1: deny if q_allow <= threshold. Example: 0.0 blocks negative expected reward.",
+    )
     parser.add_argument("--planner-signals-csv", default="paper_trading/daily_signals.csv")
     parser.add_argument(
         "--risk-max-drawdown",
@@ -816,6 +823,7 @@ def main() -> None:
 
     from src.data.rag import MarketRAG
     from src.risk.gate import RiskGate
+    from src.agent.gatekeeper import Gatekeeper
     from src.agent.planner import Planner
     from scripts.generate_etf_teacher_dataset import (
         build_risk_watch_summary,
@@ -853,12 +861,17 @@ def main() -> None:
     )
 
     planner: Optional[Planner] = None
+    gatekeeper: Optional[Gatekeeper] = None
     planner_mode = str(getattr(args, "planner_mode", "off") or "off").strip().lower()
     planner_policy = str(getattr(args, "planner_policy", "") or "").strip().lower()
     if not planner_policy:
         planner_policy = "rule" if planner_mode == "rule" else ("sft" if planner_mode == "sft" else "")
     if planner_policy in {"rule", "sft"}:
         planner = Planner(policy=planner_policy, sft_model_path=str(args.planner_sft_model))
+
+    rl_model_path = str(getattr(args, "planner_rl_model", "") or "").strip()
+    if rl_model_path:
+        gatekeeper = Gatekeeper(model_path=str(rl_model_path), threshold=float(getattr(args, "planner_rl_threshold", 0.0) or 0.0))
 
     if bool(args.moe_mode):
         scalper = str(args.moe_scalper).strip()
@@ -905,6 +918,8 @@ def main() -> None:
 
         missing_tickers: List[str] = []
         planner_decision: Optional[Dict[str, Any]] = None
+        gate_decision: Optional[Dict[str, Any]] = None
+        gate_allow: Optional[bool] = None
         news_cache: Dict[str, List[str]] = {}
         if use_stock:
             if not stock_fp.exists():
@@ -1054,6 +1069,35 @@ def main() -> None:
             except Exception:
                 planner_decision = None
 
+        if (gatekeeper is not None) and isinstance(planner_decision, dict):
+            try:
+                p_inputs = planner_decision.get("inputs") if isinstance(planner_decision.get("inputs"), dict) else {}
+                p_feats = p_inputs.get("features") if isinstance(p_inputs.get("features"), dict) else {}
+                probs = p_inputs.get("probs") if isinstance(p_inputs.get("probs"), dict) else {}
+                s = str(planner_decision.get("strategy") or "").strip().lower()
+                conf = 0.0
+                try:
+                    conf = float(max([float(x) for x in probs.values()] or [0.0]))
+                except Exception:
+                    conf = 0.0
+
+                gate_feats = {str(k): float(v) for k, v in p_feats.items() if k}
+                gate_feats.update(
+                    {
+                        "sft_is_aggressive_long": 1.0 if s == "aggressive_long" else 0.0,
+                        "sft_is_defensive": 1.0 if s == "defensive" else 0.0,
+                        "sft_is_cash_preservation": 1.0 if s == "cash_preservation" else 0.0,
+                        "sft_confidence": float(conf),
+                    }
+                )
+
+                gd = gatekeeper.decide(feats=gate_feats, threshold=float(getattr(args, "planner_rl_threshold", 0.0) or 0.0))
+                gate_decision = gd.to_dict()
+                gate_allow = bool(gd.allow)
+            except Exception:
+                gate_decision = None
+                gate_allow = None
+
         decisions = {
             "date": str(date_str),
             "base": str(args.base),
@@ -1063,6 +1107,8 @@ def main() -> None:
         }
         if planner_decision is not None:
             decisions["planner"] = planner_decision
+        if gate_decision is not None:
+            decisions["gatekeeper"] = gate_decision
 
         if missing_tickers:
             decisions["missing_tickers"] = missing_tickers
@@ -1078,6 +1124,45 @@ def main() -> None:
             }
 
         news_signals = extract_news_signals(risk_watch)
+
+        # Phase 19.1: If gatekeeper denies, force CLEAR across all symbols and skip model inference.
+        if gate_allow is False:
+            for symbol, _item in items:
+                if use_stock:
+                    parsed = {"decision": "HOLD", "ticker": str(symbol), "analysis": ""}
+                    _normalize_reasoning_trace(parsed)
+                else:
+                    parsed = {
+                        "role_aggressive": "",
+                        "role_risk": "",
+                        "role_quant": "",
+                        "synthesis": "",
+                        "label": {
+                            "action": "clear",
+                            "target_position": 0.0,
+                            "risk_notes": [],
+                            "rationale": "gatekeeper_deny",
+                        },
+                    }
+
+                rec: Dict[str, Any] = {
+                    "parsed": parsed,
+                    "parse_error": "",
+                    "final": {
+                        "action": "CLEAR",
+                        "target_position": 0.0,
+                        "trace": ["[GATEKEEPER] Deny => FORCE CLEAR."],
+                    },
+                    "raw": "",
+                }
+                decisions["items"][symbol] = rec
+                print(f"{symbol}: CLEAR 0.0")
+
+            if multi_day:
+                out["days"][str(date_str)] = decisions
+            else:
+                out = decisions
+            continue
 
         for symbol, etf_item in items:
             feats = extract_features(etf_item)

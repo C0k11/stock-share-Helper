@@ -243,6 +243,12 @@ def _run_inference(*, cfg: Dict[str, Any], out_path: Path, start: str, end: str,
             args.extend(["--moe-analyst", str(cfg.get("moe_analyst"))])
         if str(cfg.get("planner_mode") or "").strip():
             args.extend(["--planner-mode", str(cfg.get("planner_mode"))])
+        if str(cfg.get("planner_sft_model") or "").strip():
+            args.extend(["--planner-sft-model", str(cfg.get("planner_sft_model"))])
+        if str(cfg.get("planner_rl_model") or "").strip():
+            args.extend(["--planner-rl-model", str(cfg.get("planner_rl_model"))])
+        if cfg.get("planner_rl_threshold") is not None:
+            args.extend(["--planner-rl-threshold", str(cfg.get("planner_rl_threshold"))])
         if cfg.get("moe_any_news") is False:
             args.append("--no-moe-any-news")
         if cfg.get("moe_any_news") is True:
@@ -258,6 +264,12 @@ def _run_inference(*, cfg: Dict[str, Any], out_path: Path, start: str, end: str,
             args.extend(["--adapter", str(cfg.get("adapter"))])
         if str(cfg.get("planner_mode") or "").strip():
             args.extend(["--planner-mode", str(cfg.get("planner_mode"))])
+        if str(cfg.get("planner_sft_model") or "").strip():
+            args.extend(["--planner-sft-model", str(cfg.get("planner_sft_model"))])
+        if str(cfg.get("planner_rl_model") or "").strip():
+            args.extend(["--planner-rl-model", str(cfg.get("planner_rl_model"))])
+        if cfg.get("planner_rl_threshold") is not None:
+            args.extend(["--planner-rl-threshold", str(cfg.get("planner_rl_threshold"))])
 
     if bool(cfg.get("allow_clear")):
         args.append("--allow-clear")
@@ -520,6 +532,14 @@ def main() -> None:
         choices=["", "off", "rule", "sft"],
         help="Override golden inference.planner_mode",
     )
+    p.add_argument("--override-planner-sft-model", default="", help="Override golden inference.planner_sft_model")
+    p.add_argument("--override-planner-rl-model", default="", help="Override golden inference.planner_rl_model")
+    p.add_argument(
+        "--override-planner-rl-threshold",
+        type=float,
+        default=None,
+        help="Override golden inference.planner_rl_threshold",
+    )
     p.add_argument("--force-rerun", action="store_true", default=False)
     args = p.parse_args()
 
@@ -543,6 +563,18 @@ def main() -> None:
     if str(args.override_planner_mode or "").strip():
         print(f"Overriding golden inference.planner_mode: {str(args.override_planner_mode).strip()}")
         gold_infer["planner_mode"] = str(args.override_planner_mode).strip()
+
+    if str(args.override_planner_sft_model or "").strip():
+        print(f"Overriding golden inference.planner_sft_model: {str(args.override_planner_sft_model).strip()}")
+        gold_infer["planner_sft_model"] = str(args.override_planner_sft_model).strip()
+
+    if str(args.override_planner_rl_model or "").strip():
+        print(f"Overriding golden inference.planner_rl_model: {str(args.override_planner_rl_model).strip()}")
+        gold_infer["planner_rl_model"] = str(args.override_planner_rl_model).strip()
+
+    if args.override_planner_rl_threshold is not None:
+        print(f"Overriding golden inference.planner_rl_threshold: {float(args.override_planner_rl_threshold)}")
+        gold_infer["planner_rl_threshold"] = float(args.override_planner_rl_threshold)
 
     if str(args.override_moe_any_news or "").strip():
         val = str(args.override_moe_any_news).strip().lower()
