@@ -379,6 +379,67 @@ def _universe_hits(title: str, summary: str, tickers: List[str]) -> List[str]:
     return sorted(set(hits))
 
 
+def _force_alias_assets(title: str, summary: str, raw_json: Any, tickers: List[str]) -> List[str]:
+    tset = {str(t).strip().upper() for t in (tickers or []) if str(t).strip()}
+
+    text_title = str(title or "")
+    text_summary = str(summary or "")
+    text_raw = str(raw_json or "")
+
+    alias_map: Dict[str, List[str]] = {
+        "LMT": [
+            "Lockheed",
+            "Lockheed Martin",
+            "ロッキード",
+            "ロッキード・マーティン",
+            "F-35",
+            "F35",
+            "F 35",
+            "F３５",
+            "HIMARS",
+            "HiMARS",
+            "ハイマース",
+            "Pentagon",
+            "ペンタゴン",
+            "Defense contract",
+            "defense contract",
+            "defence contract",
+            "missile defense",
+            "防衛",
+            "国防",
+            "軍事",
+            "ミサイル",
+            "長距離ミサイル",
+        ],
+        "RTX": [
+            "Raytheon",
+            "レイセオン",
+            "Patriot",
+            "パトリオット",
+            "Javelin",
+            "ジャベリン",
+            "missile",
+            "ミサイル",
+            "air defense",
+            "防空",
+            "防衛",
+        ],
+        "NOC": ["Northrop", "Grumman"],
+        "GD": ["General Dynamics"],
+    }
+
+    out: List[str] = []
+    for tk, aliases in alias_map.items():
+        if tk not in tset:
+            continue
+        for a in aliases:
+            if _match_alias_word(text_title, a) or _match_alias_word(text_summary, a) or _match_alias_word(text_raw, a):
+                out.append(tk)
+                break
+
+    return sorted(set(out))
+
+
 def _iter_report_days(report: Dict[str, Any], strategy: str) -> Set[str]:
     strategies = report.get("strategies") if isinstance(report.get("strategies"), dict) else {}
     strat = strategies.get(str(strategy)) if isinstance(strategies, dict) else None
@@ -427,6 +488,38 @@ def _save_day_signals_assets(daily_dir: Path, day: str, items: List[Dict[str, An
     outp.parent.mkdir(parents=True, exist_ok=True)
     outp.write_text(json.dumps(items, ensure_ascii=False, indent=2), encoding="utf-8")
     return outp
+
+
+def _bump_impact_equity_for_forced_item(it: Dict[str, Any], *, min_abs_impact: float) -> None:
+    target = float(min_abs_impact) if float(min_abs_impact) > 0 else 1.0
+
+    sig = it.get("signal") if isinstance(it.get("signal"), dict) else None
+    if isinstance(sig, dict):
+        try:
+            cur = float(sig.get("impact_equity"))
+        except Exception:
+            cur = 0.0
+        if abs(float(cur)) < float(target):
+            sig["impact_equity"] = float(target)
+        it["signal"] = sig
+
+    raw = it.get("raw_json")
+    if isinstance(raw, str) and raw.strip().startswith("{"):
+        try:
+            obj = json.loads(raw)
+        except Exception:
+            obj = None
+        if isinstance(obj, dict):
+            try:
+                cur2 = float(obj.get("impact_equity"))
+            except Exception:
+                cur2 = 0.0
+            if abs(float(cur2)) < float(target):
+                obj["impact_equity"] = float(target)
+            try:
+                it["raw_json"] = json.dumps(obj, ensure_ascii=False)
+            except Exception:
+                pass
 
 
 def main() -> None:
@@ -553,7 +646,9 @@ def main() -> None:
             title = str(it.get("title") or "")
             summary = str(sig.get("summary") or "")
 
-            hits = _universe_hits(title, summary, tickers)
+            forced_hits = _force_alias_assets(title, summary, it.get("raw_json"), tickers)
+
+            hits = sorted(set(_universe_hits(title, summary, tickers) + forced_hits))
             if bool(args.require_universe_hit) and not hits:
                 continue
 
@@ -562,6 +657,7 @@ def main() -> None:
                 imp_f = float(imp)
             except Exception:
                 imp_f = 0.0
+            # If we have forced hits (alias match), allow it even with low impact.
             if (not hits) and (abs(imp_f) < float(args.min_abs_impact)):
                 continue
             it_id = _ensure_item_id(it)
@@ -594,6 +690,15 @@ def main() -> None:
             sig = it.get("signal") if isinstance(it.get("signal"), dict) else {}
             title = str(it.get("title") or "")
             summary = str(sig.get("summary") or "")
+
+            forced = _force_alias_assets(title, summary, it.get("raw_json"), tickers)
+            if forced:
+                it["subject_assets"] = forced
+                if isinstance(it.get("signal"), dict):
+                    it["signal"]["subject_assets"] = forced
+                _bump_impact_equity_for_forced_item(it, min_abs_impact=float(args.min_abs_impact))
+                processed_items += 1
+                continue
 
             try:
                 if str(args.backend) == "api":
