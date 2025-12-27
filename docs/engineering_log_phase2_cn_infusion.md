@@ -3252,3 +3252,34 @@ Rule vs SFT（2022-06-01..2022-06-22）对比结论（重叠 15 天）：
 - A（高）：为目标窗口生成 `signals_assets_YYYY-MM-DD.json`（至少覆盖 2022-06-06 与 2022-06-10），让每条新闻具备 `subject_assets`，然后重跑 Take 5 验证覆盖率是否回到 5-20%。
 - B（中）：若短期无法生成 assets 文件，可设计更保守的 routing fallback（例如：仅在 `ImpactEquity>=X` 且 event_type 在白名单时允许 market-news 触发），避免回到全 Analyst。
 
+### 18.7 复验（最终证据）：signals_assets 回填后，覆盖率回到 5-20% 区间
+
+完成 `signals_assets_2022-06-06.json` / `signals_assets_2022-06-10.json` 回填后，重新运行 Take 5（仅 6/06 与 6/10）。
+
+- `golden_strict`：`analyst_coverage ≈ 14.46%`（落在预期 5-20% 区间）
+- 2022-06-10（CPI crash）：AAPL/MSFT router 触发 `expert=analyst`，并输出 SELL；最终由 RiskGate 强制 `CLEAR`（宏观风控链路成立）
+
+### 18.8 LMT 救援（最后一公里）：Rule-based Alias 让 LMT 在 6/06 成功触发 Analyst
+
+为避免大模型对军工实体链接不稳定，在 `backfill_signal_assets.py` 增加军工 alias 规则（含日文/英文），并在 alias 命中时提升 `impact_equity`，确保 routing 侧 `news_score` 可过阈值。
+
+复验（6/06-only）：
+
+- LMT：`news_count=1`、`news_score=1.0`、`expert=analyst`（点火成功）
+- 说明：MoE Router 的最后阻塞点确认为 subject_assets/ImpactEquity 数据链路，而非 gating 逻辑。
+
+---
+
+## Phase 19.1：RL Gatekeeper（Allow/Deny）
+
+目标：实现 Contextual Bandit 风格的“懂盈亏审查员”，对 SFT Planner 的建议做 allow/deny；deny day 直接全市场 `FORCE CLEAR`。
+
+实现要点：
+
+- 数据：构建离线数据集 `(state, reward)`，其中 `reward = pnl_h1_net - risk_penalty`（allow 的回报；deny 的回报默认 0）
+- 模型：训练 `Q(s, allow)` 回归器（MSE），并用阈值做决策：`allow = (q_allow > threshold)`
+- 推理接线：在 `run_trading_inference.py` 里引入 `--planner-rl-model/--planner-rl-threshold`，deny 时直接跳过模型推理并输出 `CLEAR`
+- Walkforward 透传：在 `run_walkforward_eval.py` 里透传 `planner_rl_model/planner_rl_threshold`，用于 SFT-only vs SFT+Gatekeeper 对照
+
+关键证据：Deny smoke test 通过（Gatekeeper 能物理切断交易并全市场 CLEAR）。
+

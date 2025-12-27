@@ -28,7 +28,7 @@
 | 16 | 日报生成器 + Paper Trading（产品化：Daily Job / Ledger / NAV / Charts） | 完成 | 2025-12-25 |
 | 17 | Planner Dataset / SFT + MRI / Showdown | 完成 | 2025-12-25 |
 | 18 | MoE Router 修复 + signals_assets 回填 + Take 5 验证（2022-06） | 完成 | 2025-12-26 |
-| 19 | Planner Offline RL / Bandit（仓位/allow-deny 的 policy 优化） | 待开始 |  |
+| 19 | Planner Offline RL / Bandit（19.1 Gatekeeper: allow/deny） | 进行中 | 2025-12-26 |
 
 ### Phase 15 最新进展（Alpha Mining / Alpha Days Compass）
 
@@ -778,7 +778,7 @@ MIT License
  | 16 | Daily Report + Paper Trading Productization | Done | One-click daily job runner + split backtest history vs live ledger; optional NAV/signals persistence and report charts. |
  | 17 | Planner SFT (Imitation Learning) | Done | Train a lightweight tabular Planner policy (`planner_sft_v1.pt`) to imitate Golden Strict day-level strategy. |
  | 18 | MoE Routing Fixes (2022-06) | Done | Router gating fixes + signals_assets backfill + Take 5 validation; Analyst coverage back to realistic range. |
- | 19 | Planner Offline RL / Bandit | Planned | Optimize position sizing and allow/deny policy with offline RL/bandits (next). |
+ | 19 | Planner Offline RL / Bandit | In Progress | Phase 19.1: RL Gatekeeper (allow/deny) with offline training + inference integration; showdown next. |
 
 ---
 
