@@ -133,6 +133,8 @@ def build_dataset(*, run_dir: Path, system: str, reward_h: int, risk_penalty_coe
     pnl_col = f"pnl_h{int(reward_h)}_net"
 
     rows: List[Dict[str, Any]] = []
+    source_run = str(run_dir.name or run_dir)
+
     for date_str, g in df.groupby("date"):
         g2 = g.copy()
 
@@ -156,6 +158,7 @@ def build_dataset(*, run_dir: Path, system: str, reward_h: int, risk_penalty_coe
                 has_strong = 0.0
 
         feats = {
+            "source_run": str(source_run),
             "date": str(date_str),
             "system": str(system),
             "n_tickers": float(len(g2)),
@@ -247,7 +250,7 @@ def main() -> None:
 
     df = pd.concat(dfs, ignore_index=True) if dfs else pd.DataFrame()
     if not df.empty:
-        df = df.drop_duplicates(subset=["date", "system"], keep="last").sort_values(["date", "system"])
+        df = df.drop_duplicates(subset=["source_run", "date", "system"], keep="last").sort_values(["source_run", "date", "system"])
 
     if str(args.start).strip():
         df = df[df["date"] >= str(args.start).strip()]
