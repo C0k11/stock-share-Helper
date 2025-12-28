@@ -29,6 +29,11 @@
 | 17 | Planner Dataset / SFT + MRI / Showdown | 完成 | 2025-12-25 |
 | 18 | MoE Router 修复 + signals_assets 回填 + Take 5 验证（2022-06） | 完成 | 2025-12-26 |
 | 19 | Planner Offline RL / Bandit（19.2 Gatekeeper v2：Showdown + 阈值 Sweep，默认阈值 0.05） | 完成 | 2025-12-27 |
+| 20 | 数据飞轮（Unified Data Harvester）+ 模拟实盘压力测试 | 进行中 | 2025-12 |
+| 21 | 多模态视觉之眼（Visual Alpha） | 规划中 | - |
+| 22 | 宏观指挥官（Macro-Agent Hierarchy） | 规划中 | - |
+| 23 | 深度思考与辩论（System-2 Debate） | 规划中 | - |
+| 24 | 精细化执行（Execution Algorithms） | 规划中 | - |
 
 ### Phase 15 最新进展（Alpha Mining / Alpha Days Compass）
 
@@ -721,65 +726,6 @@ schtasks /Create /TN "QuantAI_DailyPipeline" /SC DAILY /ST 07:30 /RL HIGHEST /F 
 
 ```bash
 .\venv311\Scripts\python.exe scripts\generate_etf_teacher_dataset.py --daily-dir data/daily --start-date 2025-12-01 --end-date 2025-12-31 --include-cot --resume
-```
-
----
-
-## 免责声明
-
-**本项目仅供学习研究，不构成任何投资建议。**
-
-- 历史业绩不代表未来表现
-- 所有策略建议仅供参考，投资决策需自行判断
-- 使用本系统产生的任何损失由用户自行承担
-
----
-
-##  License
-
-MIT License
-
----
----
-
-# QuantAI - Intelligent Quantitative Investment Assistant
-
-> A multimodal AI-powered personal securities investment assistant providing ETF portfolio strategy recommendations, risk alerts, and explainable decisions.
-
-[中文版](#quantai---智能量化投顾助手) | [Engineering Log](docs/engineering_log_phase2_cn_infusion.md)
-
----
-
-## Milestone Overview
-
-| Phase | Topic | Status | Description |
-| :--- | :--- | :--- | :--- |
-| 1 | Bulletproof JSON Pipeline | Done | Strict JSON repair + schema validation. |
-| 2 | Teacher Data Generation (CN/US) | Done | Multi-market teacher dataset generation. |
-| 3 | LLM Fine-tuning (News LoRA) | Done | News LoRA training + inference. |
-| 4 | Production Pipeline (Daily Automation) | Done | Daily pipeline automation + health/fallback. |
-| 5 | ETF Trader + RAG + RiskGate | Done | RAG retrieval + deterministic risk gate. |
-| 6 | Stock Trader v1.1 (Tech + News) + Dual Tower | Done | News Tower + Trader Tower integration. |
-| 7 | Backtest & Execution | Done | NAV curve backtest + `Hold=Keep` + `Confirm=2` execution filter. |
-| 8 | Paper Trading | Done | Rolling daily simulation with state persistence + RiskGate CLEAR. |
-| 9 | Dashboard | Done | Streamlit cockpit for NAV, orders, and risk monitoring. |
- | 10 | CoT Distillation (Reasoning, Trader v2) | Done | Mistake book + teacher reasoning_trace for explainable trading. |
- | 11 | Adapter-MoE / Multi-Agent | Done | LoRA experts + router (MoE) + tunable RiskGate thresholds for A/B. |
- | 12 | (DPO/GRPO) | Done | DPO preference surgery successfully reduced Analyst noise; full-month MoE run + grand analysis complete (Dec 2025). |
- | 13 | Golden Run (Strict Risk + Planner + DPO Analyst) | Done | Full-month Dec 2025 run with strict risk controls and planner gating. |
- | 14 | Evaluation Platform (Protocol Freeze + Walk-forward + Stratified Report) | In Progress | Frozen configs + walk-forward runner + date-aligned stratified report. |
- | 15 | Q4 Walk-forward + Alpha Mining + Surgical DPO | Done | Mine missed alpha opportunities and train a surgical DPO adapter to boost Analyst BUY confidence on high-potential cases. |
- | 16 | Daily Report + Paper Trading Productization | Done | One-click daily job runner + split backtest history vs live ledger; optional NAV/signals persistence and report charts. |
- | 17 | Planner SFT (Imitation Learning) | Done | Train a lightweight tabular Planner policy (`planner_sft_v1.pt`) to imitate Golden Strict day-level strategy. |
- | 18 | MoE Routing Fixes (2022-06) | Done | Router gating fixes + signals_assets backfill + Take 5 validation; Analyst coverage back to realistic range. |
- | 19 | Planner Offline RL / Bandit | Done | Phase 19.2: RL Gatekeeper v2 trained + integrated; showdown + threshold sweep; default `planner_rl_threshold=0.05`. |
-
----
-
-##  Project Overview
-
-**Not a black-box promising profits, but an intelligent assistant providing explainable recommendations under risk constraints.**
-
 Core Capabilities:
 - **Strategy Recommendations**: Daily target positions, entry/exit conditions, stop-loss/take-profit
 - **Risk Alerts**: Volatility spikes, drawdown warnings, correlation surge detection
