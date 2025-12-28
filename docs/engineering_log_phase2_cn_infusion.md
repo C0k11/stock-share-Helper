@@ -3313,3 +3313,68 @@ Showdown 配置：
 
 - 默认阈值建议：`planner_rl_threshold = 0.05`
 - 备注：后续应基于更长窗口与目标 deny-rate（如 10%-30% deny-days）做阈值校准，避免在熊市/震荡市学到“长期不交易”的反馈回路。
+
+---
+
+## Phase 20：数据飞轮（Unified Data Harvester）+ 模拟实盘压力测试
+
+### 20.1 Unified Data Harvester（One Source -> Two Sinks）
+
+目标：用同一份决策日志/同一套收益口径同时产出两类训练数据（Analyst DPO pairs + Gatekeeper RL rewards），避免“手工作坊”式数据对齐。
+
+关键产物：`scripts/data/run_data_flywheel.py`
+
+输出（Two Sinks）：
+
+- Analyst DPO：`data/flywheel/analyst_dpo_pairs.jsonl`（prompt/chosen/rejected/meta）
+- Gatekeeper RL：`data/flywheel/gatekeeper_rl_rewards.csv`
+
+Reward Target 决策：训练 `Q(s, allow)` 的回归目标必须使用 “潜在回报” 而非 realized。
+
+- 训练 target：`y_reward_allow`（即 counterfactual / potential PnL；Gatekeeper deny 时也依然可计算“如果放行会赚/亏多少”）
+- 日志保留：`action_allow` + `y_reward_realized`（deny 则 realized=0，用于未来 IPS/DR 等 off-policy 估计）
+
+证据：在 Gatekeeper deny 的 day 仍能看到非零/负值的 `y_reward_allow`（代表“后悔药”标签）。
+
+### 20.2 模拟实盘压力测试（Jan 2024）
+
+目标：在未知窗口（Jan 2024）检验强配置（Analyst DPO + Planner SFT + Gatekeeper）在实战波动中的稳定性，并跑完后用 20.1 收割训练燃料。
+
+运行配置（核心开关）：
+
+- `planner_mode=sft`，`override_planner_sft_model=models/planner_sft_v1.pt`
+- `override_planner_rl_model=models/rl_gatekeeper_v2.pt`，`override_planner_rl_threshold=0.05`
+- `override_moe_analyst=models/phase15_3_analyst_dpo_h5_x0005`
+- `override_moe_any_news=false`，`override_moe_news_threshold=0.8`，`override_moe_vol_threshold=-1.0`
+
+Run ID：`phase20_2_paper_trading_jan2024`
+
+预检与修复（为 Jan 2024 补齐输入）：
+
+- 补齐宏观/日历数据：确保 `SPY/VIX/TNX` 在 `data/raw` 覆盖到 2024-01（否则 batch 特征构建会提示 “No trading dates found”）
+- 生成 stock 特征快照：用 `build_daily_features_universal.py` 批量生成 `data/daily/stock_features_2024-01-*.json`（Jan 2024 交易日约 20 天）
+
+风险提示（数据覆盖）：
+
+- 当前 `data/daily/signals_2024-01-*.json` 多为 `[]`（空），且缺少 `news_2024-01-*.json`，在 `override_moe_any_news=false` 的设定下，Analyst 可能难以触发，导致 DPO pairs 产量偏低。
+- 若需在 Jan 2024 生成更多 Analyst DPO pairs，需额外补齐 2024-01 的 news 原始数据并执行 `backfill_news_signals.py`（待办）。
+
+---
+
+## Phase 21：Visual Alpha（多模态视觉之眼）
+
+目标：引入视觉信号（K 线图形态/支撑阻力/突破结构），补齐纯 OHLCV 表格难以捕捉的空间形态。
+
+方向：用 `mplfinance` 生成近期 60 天 K 线图（含均线/成交量），喂给 VLM（Qwen-VL/LLaVA 等）输出结构化图形信号；在 MoE 中新增 `Chartist` 专家（先只输出信号/解释，避免直接下单）。
+
+## Phase 22：Macro-Agent Hierarchy（宏观指挥官）
+
+目标：引入全局风险因子 `Global_Risk_Factor`（0..1），基于 VIX/TNX/DXY/板块轮动等宏观状态直接约束下层交易系统的总仓位上限，避免“只看个股忽略大周期”的系统性风险。
+
+## Phase 23：System 2 Reasoning（深度思考与辩论）
+
+目标：Bull/Bear/Judge 多智能体辩论，输出更严格的逻辑链与裁决，降低幻觉与盲目乐观。
+
+## Phase 24：Execution Algorithms（精细化执行）
+
+目标：从“决定买”进化到“买得漂亮”，引入滑点/拆单（TWAP/VWAP）等执行层模型，减少回测与实盘的执行假设偏差。
