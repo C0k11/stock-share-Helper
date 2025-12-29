@@ -3,6 +3,7 @@
 import argparse
 import json
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -117,17 +118,42 @@ def _try_parse_json(text: str) -> Optional[Dict[str, Any]]:
     except Exception:
         pass
 
-    # Try to extract first JSON object substring
-    i = s.find("{")
-    j = s.rfind("}")
-    if i >= 0 and j > i:
-        sub = s[i : j + 1]
+    m_code = re.search(r"```json\s*(\{.*?\})\s*```", s, flags=re.IGNORECASE | re.DOTALL)
+    if m_code:
+        try:
+            obj = json.loads(m_code.group(1))
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
+
+    for m in re.finditer(r"\{.*?\}", s, flags=re.DOTALL):
+        sub = m.group(0)
         try:
             obj = json.loads(sub)
             if isinstance(obj, dict):
                 return obj
         except Exception:
-            return None
+            continue
+
+    m_signal = re.search(r"\bsignal\b\s*[:：]\s*[*_`~\s]*([A-Za-z_]+)", s, flags=re.IGNORECASE)
+    m_conf = re.search(
+        r"\bconfidence\b\s*[:：]\s*[*_`~\s]*([0-9]+(?:\.[0-9]+)?)",
+        s,
+        flags=re.IGNORECASE,
+    )
+    m_reason = re.search(r"\breasoning\b\s*[:：]\s*(.+)", s, flags=re.IGNORECASE | re.DOTALL)
+    if m_signal:
+        signal = str(m_signal.group(1) or "").strip().upper()
+        out: Dict[str, Any] = {"signal": signal}
+        if m_conf:
+            try:
+                out["confidence"] = float(m_conf.group(1))
+            except Exception:
+                pass
+        if m_reason:
+            out["reasoning"] = str(m_reason.group(1) or "").strip()
+        return out
 
     return None
 

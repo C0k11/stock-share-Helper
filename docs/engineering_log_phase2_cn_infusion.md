@@ -122,6 +122,42 @@ Dry-run（不需要启动 VLM 服务，用于验证 I/O 与输出格式）：
   --out-jsonl results\phase21_chartist\chart_signals.jsonl
 ```
 
+### Phase 21.3：Real Inference（Ollama 本地 VLM 冒烟测试）
+
+Windows 工业化安装（可复现）：
+
+```powershell
+winget install -e --id Ollama.Ollama
+```
+
+安装完成后需要 **重启终端**（刷新 PATH），再拉取视觉模型：
+
+```powershell
+ollama pull llama3.2-vision
+```
+
+验证 OpenAI-compatible 端点（可选）：
+
+```powershell
+powershell -NoProfile -Command "irm http://localhost:11434/v1/models"
+```
+
+Real smoke test：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\inference\run_chart_expert.py `
+  --asof 2024-01-31 `
+  --limit 3 `
+  --model "llama3.2-vision" `
+  --api-base "http://localhost:11434/v1" `
+  --api-key "ollama" `
+  --out-jsonl results\phase21_chartist\chart_signals_real_smoke.jsonl
+```
+
+验收标准：输出 `chart_signals_real_smoke.jsonl` 且 `ok=3, failed=0`。
+
+工程要点：Ollama 的视觉模型在部分场景不会严格输出 JSON，因此推理脚本加入了对 `Signal/Confidence/Reasoning` 的兜底解析，保证 real run 的稳定性。
+
 输出：
 
 - `results/phase21_chartist/chart_signals.jsonl`
