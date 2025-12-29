@@ -212,6 +212,30 @@ def _planner_allow_dates_from_moe(moe_path: Path) -> set:
     return out
 
 
+def _gatekeeper_stats_from_decisions(*, payload: Dict[str, Any], dates: List[str]) -> Dict[str, float]:
+    days = payload.get("days") if isinstance(payload, dict) else None
+    if not isinstance(days, dict) or not dates:
+        return {"gate_present_rate": 0.0, "gate_allow_rate": 0.0}
+
+    present_days = 0
+    allow_days = 0
+    for d in dates:
+        day = days.get(str(d))
+        if not isinstance(day, dict):
+            continue
+        gk = day.get("gatekeeper") if isinstance(day.get("gatekeeper"), dict) else None
+        if not isinstance(gk, dict):
+            continue
+        present_days += 1
+        if bool(gk.get("allow")):
+            allow_days += 1
+
+    total_days = len(set([str(d) for d in dates]))
+    present_rate = float(present_days) / float(total_days) if total_days else 0.0
+    allow_rate = float(allow_days) / float(present_days) if present_days else 1.0
+    return {"gate_present_rate": float(present_rate), "gate_allow_rate": float(allow_rate)}
+
+
 def _run_inference(*, cfg: Dict[str, Any], out_path: Path, start: str, end: str, universe: str, daily_dir: Path, base_model: str, load_4bit: bool) -> None:
     args: List[str] = [
         sys.executable,
@@ -315,6 +339,8 @@ def _compute_system_metrics(
 
     dates = _iter_dates_inclusive(start, end)
     trading_dates, close_map = _load_stock_close_map(daily_dir, dates)
+
+    gk_stats = _gatekeeper_stats_from_decisions(payload=payload, dates=dates)
 
     strong_news_days = _detect_strong_news_days(daily_dir, dates, float(min_news_abs_impact))
 
@@ -420,7 +446,7 @@ def _compute_system_metrics(
             out = dict(r)
             out.update(
                 {
-                    "system": str(system_key),
+                    "system": system_key,
                     "fr_h1": fr_by_h.get("1"),
                     "fr_h5": fr_by_h.get("5"),
                     "fr_h10": fr_by_h.get("10"),
@@ -492,6 +518,8 @@ def _compute_system_metrics(
         "max_drawdown": float(max_drawdown),
         "analyst_coverage": float(analyst_coverage),
         "planner_allow_rate": allow_rate,
+        "gate_present_rate": float(gk_stats.get("gate_present_rate", 0.0)),
+        "gate_allow_rate": float(gk_stats.get("gate_allow_rate", 0.0)),
         "inputs": {"decision_json": str(decision_path), "sha256": _hash_file(decision_path)},
     }
 
@@ -753,7 +781,7 @@ def main() -> None:
 
     # Write combined per-system metrics.json (aggregate across windows)
     # Since daily.csv is combined, recompute summary from daily.csv to avoid window weighting issues.
-    def _aggregate_metrics_from_daily(system_key: str, daily_csv: Path) -> Dict[str, Any]:
+    def _aggregate_metrics_from_daily(system_key: str, daily_csv: Path, system_dir: Path) -> Dict[str, Any]:
         if not daily_csv.exists():
             return {}
         df = pd.read_csv(daily_csv)
@@ -761,10 +789,10 @@ def main() -> None:
         range_end = str(end)
         if "date" in df.columns and len(df):
             try:
-                dates = pd.to_datetime(df["date"], errors="coerce")
-                if dates.notna().any():
-                    range_start = str(dates.min().date())
-                    range_end = str(dates.max().date())
+                dt = pd.to_datetime(df["date"], errors="coerce")
+                if dt.notna().any():
+                    range_start = str(dt.min().date())
+                    range_end = str(dt.max().date())
             except Exception:
                 pass
         for c in ["turnover", "fee", "pnl_h1", "pnl_h5", "pnl_h10"]:
@@ -786,6 +814,40 @@ def main() -> None:
         analyst_cov_local = float((df.get("expert", "").astype(str) == "analyst").sum()) / float(len(df)) if len(df) else 0.0
         planner_allow_rate_local = float(df.get("planner_allow", False).astype(bool).groupby(df.get("date")).max().mean()) if ("planner_allow" in df.columns and "date" in df.columns and len(df)) else 0.0
 
+        gate_present_days = 0
+        gate_allow_days = 0
+        total_days = 0
+        if "date" in df.columns and len(df):
+            uniq_dates = sorted(set([str(x) for x in df["date"].astype(str).tolist() if str(x).strip()]))
+            total_days = len(uniq_dates)
+            day_status: Dict[str, Dict[str, bool]] = {d: {"present": False, "allow": False} for d in uniq_dates}
+            for fp in sorted(system_dir.glob("decisions_*.json")):
+                try:
+                    payload = json.loads(fp.read_text(encoding="utf-8"))
+                except Exception:
+                    continue
+                days = payload.get("days") if isinstance(payload, dict) else None
+                if not isinstance(days, dict):
+                    continue
+                for d in uniq_dates:
+                    if d not in days:
+                        continue
+                    day = days.get(d)
+                    if not isinstance(day, dict):
+                        continue
+                    gk = day.get("gatekeeper") if isinstance(day.get("gatekeeper"), dict) else None
+                    if not isinstance(gk, dict):
+                        continue
+                    day_status[d]["present"] = True
+                    if bool(gk.get("allow")):
+                        day_status[d]["allow"] = True
+
+            gate_present_days = sum(1 for d in uniq_dates if bool(day_status.get(d, {}).get("present")))
+            gate_allow_days = sum(1 for d in uniq_dates if bool(day_status.get(d, {}).get("present")) and bool(day_status.get(d, {}).get("allow")))
+
+        gate_present_rate_local = float(gate_present_days) / float(total_days) if total_days else 0.0
+        gate_allow_rate_local = float(gate_allow_days) / float(gate_present_days) if gate_present_days else 1.0
+
         return {
             "system": system_key,
             "range": {"start": str(range_start), "end": str(range_end)},
@@ -796,10 +858,16 @@ def main() -> None:
             "fees_total": float(fees_total_local),
             "analyst_coverage": float(analyst_cov_local),
             "planner_allow_rate": float(planner_allow_rate_local),
+            "gate_present_rate": float(gate_present_rate_local),
+            "gate_allow_rate": float(gate_allow_rate_local),
         }
 
-    base_combined_metrics = _aggregate_metrics_from_daily("baseline_fast", run_dir / "baseline_fast" / "daily.csv")
-    gold_combined_metrics = _aggregate_metrics_from_daily("golden_strict", run_dir / "golden_strict" / "daily.csv")
+    base_combined_metrics = _aggregate_metrics_from_daily(
+        "baseline_fast", run_dir / "baseline_fast" / "daily.csv", run_dir / "baseline_fast"
+    )
+    gold_combined_metrics = _aggregate_metrics_from_daily(
+        "golden_strict", run_dir / "golden_strict" / "daily.csv", run_dir / "golden_strict"
+    )
 
     (run_dir / "baseline_fast" / "metrics.json").write_text(
         json.dumps(base_combined_metrics, ensure_ascii=False, indent=2, sort_keys=True),
