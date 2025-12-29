@@ -50,6 +50,7 @@ pydantic>=2.5.0           # 数据验证
 # 可视化与研究
 # ====================
 matplotlib>=3.8.0         # 绑图
+mplfinance>=0.12.10b0     # K线图 (candlestick) + volume
 plotly>=5.18.0            # 交互图表
 jupyter>=1.0.0            # Jupyter Notebook
 ipywidgets>=8.1.0         # Notebook组件
