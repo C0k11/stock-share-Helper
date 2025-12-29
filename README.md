@@ -602,6 +602,28 @@ Phase 16 把“抓取 → signals → 特征 → 交易推理 → 日报 → 纸
 
 Chartist 采用 **OpenAI-compatible API**（支持本地 vLLM/Ollama 或云端），脚本只做 HTTP 调用，解耦显存与推理进程。
 
+#### Ollama（Windows）本地 VLM（OpenAI-compatible）
+
+安装（命令行，可复现）：
+
+```powershell
+winget install -e --id Ollama.Ollama
+```
+
+注意：安装完成后需要 **重启终端**（让 PATH 生效）。
+
+拉取视觉模型：
+
+```powershell
+ollama pull llama3.2-vision
+```
+
+可选：验证 OpenAI-compatible 端点：
+
+```powershell
+powershell -NoProfile -Command "irm http://localhost:11434/v1/models"
+```
+
 环境变量（密钥不入库）：
 
 - `OPENAI_BASE_URL`（示例：`http://127.0.0.1:8000/v1`）
@@ -624,6 +646,18 @@ Dry-run（不需要启动任何 VLM 服务，用于验证 I/O 与输出格式）
 .\venv311\Scripts\python.exe scripts\inference\run_chart_expert.py `
   --asof 2024-01-31 `
   --out-jsonl results\phase21_chartist\chart_signals.jsonl
+```
+
+Ollama 示例（llama3.2-vision）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\inference\run_chart_expert.py `
+  --asof 2024-01-31 `
+  --limit 3 `
+  --model "llama3.2-vision" `
+  --api-base "http://localhost:11434/v1" `
+  --api-key "ollama" `
+  --out-jsonl results\phase21_chartist\chart_signals_real_smoke.jsonl
 ```
 
 ### Phase 16：主要产物
