@@ -30,7 +30,7 @@
 | 18 | MoE Router 修复 + signals_assets 回填 + Take 5 验证（2022-06） | 完成 | 2025-12-26 |
 | 19 | Planner Offline RL / Bandit（19.2 Gatekeeper v2：Showdown + 阈值 Sweep，默认阈值 0.05） | 完成 | 2025-12-27 |
 | 20 | 数据飞轮（Unified Data Harvester）+ 模拟实盘压力测试 | 进行中 | 2025-12 |
-| 21 | 多模态视觉之眼（Visual Alpha） | 规划中 | - |
+| 21 | 多模态视觉之眼（Visual Alpha / Chartist） | 进行中 | 2025-12 |
 | 22 | 宏观指挥官（Macro-Agent Hierarchy） | 规划中 | - |
 | 23 | 深度思考与辩论（System-2 Debate） | 规划中 | - |
 | 24 | 精细化执行（Execution Algorithms） | 规划中 | - |
@@ -575,7 +575,58 @@ Phase 16 把“抓取 → signals → 特征 → 交易推理 → 日报 → 纸
 .\venv311\Scripts\python.exe scripts\product\run_daily_job.py --date 2025-12-14
 ```
 
-主要产物：
+---
+
+## Phase 21：Visual Alpha（Chartist）Quickstart
+
+目标：把 OHLCV 变成“可被视觉模型理解的图像”（Retina），再用 VLM 作为独立专家输出结构化技术面信号。
+
+### 21.1 生成 K 线图（Retina）
+
+默认使用项目标准原始数据源：`data/raw/<TICKER>.parquet`。
+
+```powershell
+.\venv311\Scripts\python.exe scripts\data\generate_charts.py `
+  --asof 2024-01-31 `
+  --tickers AAPL,MSFT,NVDA `
+  --lookback 60 `
+  --out-jsonl data\charts\2024-01-31\charts_base64.jsonl
+```
+
+产物：
+
+- `data/charts/2024-01-31/AAPL.png`（以及其它 ticker）
+- `data/charts/2024-01-31/charts_base64.jsonl`（供 VLM API 调用）
+
+### 21.2 Chartist（图表专家）推理
+
+Chartist 采用 **OpenAI-compatible API**（支持本地 vLLM/Ollama 或云端），脚本只做 HTTP 调用，解耦显存与推理进程。
+
+环境变量（密钥不入库）：
+
+- `OPENAI_BASE_URL`（示例：`http://127.0.0.1:8000/v1`）
+- `OPENAI_API_KEY`（本地可用 `EMPTY`）
+- `VLM_MODEL`（示例：`Qwen2-VL-7B-Instruct`）
+
+Dry-run（不需要启动任何 VLM 服务，用于验证 I/O 与输出格式）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\inference\run_chart_expert.py `
+  --asof 2024-01-31 `
+  --dry-run `
+  --limit 3 `
+  --out-jsonl results\phase21_chartist\chart_signals_dryrun.jsonl
+```
+
+真实推理（需要你已启动本地 VLM 服务）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\inference\run_chart_expert.py `
+  --asof 2024-01-31 `
+  --out-jsonl results\phase21_chartist\chart_signals.jsonl
+```
+
+### Phase 16：主要产物
 
 - `reports/daily/2025-12-14.md`
 - `reports/daily/assets/2025-12-14_nav.png` / `2025-12-14_allocation.png`

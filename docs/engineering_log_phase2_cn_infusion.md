@@ -1,6 +1,6 @@
 # QuantAI 工程日志
  
-> 本文档记录项目从 Phase 1 到 Phase 19 的完整工程历程，包括问题诊断、技术决策、实现方案、产物清单与未来规划。
+> 本文档记录项目从 Phase 1 到 Phase 21 的完整工程历程，包括问题诊断、技术决策、实现方案、产物清单与未来规划。
 >
 > **安全原则**：任何 API Key/Token 不得写入仓库，只允许通过环境变量或本地 `.env.local`（已在 `.gitignore` 忽略）管理。
 
@@ -28,7 +28,9 @@
 | 16 | 日报生成器 + Paper Trading（产品化：Daily Job / Ledger / NAV / Charts） | 完成 | 2025-12-25 |
 | 17 | Planner Dataset / SFT + MRI / Showdown | 完成 | 2025-12-25 |
 | 18 | MoE Router 修复 + signals_assets 回填 + Take 5 验证（2022-06） | 完成 | 2025-12-26 |
-| 19 | Planner Offline RL / Bandit（仓位/allow-deny 的 policy 优化） | 待开始 |  |
+| 19 | Planner Offline RL / Bandit（19.2 Gatekeeper v2：Showdown + 阈值 Sweep，默认阈值 0.05） | 完成 | 2025-12-27 |
+| 20 | 数据飞轮（Unified Data Harvester）+ 模拟实盘压力测试 | 进行中 | 2025-12 |
+| 21 | 多模态视觉之眼（Visual Alpha / Chartist） | 进行中 | 2025-12 |
 
 ---
 
@@ -48,8 +50,81 @@
 - [Phase 13: 黄金运行](#phase-13-黄金运行严格风险--规划器--dpo-analyst-终极2025-年-12-月)
 - [Phase 14: 评测平台](#phase-14-评测平台protocol-freeze--walk-forward--stratified-report)
 - [Phase 15: Q4 Walk-forward Report + Alpha Mining + Surgical DPO](#phase-15-q4-walk-forward-report--alpha-mining--surgical-dpoanalyst-alpha-hunter)
+- [Phase 21: 多模态视觉之眼（Visual Alpha / Chartist）](#phase-21-多模态视觉之眼visual-alpha--chartist)
 
 ---
+
+## Phase 21: 多模态视觉之眼（Visual Alpha / Chartist）
+
+目标：即使没有新闻，系统也能通过 K 线图形（形态/均线/成交量）获得可解释 Alpha。
+
+核心工程策略：
+
+- **Retina**：把 OHLCV 转成图像（K 线 + SMA/BBands/Volume），供视觉模型输入。
+- **Chartist**：用 VLM 作为独立专家，通过 OpenAI-compatible API 接入（vLLM/Ollama/云端），推理脚本只做 HTTP 调用。
+
+### Phase 21.1：Retina（Chart Generator）
+
+脚本：
+
+- `scripts/data/generate_charts.py`
+
+输入（默认）：
+
+- `data/raw/<TICKER>.parquet`
+
+输出：
+
+- `data/charts/YYYY-MM-DD/<TICKER>.png`
+- `data/charts/YYYY-MM-DD/charts_base64.jsonl`
+
+示例：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\data\generate_charts.py `
+  --asof 2024-01-31 `
+  --tickers AAPL,MSFT,NVDA `
+  --lookback 60 `
+  --out-jsonl data\charts\2024-01-31\charts_base64.jsonl
+```
+
+### Phase 21.2：Chartist（图表专家推理）
+
+脚本：
+
+- `scripts/inference/run_chart_expert.py`
+
+Prompt 模板：
+
+- `configs/prompts/chartist_prompt.yaml`
+
+环境变量（密钥不入库）：
+
+- `OPENAI_BASE_URL`（示例：`http://127.0.0.1:8000/v1`）
+- `OPENAI_API_KEY`（本地可用 `EMPTY`）
+- `VLM_MODEL`（示例：`Qwen2-VL-7B-Instruct`）
+
+Dry-run（不需要启动 VLM 服务，用于验证 I/O 与输出格式）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\inference\run_chart_expert.py `
+  --asof 2024-01-31 `
+  --dry-run `
+  --limit 3 `
+  --out-jsonl results\phase21_chartist\chart_signals_dryrun.jsonl
+```
+
+真实推理（需要你已启动本地 VLM 服务）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\inference\run_chart_expert.py `
+  --asof 2024-01-31 `
+  --out-jsonl results\phase21_chartist\chart_signals.jsonl
+```
+
+输出：
+
+- `results/phase21_chartist/chart_signals.jsonl`
 
 ## 1. 目标与范围
 
