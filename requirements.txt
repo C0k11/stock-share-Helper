@@ -42,6 +42,7 @@ sentencepiece>=0.1.99     # 分词器
 # ====================
 # API与Web
 # ====================
+openai>=1.12.0             # OpenAI-compatible client (works with local vLLM/Ollama endpoints)
 fastapi>=0.108.0          # API框架
 uvicorn>=0.25.0           # ASGI服务器
 pydantic>=2.5.0           # 数据验证
