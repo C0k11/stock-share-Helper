@@ -236,7 +236,21 @@ def _gatekeeper_stats_from_decisions(*, payload: Dict[str, Any], dates: List[str
     return {"gate_present_rate": float(present_rate), "gate_allow_rate": float(allow_rate)}
 
 
-def _run_inference(*, cfg: Dict[str, Any], out_path: Path, start: str, end: str, universe: str, daily_dir: Path, base_model: str, load_4bit: bool) -> None:
+def _run_inference(
+    *,
+    cfg: Dict[str, Any],
+    out_path: Path,
+    start: str,
+    end: str,
+    universe: str,
+    daily_dir: Path,
+    base_model: str,
+    load_4bit: bool,
+    macro_file: str = "",
+    chart_signals_file: str = "",
+    chart_confidence: Optional[float] = None,
+    chart_mode: str = "",
+) -> None:
     args: List[str] = [
         sys.executable,
         "scripts/run_trading_inference.py",
@@ -309,6 +323,16 @@ def _run_inference(*, cfg: Dict[str, Any], out_path: Path, start: str, end: str,
         args.extend(["--max-new-tokens", str(cfg.get("max_new_tokens"))])
     if cfg.get("temperature") is not None:
         args.extend(["--temperature", str(cfg.get("temperature"))])
+
+    if str(macro_file or "").strip():
+        args.extend(["--macro-file", str(macro_file).strip()])
+
+    if str(chart_signals_file or "").strip():
+        args.extend(["--chart-signals-file", str(chart_signals_file).strip()])
+        if chart_confidence is not None:
+            args.extend(["--chart-confidence", str(float(chart_confidence))])
+        if str(chart_mode or "").strip():
+            args.extend(["--chart-mode", str(chart_mode).strip()])
 
     subprocess.run(args, check=True)
 
@@ -531,6 +555,28 @@ def main() -> None:
     p.add_argument("--baseline-config", default="configs/baseline_fast_v1.yaml")
     p.add_argument("--golden-config", default="configs/golden_strict_v1.yaml")
     p.add_argument("--run-id", required=True)
+    p.add_argument(
+        "--chart-signals-file",
+        default="",
+        help="Optional Chartist signals jsonl injected into GOLDEN run only (baseline remains control)",
+    )
+    p.add_argument(
+        "--chart-confidence",
+        type=float,
+        default=0.7,
+        help="Chartist confidence threshold for overlay (default: 0.7)",
+    )
+    p.add_argument(
+        "--chart-mode",
+        default="standard",
+        choices=["standard", "conservative"],
+        help="Chartist overlay mode: standard=upgrade+block, conservative=block only",
+    )
+    p.add_argument(
+        "--macro-file",
+        default="",
+        help="Optional macro features CSV (Date,Global_Risk_Score). Passed through to baseline and golden inference.",
+    )
     p.add_argument("--windows", nargs="*", default=[])
     p.add_argument("--override-moe-analyst", default="", help="Override golden inference.moe_analyst adapter path")
     p.add_argument("--override-moe-scalper", default="", help="Override golden inference.moe_scalper adapter path")
@@ -568,6 +614,12 @@ def main() -> None:
         default=None,
         help="Override golden inference.planner_rl_threshold",
     )
+    p.add_argument(
+        "--override-risk-max-drawdown",
+        type=float,
+        default=None,
+        help="Override golden inference.risk_max_drawdown",
+    )
     p.add_argument("--force-rerun", action="store_true", default=False)
     args = p.parse_args()
 
@@ -603,6 +655,10 @@ def main() -> None:
     if args.override_planner_rl_threshold is not None:
         print(f"Overriding golden inference.planner_rl_threshold: {float(args.override_planner_rl_threshold)}")
         gold_infer["planner_rl_threshold"] = float(args.override_planner_rl_threshold)
+
+    if args.override_risk_max_drawdown is not None:
+        print(f"Overriding golden inference.risk_max_drawdown: {float(args.override_risk_max_drawdown)}")
+        gold_infer["risk_max_drawdown"] = float(args.override_risk_max_drawdown)
 
     if str(args.override_moe_any_news or "").strip():
         val = str(args.override_moe_any_news).strip().lower()
@@ -697,10 +753,11 @@ def main() -> None:
                 out_path=base_out,
                 start=str(w_start),
                 end=str(w_end),
-                universe=universe,
+                universe=str(universe),
                 daily_dir=daily_dir,
-                base_model=base_model,
-                load_4bit=load_4bit,
+                base_model=str(base_model),
+                load_4bit=bool(load_4bit),
+                macro_file=str(getattr(args, "macro_file", "") or "").strip(),
             )
 
         if not gold_out.exists():
@@ -709,10 +766,14 @@ def main() -> None:
                 out_path=gold_out,
                 start=str(w_start),
                 end=str(w_end),
-                universe=universe,
+                universe=str(universe),
                 daily_dir=daily_dir,
-                base_model=base_model,
-                load_4bit=load_4bit,
+                base_model=str(base_model),
+                load_4bit=bool(load_4bit),
+                macro_file=str(getattr(args, "macro_file", "") or "").strip(),
+                chart_signals_file=str(getattr(args, "chart_signals_file", "") or "").strip(),
+                chart_confidence=float(getattr(args, "chart_confidence", 0.7) or 0.7),
+                chart_mode=str(getattr(args, "chart_mode", "standard") or "standard").strip(),
             )
 
         planner_allow_dates = _planner_allow_dates_from_moe(gold_out)
