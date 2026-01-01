@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import json
 import re
 import sys
+import csv
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -64,6 +65,87 @@ def _to_float(x: Any) -> float:
         return float(x)
     except Exception:
         return 0.0
+
+
+def _load_macro_risk_map(csv_path: str) -> Dict[str, float]:
+    path_s = str(csv_path or "").strip()
+    if not path_s:
+        return {}
+    p = Path(path_s)
+    if not p.exists():
+        raise SystemExit(f"macro file not found: {p}")
+
+    out: Dict[str, float] = {}
+    with p.open("r", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames:
+            return {}
+
+        field_map = {str(k or "").strip().lower(): str(k) for k in (reader.fieldnames or [])}
+        date_col = field_map.get("date")
+        if date_col is None:
+            raise SystemExit(f"macro file missing Date column: {p}")
+        score_col = field_map.get("global_risk_score")
+        if score_col is None:
+            raise SystemExit(f"macro file missing Global_Risk_Score column: {p}")
+
+        for row in reader:
+            if not isinstance(row, dict):
+                continue
+            d = str(row.get(date_col) or "").strip()
+            if not d:
+                continue
+            d_norm = str(d).split(" ")[0].strip()
+            out[d_norm] = float(_to_float(row.get(score_col)))
+
+    return out
+
+
+def _macro_gear(score: float) -> Tuple[float, str]:
+    s = float(score)
+    if s >= 0.5:
+        return 0.0, "NEUTRAL"
+    if s >= 0.3:
+        return 0.5, "LOW"
+    return 1.0, "DRIVE"
+
+
+def _load_chartist_signals(path: Path) -> Dict[Tuple[str, str], Dict[str, Any]]:
+    out: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    if path is None or (not path.exists()):
+        return out
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            s = (line or "").strip()
+            if not s:
+                continue
+            try:
+                obj = json.loads(s)
+            except Exception:
+                continue
+            if not isinstance(obj, dict):
+                continue
+            ok = obj.get("ok")
+            if ok is False:
+                continue
+            ticker = str(obj.get("ticker") or "").upper().strip()
+            asof = str(obj.get("asof") or obj.get("date") or "").strip()
+            if not ticker or not asof:
+                continue
+            out[(asof, ticker)] = obj
+    return out
+
+
+def _chartist_score(sig: Any, conf: Any, *, threshold: float) -> int:
+    s = str(sig or "").strip().upper()
+    c = _to_float(conf)
+    if c <= float(threshold):
+        return 0
+    if s == "BULLISH":
+        return 1
+    if s == "BEARISH":
+        return -1
+    return 0
 
 
 def _to_pct(x: Any) -> float:
@@ -808,6 +890,28 @@ def main() -> None:
     parser.add_argument("--signals", dest="signals_path", default="", help="Override signals_YYYY-MM-DD.json path for stock news injection")
     parser.add_argument("--min-news-abs-impact", type=float, default=0.5)
     parser.add_argument("--max-news-signals", type=int, default=3)
+    parser.add_argument(
+        "--chart-signals-file",
+        default="",
+        help="Optional Chartist signals jsonl (ticker/asof/signal/confidence) keyed by (date,ticker)",
+    )
+    parser.add_argument(
+        "--chart-confidence",
+        type=float,
+        default=0.7,
+        help="Chartist confidence threshold for overlay (default: 0.7)",
+    )
+    parser.add_argument(
+        "--chart-mode",
+        default="standard",
+        choices=["standard", "conservative"],
+        help="Chartist overlay mode: standard=upgrade+block, conservative=block only",
+    )
+    parser.add_argument(
+        "--macro-file",
+        default="",
+        help="Optional macro features CSV (Date,Global_Risk_Score). Applies Macro Governor to clamp long exposure.",
+    )
     parser.add_argument("--out", default="data/decisions_inference.json")
     parser.add_argument("--output", dest="out", help="Alias of --out")
     parser.add_argument("--moe-mode", action="store_true", default=False)
@@ -843,6 +947,19 @@ def main() -> None:
         date_list = _iter_dates_inclusive(str(args.date_range[0]), str(args.date_range[1]))
     else:
         date_list = [str(args.date)]
+
+    chart_signals_path = str(getattr(args, "chart_signals_file", "") or "").strip()
+    chart_map: Dict[Tuple[str, str], Dict[str, Any]] = {}
+    if chart_signals_path:
+        try:
+            chart_map = _load_chartist_signals(Path(chart_signals_path))
+        except Exception:
+            chart_map = {}
+
+    macro_file = str(getattr(args, "macro_file", "") or "").strip()
+    macro_risk_map: Dict[str, float] = {}
+    if macro_file:
+        macro_risk_map = _load_macro_risk_map(macro_file)
 
     rag = MarketRAG(data_dir=str(daily_dir))
     dd_in = float(getattr(args, "risk_max_drawdown", 0.08) or 0.08)
@@ -913,6 +1030,10 @@ def main() -> None:
     for i, date_str in enumerate(date_list, start=1):
         if bool(args.progress) and total_dates > 1:
             print(f"[date {i}/{total_dates}] {date_str}", flush=True)
+
+        macro_score = float(macro_risk_map.get(str(date_str), 0.0)) if macro_risk_map else 0.0
+        macro_multiplier, macro_gear = _macro_gear(macro_score)
+
         stock_fp = daily_dir / f"stock_features_{date_str}.json"
         etf_fp = daily_dir / f"etf_features_{date_str}.json"
 
@@ -1324,6 +1445,8 @@ def main() -> None:
             final_action = "HOLD"
             final_pos = 0.0
             final_trace: List[str] = []
+            proposed_action = "HOLD"
+            proposed_pos: Any = 0.0
             if parsed is not None:
                 if use_stock:
                     proposed_action = str(parsed.get("decision") or "HOLD")
@@ -1336,20 +1459,61 @@ def main() -> None:
                     label = parsed.get("label") if isinstance(parsed.get("label"), dict) else {}
                     proposed_action = str(label.get("action") or "hold")
                     proposed_pos = label.get("target_position", 0.0)
+
+            chartist_meta: Optional[Dict[str, Any]] = None
+            ensemble_trace: List[str] = []
+            if use_stock and chart_map:
+                sym_u = str(symbol).upper().strip()
+                key = (str(date_str), sym_u)
+                cs = chart_map.get(key)
+                if isinstance(cs, dict):
+                    sig = cs.get("signal")
+                    conf = cs.get("confidence")
+                    thr = float(getattr(args, "chart_confidence", 0.7) or 0.7)
+                    mode = str(getattr(args, "chart_mode", "standard") or "standard").strip().lower()
+                    score = _chartist_score(sig, conf, threshold=float(thr))
+                    chartist_meta = {
+                        "signal": sig,
+                        "confidence": conf,
+                        "reasoning": cs.get("reasoning"),
+                        "score": int(score),
+                    }
+                    decision_up = str(proposed_action).strip().upper()
+                    if score >= 1 and mode == "standard" and decision_up != "BUY":
+                        ensemble_trace.append("[CHARTIST] strong BULLISH => upgrade to BUY")
+                        proposed_action = "BUY"
+                        proposed_pos = 0.5
+                    elif score <= -1 and decision_up == "BUY":
+                        ensemble_trace.append("[CHARTIST] strong BEARISH => block BUY => HOLD")
+                        proposed_action = "HOLD"
+                        proposed_pos = 0.0
+
+            try:
+                final_action, final_pos, final_trace = risk_gate.adjudicate(
+                    feats,
+                    news_signals,
+                    proposed_action,
+                    proposed_pos,
+                )
+                if ensemble_trace:
+                    final_trace = list(ensemble_trace) + list(final_trace)
+            except Exception as e:
+                final_action = str(proposed_action).upper()
                 try:
-                    final_action, final_pos, final_trace = risk_gate.adjudicate(
-                        feats,
-                        news_signals,
-                        proposed_action,
-                        proposed_pos,
-                    )
-                except Exception as e:
-                    final_action = str(proposed_action).upper()
-                    try:
-                        final_pos = float(proposed_pos)
-                    except Exception:
-                        final_pos = 0.0
-                    final_trace = [f"[RISK] adjudicate error: {e}"]
+                    final_pos = float(proposed_pos)
+                except Exception:
+                    final_pos = 0.0
+                final_trace = (list(ensemble_trace) if ensemble_trace else []) + [f"[RISK] adjudicate error: {e}"]
+
+            if macro_file and float(final_pos) > 0.0 and float(macro_multiplier) < 1.0:
+                capped = min(float(final_pos), float(macro_multiplier))
+                if capped < float(final_pos) - 1e-12:
+                    final_pos = float(capped)
+                    if float(final_pos) <= 1e-12:
+                        final_action = "HOLD"
+                    final_trace = list(final_trace) + [
+                        f"[MACRO] gear={macro_gear} risk={macro_score:.4f} => cap={float(macro_multiplier):.4f}"
+                    ]
 
             rec: Dict[str, Any] = {
                 "parsed": parsed,
@@ -1357,6 +1521,9 @@ def main() -> None:
                 "final": {"action": final_action, "target_position": final_pos, "trace": final_trace},
                 "raw": raw_text,
             }
+
+            if chartist_meta is not None:
+                rec["chartist"] = chartist_meta
 
             if bool(args.moe_mode) and use_stock:
                 rec["expert"] = str(expert)
@@ -1370,6 +1537,13 @@ def main() -> None:
                 print(f"{symbol}: PARSE_ERROR {parse_error}")
 
         if multi_day:
+            if macro_file:
+                decisions["macro"] = {
+                    "risk_score": float(macro_score),
+                    "gear": str(macro_gear),
+                    "multiplier": float(macro_multiplier),
+                    "source": str(macro_file),
+                }
             out["days"][str(date_str)] = decisions
         else:
             out = decisions

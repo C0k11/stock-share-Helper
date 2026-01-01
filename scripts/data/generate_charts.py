@@ -87,6 +87,28 @@ def _slice_lookback(df: pd.DataFrame, *, asof: str, lookback: int) -> pd.DataFra
     if pd.isna(asof_dt):
         return pd.DataFrame()
 
+    idx_tz = getattr(getattr(df, "index", None), "tz", None)
+    if idx_tz is not None and getattr(asof_dt, "tzinfo", None) is None:
+        try:
+            asof_dt = asof_dt.tz_localize(idx_tz)
+        except Exception:
+            pass
+    elif idx_tz is None and getattr(asof_dt, "tzinfo", None) is not None:
+        try:
+            asof_dt = asof_dt.tz_convert(None)
+        except Exception:
+            try:
+                asof_dt = asof_dt.tz_localize(None)
+            except Exception:
+                pass
+    if idx_tz is not None and getattr(asof_dt, "tzinfo", None) is not None:
+        try:
+            df = df.copy()
+            df.index = df.index.tz_convert(None)
+            asof_dt = asof_dt.tz_convert(None)
+        except Exception:
+            pass
+
     df2 = df[df.index <= asof_dt].copy()
     if df2.empty:
         return pd.DataFrame()
@@ -102,6 +124,28 @@ def _slice_history_for_indicators(df: pd.DataFrame, *, asof: str, bars: int) -> 
     asof_dt = pd.to_datetime(str(asof), errors="coerce")
     if pd.isna(asof_dt):
         return pd.DataFrame()
+
+    idx_tz = getattr(getattr(df, "index", None), "tz", None)
+    if idx_tz is not None and getattr(asof_dt, "tzinfo", None) is None:
+        try:
+            asof_dt = asof_dt.tz_localize(idx_tz)
+        except Exception:
+            pass
+    elif idx_tz is None and getattr(asof_dt, "tzinfo", None) is not None:
+        try:
+            asof_dt = asof_dt.tz_convert(None)
+        except Exception:
+            try:
+                asof_dt = asof_dt.tz_localize(None)
+            except Exception:
+                pass
+    if idx_tz is not None and getattr(asof_dt, "tzinfo", None) is not None:
+        try:
+            df = df.copy()
+            df.index = df.index.tz_convert(None)
+            asof_dt = asof_dt.tz_convert(None)
+        except Exception:
+            pass
 
     df2 = df[df.index <= asof_dt].copy()
     if df2.empty:
@@ -274,7 +318,9 @@ def main() -> None:
     ap.add_argument("--ohlcv-csv", default="", help="Optional OHLCV csv (must include ticker/symbol column)")
     ap.add_argument("--out-dir", default="data/charts", help="Root output dir")
 
-    ap.add_argument("--asof", required=True, help="As-of date YYYY-MM-DD")
+    ap.add_argument("--asof", default="", help="As-of date YYYY-MM-DD")
+    ap.add_argument("--start-date", default="", help="Batch mode start date YYYY-MM-DD")
+    ap.add_argument("--end-date", default="", help="Batch mode end date YYYY-MM-DD")
     ap.add_argument("--lookback", type=int, default=60, help="Lookback bars (trading days)")
 
     ap.add_argument("--include-sma", action="store_true", default=True)
@@ -288,12 +334,20 @@ def main() -> None:
 
     args = ap.parse_args()
 
+    asof = str(getattr(args, "asof", "") or "").strip()
+    start_date = str(getattr(args, "start_date", "") or "").strip()
+    end_date = str(getattr(args, "end_date", "") or "").strip()
+    if (start_date or end_date) and (not (start_date and end_date)):
+        raise SystemExit("Batch mode requires both --start-date and --end-date")
+    if (not start_date) and (not end_date) and (not asof):
+        raise SystemExit("Missing --asof (or provide --start-date/--end-date for batch mode)")
+
     _ensure_mpl_backend()
 
     tickers = _load_tickers(tickers_file=str(args.tickers_file), tickers_csv=str(args.tickers))
 
     raw_dir = Path(str(args.raw_dir))
-    out_root = Path(str(args.out_dir)) / str(args.asof)
+    out_dir = Path(str(args.out_dir))
 
     df_csv: pd.DataFrame = pd.DataFrame()
     if str(args.ohlcv_csv or "").strip():
@@ -304,6 +358,14 @@ def main() -> None:
     ok = 0
     failed = 0
     skipped = 0
+
+    def _iter_asof_dates() -> List[str]:
+        if start_date and end_date:
+            dr = pd.date_range(start=pd.to_datetime(start_date), end=pd.to_datetime(end_date), freq="D")
+            return [str(d.date()) for d in dr]
+        return [asof]
+
+    asof_dates = _iter_asof_dates()
 
     for t in tickers:
         df_raw: Optional[pd.DataFrame] = None
@@ -327,45 +389,53 @@ def main() -> None:
         df = _normalize_ohlcv(df_raw)
         lookback = int(args.lookback)
         hist_bars = max(lookback, 220)
-        df_hist = _slice_history_for_indicators(df, asof=str(args.asof), bars=hist_bars)
-        df60 = df_hist.tail(lookback).copy() if (df_hist is not None and not df_hist.empty) else pd.DataFrame()
 
-        if df60.empty or len(df60) < max(10, lookback // 3):
+        any_ok_for_ticker = False
+        for d in asof_dates:
+            df_hist = _slice_history_for_indicators(df, asof=str(d), bars=hist_bars)
+            df60 = df_hist.tail(lookback).copy() if (df_hist is not None and not df_hist.empty) else pd.DataFrame()
+
+            if df60.empty or len(df60) < max(10, lookback // 3):
+                skipped += 1
+                continue
+
+            overlays_full = _compute_overlays(df_hist)
+            overlays_aligned = {k: v.reindex(df60.index) for k, v in overlays_full.items()}
+
+            start_d, end_d = _iter_dates(df60)
+            title = f"{t} {start_d}..{end_d}"
+
+            out_root = out_dir / str(d)
+            out_png = out_root / f"{t}.png"
+            if _plot_one(
+                df=df60,
+                overlays=overlays_aligned,
+                ticker=t,
+                out_png=out_png,
+                title=title,
+                include_bbands=bool(args.include_bbands),
+                include_sma=bool(args.include_sma),
+                verbose=bool(args.verbose),
+            ):
+                ok += 1
+                any_ok_for_ticker = True
+                if str(args.out_jsonl or "").strip():
+                    rows_jsonl.append(
+                        {
+                            "ticker": t,
+                            "asof": str(d),
+                            "lookback": int(args.lookback),
+                            "start": start_d,
+                            "end": end_d,
+                            "png_path": str(out_png.as_posix()),
+                            "image_base64": _png_to_b64(out_png),
+                        }
+                    )
+            else:
+                failed += 1
+
+        if not any_ok_for_ticker and (not asof_dates):
             skipped += 1
-            continue
-
-        overlays_full = _compute_overlays(df_hist)
-        overlays_aligned = {k: v.reindex(df60.index) for k, v in overlays_full.items()}
-
-        start_d, end_d = _iter_dates(df60)
-        title = f"{t} {start_d}..{end_d}"
-
-        out_png = out_root / f"{t}.png"
-        if _plot_one(
-            df=df60,
-            overlays=overlays_aligned,
-            ticker=t,
-            out_png=out_png,
-            title=title,
-            include_bbands=bool(args.include_bbands),
-            include_sma=bool(args.include_sma),
-            verbose=bool(args.verbose),
-        ):
-            ok += 1
-            if str(args.out_jsonl or "").strip():
-                rows_jsonl.append(
-                    {
-                        "ticker": t,
-                        "asof": str(args.asof),
-                        "lookback": int(args.lookback),
-                        "start": start_d,
-                        "end": end_d,
-                        "png_path": str(out_png.as_posix()),
-                        "image_base64": _png_to_b64(out_png),
-                    }
-                )
-        else:
-            failed += 1
 
     if str(args.out_jsonl or "").strip():
         out_jsonl = Path(str(args.out_jsonl))
@@ -377,13 +447,16 @@ def main() -> None:
     print(
         json.dumps(
             {
-                "asof": str(args.asof),
+                "asof": str(asof),
+                "start_date": str(start_date),
+                "end_date": str(end_date),
+                "asof_dates": int(len(asof_dates)),
                 "lookback": int(args.lookback),
                 "tickers": len(tickers),
                 "ok": int(ok),
                 "failed": int(failed),
                 "skipped": int(skipped),
-                "out_dir": str(out_root.as_posix()),
+                "out_dir": str(out_dir.as_posix()),
                 "out_jsonl": str(args.out_jsonl or ""),
             },
             ensure_ascii=False,

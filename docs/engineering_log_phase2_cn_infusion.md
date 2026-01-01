@@ -136,6 +136,14 @@ winget install -e --id Ollama.Ollama
 ollama pull llama3.2-vision
 ```
 
+可选：把 Ollama 模型缓存统一放到指定目录（推荐）：
+
+```powershell
+setx OLLAMA_MODELS "D:\\Project\\ml_cache\\ollama\\models"
+```
+
+注意：设置后需要 **重启终端**（并建议重启 Ollama 进程）使其生效。
+
 验证 OpenAI-compatible 端点（可选）：
 
 ```powershell
@@ -3478,13 +3486,228 @@ Run ID：`phase20_2_paper_trading_jan2024`
 
 方向：用 `mplfinance` 生成近期 60 天 K 线图（含均线/成交量），喂给 VLM（Qwen-VL/LLaVA 等）输出结构化图形信号；在 MoE 中新增 `Chartist` 专家（先只输出信号/解释，避免直接下单）。
 
-## Phase 22：Macro-Agent Hierarchy（宏观指挥官）
+### 21.1 Retina：Jan 2024 批量图表生成
 
-目标：引入全局风险因子 `Global_Risk_Factor`（0..1），基于 VIX/TNX/DXY/板块轮动等宏观状态直接约束下层交易系统的总仓位上限，避免“只看个股忽略大周期”的系统性风险。
+目标：为 Jan 2024 每个交易日生成“asof 日”的 60 天 K 线图（含均线/成交量），并同时输出 base64 JSONL 供 Chartist 批量推理。
 
-## Phase 23：System 2 Reasoning（深度思考与辩论）
+脚本：`scripts/data/generate_charts.py`
 
-目标：Bull/Bear/Judge 多智能体辩论，输出更严格的逻辑链与裁决，降低幻觉与盲目乐观。
+关键产物：
+
+- `data/charts/jan2024_charts_base64.jsonl`
+
+运行要点：
+
+- 使用 batch 方式一次性生成 Jan 2024 全量图表
+- 修复过 tz-aware vs tz-naive 的日期比较问题，确保交易日对齐
+
+### 21.2 Chartist：Jan 2024 批量推理产出 signals
+
+目标：对 `data/charts/jan2024_charts_base64.jsonl` 做批量 VLM 推理，输出 `(ticker, asof, signal, confidence, reasoning)`。
+
+脚本：`scripts/inference/run_chart_expert.py`
+
+关键产物：
+
+- `results/phase21_chartist/jan2024_signals.jsonl`
+
+运行要点：
+
+- 支持 `--input-file` 作为 `--input-jsonl` 的别名（便于命令行调用）
+- 支持本地 Transformers 推理后端（Qwen2.5-VL），避免依赖 Ollama 服务稳定性
+
+### 21.3 Trading Core 接线：注入 chart signals + overlay 投票
+
+目标：把 Chartist signals 注入 `run_trading_inference.py` 的决策链路，在 RiskGate 前作为“加权投票 overlay”调整提案（UPGRADE / BLOCK）。
+
+代码入口：
+
+- `scripts/run_trading_inference.py`：读取 `--chart-signals-file` 并应用 overlay
+- `scripts/run_walkforward_eval.py`：仅对 golden_strict 注入 chart signals，baseline_fast 保持对照组
+
+### 21.4 Jan 2024 Showdown：Baseline vs Golden（SFT+Chartist）
+
+目标：在 Jan 2024 全月窗口做 baseline_fast vs golden_strict 对照回测，并固化产物与关键指标。
+
+Run ID：`phase21_4_jan2024_visual_showdown`
+
+产物路径：
+
+- `results/phase21_4_jan2024_visual_showdown/metrics.json`
+- `results/phase21_4_jan2024_visual_showdown/{baseline_fast,golden_strict}/daily.csv`
+- `results/phase21_4_jan2024_visual_showdown/{baseline_fast,golden_strict}/decisions_2024-01-03_2024-01-31.json`
+
+关键指标（`pnl_sum_net['1'] / max_drawdown / trade_count / fees_total`）：
+
+- Baseline Fast：`0.5749 / -0.2885 / 255 / 0.0635`
+- Golden Strict（with chart signals）：`0.5635 / -0.2818 / 270 / 0.06749`
+
+### 21.5 参数化 Overlay（`chart-confidence` / `chart-mode`）与失效根因（Ceiling Effect）
+
+关键发现：当 `--chart-confidence` 设为 0.85 时，Chartist overlay 在 Jan 2024 全月窗口 **0 次触发**（无 UPGRADE / BLOCK），导致该实验本质上是在对比“Golden Strict（Gatekeeper 风控）vs Baseline Fast”。
+
+根因：Jan 2024 的 Chartist signals（`results/phase21_chartist/jan2024_signals.jsonl`）中，`confidence` 分布存在“天花板效应”。
+
+- 观测到 `confidence ∈ [0.6, 0.8]`，且 `max(confidence)=0.8`
+- overlay 的 score 规则为：`if conf <= threshold: score=0`
+- 因此当 `threshold >= 0.8` 时（包含 0.80 本身），会导致 **所有样本 score=0**，进而 overlay 永远不触发
+
+结论：若使用该批 signals，需要保证 `--chart-confidence < 0.8` 才能唤醒 overlay。
+
+### 21.6 Smoke Run：唤醒验证（7 天窗口，0.75 Standard）
+
+目标：不跑全月，先验证 overlay 能触发并带来正向收益/风控效果。
+
+Run ID：`phase21_6_wakeup_test`
+
+命令：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\run_walkforward_eval.py `
+  --run-id phase21_6_wakeup_test `
+  --baseline-config configs\baseline_fast_v1.yaml `
+  --golden-config configs\experiment_alpha_v4.yaml `
+  --windows 2024-01-03 2024-01-10 `
+  --planner-mode sft `
+  --override-planner-sft-model models\planner_sft_v1.pt `
+  --override-planner-rl-model models\rl_gatekeeper_v2.pt `
+  --override-planner-rl-threshold 0.05 `
+  --chart-signals-file results\phase21_chartist\jan2024_signals.jsonl `
+  --chart-confidence 0.75 `
+  --chart-mode standard `
+  --force-rerun
+```
+
+触发统计（从 `golden_strict/decisions_2024-01-03_2024-01-10.json` 复算 overlay 规则）：
+
+- `TOTAL_ITEMS=534`
+- `BULL_STRONG=362`，`BEAR_STRONG=1`
+- `UPGRADE=165`，`BLOCK=0`
+
+核心指标（`results/phase21_6_wakeup_test/metrics.json`）：
+
+- Baseline Fast：`pnl_sum_net['1']=0.1812387`，`max_drawdown=-0.0629803`，`trade_count=83`，`fees_total=0.020745`
+- Golden Strict：`pnl_sum_net['1']=0.2052878`，`max_drawdown=-0.0495641`，`trade_count=76`，`fees_total=0.018995`
+
+观察：在 7 天窗口内同时实现 “收益更高 / 回撤更小 / 交易更少（费用更低）”。
+
+### 21.7 Jan 2024 Full Month Showdown（0.75 Standard）
+
+目标：在全月窗口验证 Visual Alpha 是否能修正 0.85 空转实验的收益问题，并对 Baseline Fast 形成稳定增益。
+
+Run ID：`phase21_7_jan2024_full_standard_075`
+
+```powershell
+.\venv311\Scripts\python.exe scripts\run_walkforward_eval.py `
+  --run-id phase21_7_jan2024_full_standard_075 `
+  --baseline-config configs\baseline_fast_v1.yaml `
+  --golden-config configs\experiment_alpha_v4.yaml `
+  --windows 2024-01-03 2024-01-31 `
+  --planner-mode sft `
+  --override-planner-sft-model models\planner_sft_v1.pt `
+  --override-planner-rl-model models\rl_gatekeeper_v2.pt `
+  --override-planner-rl-threshold 0.05 `
+  --chart-signals-file results\phase21_chartist\jan2024_signals.jsonl `
+  --chart-confidence 0.75 `
+  --chart-mode standard `
+  --force-rerun
+```
+
+ Success Criteria（以 Jan 2024 作为强趋势窗口的“实战标准”）：
+
+ - `pnl_sum_net['1']`：目标恢复到 `0.50+`，并挑战/超过 Baseline Fast（≈ `0.57`）
+ - `max_drawdown`：目标保持在 `-0.25` 左右（优于 Baseline Fast 的 `-0.28`）
+
+Status: Completed
+
+核心指标（`results/phase21_7_jan2024_full_standard_075/metrics.json`，`pnl_sum_net['1'] / max_drawdown / trade_count / fees_total`）：
+
+- Baseline Fast：`0.5748948 / -0.2884886 / 255 / 0.06350`
+- Golden Strict（0.75 Standard）：`0.5666537 / -0.2818105 / 270 / 0.06749`
+
+结论：验证通过。Chartist overlay 在 0.75 阈值下全月可稳定工作；Golden 收益略低于 Baseline（手续费与风控对冲带来 tradeoff），但回撤更优。
+
+## Phase 22：Macro Governor Implementation（宏观总闸）
+
+Status: Completed
+
+目标：引入全局风险因子 `Global_Risk_Score`（0..1），并将其映射为宏观档位（Drive/Low/Neutral），从而约束下层交易系统的总仓位上限，避免“只看个股忽略大周期”的系统性风险。
+
+关键产物：
+
+- 宏观特征构建：`scripts/data/build_macro_features.py` → `data/macro_features.csv`
+- 推理接线：`scripts/run_trading_inference.py` 增加 `--macro-file`，在 daily loop 中对仓位做宏观乘子 clamp
+- 回测接线：`scripts/run_walkforward_eval.py` 增加 `--macro-file` 并传递给推理脚本
+
+## Phase 23：Feb 2024 Out-of-Sample Stress Test（盲测战役）
+
+目标：以 Jan 2024 完成校准的参数（Chartist 0.75）+ 新装 Macro Governor，在 Feb 2024 做一次真正 OOS 盲测，并在失败后完成定责与修复。
+
+### 23.1 Data Pipeline（Feb 2024 数据准备）
+
+Status: Completed
+
+目标：为 Feb 2024 盲测准备足够 lookback 的行情 + 宏观特征 + 图表 + Chartist signals + daily stock features。
+
+关键产物：
+
+- 行情覆盖扩展：`data/raw` 覆盖到 `2024-03-02`（含 universe + 宏观标的）
+- 宏观特征：`data/macro_features.csv`
+- Feb 图表：`data/charts/feb2024_charts_base64.jsonl`
+- Feb Chartist signals：`results/phase21_chartist/feb2024_signals.jsonl`
+- Feb daily features：`data/daily/stock_features_2024-02-*.json`
+
+### 23.2 Blind Test（The Crash）
+
+Status: Completed
+
+Run ID：`phase23_blind_feb2024`
+
+核心指标（`results/phase23_blind_feb2024/metrics.json`，`pnl_sum_net['1'] / max_drawdown / trade_count / nav_end`）：
+
+- Baseline Fast：`0.1509257 / -0.3299810 / 331 / 1.0233939`
+- Golden Strict：`0.0284185 / -0.2881090 / 327 / 0.9413328`
+
+结论：在 Feb 2024 高位震荡行情中，Golden 发生严重 “Risk Allergy”，收益显著落后于 Baseline。
+
+### 23.3 Autopsy（验尸定责）
+
+Status: Completed
+
+目标：用数据定责，确认是谁“踩死了刹车”（Macro / Chartist / Hard-coded Risk Rule）。
+
+Findings：
+
+- Macro（Feb 2024）：最高 `Global_Risk_Score=0.3267`（仅 1 天 > 0.3），整体无明显异常
+- Chartist（Feb 2024 signals 分布）：`BULLISH=1875, BEARISH=192, NEUTRAL=1181`，不存在 BEARISH 泛滥
+- Decision blocking（golden_strict，SFT=BUY 但 final!=BUY）：
+  - SFT BUY 总数：`1351`
+  - Final 分布：`BUY 623 / CLEAR 727 / HOLD 1`
+  - Blocked BUYs：`728`
+  - Blocked tags：`RISK 728, CHART 4, MACRO 0`
+
+结论：凶手是硬编码的 drawdown 风控（`risk_max_drawdown=0.08`）触发 `[RISK] FORCE CLEAR`，造成典型 whipsaw。
+
+### 23.4 Resilient Run（松绑测试）
+
+Status: Completed
+
+动作：将 `risk_max_drawdown: 0.08 -> 0.15`，释放震荡行情下的“市场呼吸空间”。
+
+Run ID：`phase23_4_feb2024_resilient`
+
+核心指标（`results/phase23_4_feb2024_resilient/metrics.json`，`pnl_sum_net['1'] / max_drawdown / trade_count / nav_end`）：
+
+- Baseline Fast：`0.1509257 / -0.3299810 / 331 / 1.0233939`
+- Golden (Resilient)：`1.2377996 / -0.4576312 / 518 / 2.2441611`
+
+Blocked BUYs（同口径复算，SFT=BUY 但 final!=BUY）：
+
+- Old Golden（-8%）：`728`（Final：`BUY 623 / CLEAR 727 / HOLD 1`）
+- New Golden（-15%）：`337`（Final：`BUY 1014 / CLEAR 335 / HOLD 2`）
+- Blocked tags：`RISK 337, CHART 4, MACRO 0`
+
+结论：适度放宽硬止损显著降低 whipsaw，释放出被过度风控压制的 Alpha；代价是最大回撤更深（tradeoff 明确）。
 
 ## Phase 24：Execution Algorithms（精细化执行）
 

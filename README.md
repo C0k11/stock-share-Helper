@@ -618,6 +618,14 @@ winget install -e --id Ollama.Ollama
 ollama pull llama3.2-vision
 ```
 
+可选：把 Ollama 模型缓存统一放到指定目录（推荐）：
+
+```powershell
+setx OLLAMA_MODELS "D:\\Project\\ml_cache\\ollama\\models"
+```
+
+注意：设置后需要 **重启终端**（并建议重启 Ollama 进程）使其生效。
+
 可选：验证 OpenAI-compatible 端点：
 
 ```powershell
@@ -658,6 +666,73 @@ Ollama 示例（llama3.2-vision）：
   --api-base "http://localhost:11434/v1" `
   --api-key "ollama" `
   --out-jsonl results\phase21_chartist\chart_signals_real_smoke.jsonl
+```
+
+### 21.3 Chartist Overlay（接入交易推理 / Walk-forward Eval）
+
+当你已经生成了 Jan 2024 的 chartist signals（示例：`results\phase21_chartist\jan2024_signals.jsonl`），可以通过 `run_walkforward_eval.py` 将其注入 Golden Strict（Baseline 作为对照不注入）。
+
+关键参数：
+
+- `--chart-signals-file <jsonl>`：Chartist signals（`ticker/asof/signal/confidence`）
+- `--chart-confidence <float>`：置信度阈值
+- `--chart-mode {standard,conservative}`：
+  - `standard`：允许 UPGRADE + BLOCK
+  - `conservative`：仅 BLOCK
+
+阈值注意事项（Ceiling Effect）：
+
+- 在 Jan 2024 的一批 signals 中观测到 `confidence` 上限为 `0.8`
+- overlay 打分规则为 `if conf <= threshold: score=0`
+- 因此当 `--chart-confidence >= 0.8`（含 0.80）时可能导致 overlay **0 次触发**
+
+#### Phase 21.6：Smoke Run（wakeup_test, 7 天窗口）
+
+目标：先验证 overlay “确实触发”并观察收益/回撤趋势。
+
+```powershell
+.\venv311\Scripts\python.exe scripts\run_walkforward_eval.py `
+  --run-id phase21_6_wakeup_test `
+  --baseline-config configs\baseline_fast_v1.yaml `
+  --golden-config configs\experiment_alpha_v4.yaml `
+  --windows 2024-01-03 2024-01-10 `
+  --planner-mode sft `
+  --override-planner-sft-model models\planner_sft_v1.pt `
+  --override-planner-rl-model models\rl_gatekeeper_v2.pt `
+  --override-planner-rl-threshold 0.05 `
+  --chart-signals-file results\phase21_chartist\jan2024_signals.jsonl `
+  --chart-confidence 0.75 `
+  --chart-mode standard `
+  --force-rerun
+```
+
+输出：
+
+- `results\phase21_6_wakeup_test\metrics.json`
+- `results\phase21_6_wakeup_test\golden_strict\decisions_2024-01-03_2024-01-10.json`
+
+该窗口观测（用于 sanity check）：
+
+- overlay 触发：`UPGRADE=165`，`BLOCK=0`
+- `pnl_sum_net['1']`：Golden `0.2053` vs Baseline `0.1812`
+- `max_drawdown`：Golden `-0.0496` vs Baseline `-0.0630`
+
+#### Phase 21.7：Jan 2024 Full Month（0.75 Standard）
+
+```powershell
+.\venv311\Scripts\python.exe scripts\run_walkforward_eval.py `
+  --run-id phase21_7_jan2024_full_standard_075 `
+  --baseline-config configs\baseline_fast_v1.yaml `
+  --golden-config configs\experiment_alpha_v4.yaml `
+  --windows 2024-01-03 2024-01-31 `
+  --planner-mode sft `
+  --override-planner-sft-model models\planner_sft_v1.pt `
+  --override-planner-rl-model models\rl_gatekeeper_v2.pt `
+  --override-planner-rl-threshold 0.05 `
+  --chart-signals-file results\phase21_chartist\jan2024_signals.jsonl `
+  --chart-confidence 0.75 `
+  --chart-mode standard `
+  --force-rerun
 ```
 
 ### Phase 16：主要产物
