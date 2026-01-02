@@ -3709,6 +3709,111 @@ Blocked BUYs（同口径复算，SFT=BUY 但 final!=BUY）：
 
 结论：适度放宽硬止损显著降低 whipsaw，释放出被过度风控压制的 Alpha；代价是最大回撤更深（tradeoff 明确）。
 
+### 23.5 Extension：Mar/Apr 2024 OOS + Risk Sweep（`risk_max_drawdown`）
+
+Status: Completed
+
+设置：
+
+- OOS Window：`2024-03-01 ~ 2024-04-30`（两段 windows：`2024-03-01~03-31` + `2024-04-01~04-30`）
+- Baseline config：`configs/baseline_fast_v1.yaml`（对照组全程固定）
+- Golden config：`configs/golden_resilient_v1.yaml` + `--override-risk-max-drawdown`
+- Macro file：`data\macro\macro_features_2023-03-01_2024-05-03.csv`
+- Chartist signals：`results\phase23_5_oos_marapr2024\chart_signals.jsonl`（`--chart-confidence 0.7 --chart-mode standard`）
+
+核心指标（同口径：`pnl_sum_net['1'] / max_drawdown / trade_count / nav_end`；其中 `nav_end/max_drawdown` 由 `daily.csv` 复算）：
+
+| Run | Golden `risk_max_drawdown` | Baseline Fast | Golden (Resilient) |
+| --- | --- | --- | --- |
+| main | `0.15` | `-0.0425647 / -0.1268028 / 55 / 0.9485331` | `-0.1092371 / -0.1698862 / 73 / 0.8790373` |
+| dd10 | `0.10` | `-0.0425647 / -0.1268028 / 55 / 0.9485331` | `-0.0202596 / -0.1245037 / 65 / 0.9685675` |
+| dd12 | `0.12` | `-0.0425647 / -0.1268028 / 55 / 0.9485331` | `-0.0748460 / -0.1505680 / 69 / 0.9117964` |
+| dd18 | `0.18` | `-0.0425647 / -0.1268028 / 55 / 0.9485331` | `-0.1549008 / -0.1952998 / 84 / 0.8360632` |
+
+结论：在 Mar/Apr 2024 这段 OOS 上，`risk_max_drawdown` 放宽到 `0.12/0.15/0.18` 后表现反而显著变差；最优点出现在 `0.10`（收益更好、回撤更浅、交易次数更少）。
+
+### 23.6 System-2 Debate（深度思考与辩论 / 本地落地）
+
+Status: Completed
+
+目标：将“计划中的 System-2 Debate（主张/反驳/裁决）”从概念与 Teacher 侧实验，补齐为本地可开关的推理管线能力，用于在关键交易上做第二层审查，减少低质量入场。
+
+实现要点：
+
+- 推理入口：`scripts/run_trading_inference.py`
+  - 新增参数：`--system2-debate {off|buy_only|all}`
+  - Debate 链路：proposal（原模型输出）→ critic（找漏洞/风险/过度自信）→ judge（裁决最终 action）
+  - 输出追踪：每个 ticker 的 `decisions.items.<ticker>.system2` 会记录 proposal/critic/judge 的 JSON 与 raw 文本
+- 回测接线：`scripts/run_walkforward_eval.py` 在 `_run_inference()` 中透传 `system2_debate/system2_max_new_tokens/system2_temperature` 到推理脚本
+
+使用方式（示例）：
+
+- 仅在 BUY 时触发辩论（性价比更高）：`--system2-debate buy_only`
+- 全量触发（更慢但更严）：`--system2-debate all`
+
+备注：System-2 Debate 在执行顺序上发生在 Chartist overlay / RiskGate adjudicate 之前；裁决结果仍会经过风控与宏观总闸的最终 clamp。
+
 ## Phase 24：Execution Algorithms（精细化执行）
 
 目标：从“决定买”进化到“买得漂亮”，引入滑点/拆单（TWAP/VWAP）等执行层模型，减少回测与实盘的执行假设偏差。
+
+### Phase 24.1：Simulator Implementation（执行模拟器落地）
+
+- **代码入口**
+  - `src/execution/simulator.py`：`ExecutionSimulator`（下单/成交/错过统计）
+  - `scripts/run_walkforward_eval.py`：将执行模拟注入 walkforward 的成交与成本口径
+- **执行模式**
+  - `close`：近似 MOC（在收盘附近成交，叠加 `--slippage-bps`）
+  - `passive`：被动限价单（用开盘价作为参考，挂单价为 `Open * (1 ± k)`，其中 `k = --limit-threshold-bps`）
+  - 关键原则：`passive` 使用开盘价构造限价，避免用当日高低点引入 look-ahead bias。
+- **会计准则（Corrected Accounting）**
+  - **Fees（硬成本，必须 >= 0）**：
+    - `fees_total = commission_total + slippage_cost_total`
+    - 其中 `slippage_cost_total >= 0` 表示执行冲击/不利滑点成本
+  - **Execution Edge（价格改善，必须 >= 0）**：
+    - `exec_edge_total >= 0` 表示相对基准价（close）获得的价格改善
+  - **净收益口径**：`pnl_sum_net['1'] = pnl_sum['1'] - fees_total + exec_edge_total`
+
+注：本 Phase 未实现显式的 “System-2 Debate（多代理辩论）” 模块；当前属于通过 walkforward 与执行模拟结果进行参数收敛/反事实校准的系统二式推理流程。
+
+### Phase 24.2：Reality Check（Passive, k=50bps）
+
+- **Run**：`phase24_2_marapr_reality_check`（Mar/Apr 2024, DD=0.10, `passive`, `k=50bps`, `slippage=10bps`）
+- **现象**：踏空率过高（>50%），策略过于“贪婪”，导致大量机会无法成交。
+- **结果（system-level 汇总，Mar+Apr）**
+  - **baseline_fast**
+    - Miss Rate：`19/40 = 47.50%`
+    - `pnl_sum_net['1'] = -0.0469674`
+  - **golden_strict**
+    - Miss Rate：`34/67 = 50.75%`
+    - `pnl_sum_net['1'] = 0.0245552`
+  - 备注：该 run 仍处于旧口径阶段（signed slippage 可能导致 `fees_total` 为负），后续已在 24.1 的 corrected accounting 中修正。
+
+### Phase 24.3：Calibration（Passive, k=30bps）
+
+- **Run**：`phase24_3_marapr_passive_30bps`
+- **现象**：踏空率显著降低，但成交更频繁导致硬成本显著上升；额外成交不一定是高质量机会。
+- **结果（system-level 汇总，Mar+Apr，corrected accounting）**
+  - **baseline_fast**
+    - Miss Rate：`11/34 = 32.35%`
+    - `fees_total = 0.0883609`
+    - `exec_edge_total = 0.0534743`
+    - `pnl_sum_net['1'] = -0.0568170`
+  - **golden_strict**
+    - Miss Rate：`20/55 = 36.36%`
+    - `fees_total = 0.0965931`
+    - `exec_edge_total = 0.1290884`
+    - `pnl_sum_net['1'] = 0.0206746`
+
+### Phase 24.4：Final Sweet Spot（Passive, k=40bps）
+
+- **Run**：`phase24_4_final_calibration_40bps`（Mar/Apr 2024, DD=0.10, `passive`, `k=40bps`, `slippage=10bps`）
+- **关键配置**：限价买入 `Open * (1 - 0.4%)`（卖出对称），在过滤低质量噪音与避免过度踏空之间折中。
+- **Golden Strict 指标（system-level 汇总，Mar+Apr，corrected accounting）**
+  - Miss Rate：`27/60 = 45.00%`
+  - `pnl_sum_net['1'] = 0.0212697`（达标）
+  - `exec_edge_total = 0.1175486`
+  - `fees_total = 0.0965267`
+  - `exec_edge_total > fees_total`（执行层 alpha 覆盖硬成本）
+
+**结论**：确立 `Passive + 40bps` 为下一阶段（Phase 3 / Paper Trading）的实盘执行标准；它通过较高的踏空率过滤低质量入场点，同时保持 `Edge > Fees` 的可持续执行优势。

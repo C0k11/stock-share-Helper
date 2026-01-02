@@ -54,6 +54,38 @@ Response Format (STRICT JSON ONLY, NO MARKDOWN, NO PROSE):
 """
 
 
+SYSTEM2_CRITIC_PROMPT_STOCK_JSON = """You are a strict trading decision critic.
+You will be given a proposed decision and the market inputs.
+Your job is to find flaws, missing risks, and overconfidence.
+
+Response Format (STRICT JSON ONLY, NO MARKDOWN, NO PROSE):
+{
+  "accept": true | false,
+  "suggested_decision": "BUY" | "SELL" | "HOLD" | "CLEAR",
+  "reasons": ["<short>", "<short>", "<short>"]
+}
+
+Rules:
+- reasons must contain exactly 3 short strings (<= 25 words each)
+- suggested_decision must be one of BUY/SELL/HOLD/CLEAR
+"""
+
+
+SYSTEM2_JUDGE_PROMPT_STOCK_JSON = """You are a strict trading decision judge.
+You will be given a proposed decision and a critic review.
+Decide the final decision.
+
+Response Format (STRICT JSON ONLY, NO MARKDOWN, NO PROSE):
+{
+  "final_decision": "BUY" | "SELL" | "HOLD" | "CLEAR",
+  "rationale": "Brief reason < 25 words"
+}
+
+Rules:
+- final_decision must be one of BUY/SELL/HOLD/CLEAR
+"""
+
+
 def _patch_prompt_allow_clear(prompt: str) -> str:
     p = str(prompt or "")
     p = p.replace('"decision": "BUY" | "SELL" | "HOLD"', '"decision": "BUY" | "SELL" | "HOLD" | "CLEAR"')
@@ -65,6 +97,109 @@ def _to_float(x: Any) -> float:
         return float(x)
     except Exception:
         return 0.0
+
+
+def _llm_generate(*, model: Any, tokenizer: Any, messages: List[Dict[str, str]], max_new_tokens: int, temperature: float) -> str:
+    import torch
+
+    text = tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+    inputs = tokenizer([text], return_tensors="pt").to(model.device)
+    do_sample = float(temperature) > 0
+    with torch.no_grad():
+        gen_ids = model.generate(
+            **inputs,
+            max_new_tokens=int(max_new_tokens),
+            temperature=float(temperature),
+            do_sample=bool(do_sample),
+        )
+    gen_ids = [out_ids[len(in_ids) :] for in_ids, out_ids in zip(inputs.input_ids, gen_ids)]
+    return tokenizer.batch_decode(gen_ids, skip_special_tokens=True)[0]
+
+
+def _try_parse_json_dict(raw_text: str) -> Tuple[Optional[Dict[str, Any]], str]:
+    try:
+        raw_json = extract_json_text(str(raw_text or "").strip())
+        if raw_json is None:
+            return None, "no json found in model output"
+        obj = repair_and_parse_json(raw_json)
+        if not isinstance(obj, dict):
+            return None, "model output json is not object"
+        return obj, ""
+    except Exception as e:
+        return None, str(e)
+
+
+def _build_system2_context_lines(*, symbol: str, date_str: str, feats: Dict[str, Any], news_contexts: List[str]) -> List[str]:
+    tech = feats.get("technical") if isinstance(feats.get("technical"), dict) else {}
+    sig = feats.get("signal") if isinstance(feats.get("signal"), dict) else {}
+
+    def gv(d: Dict[str, Any], k: str, default: Any = "") -> Any:
+        return d.get(k, default) if isinstance(d, dict) else default
+
+    lines = [
+        f"Ticker: {symbol}",
+        f"Date: {date_str}",
+        f"Close: {gv(tech, 'close', '')}",
+        f"Price vs MA20: {gv(tech, 'price_vs_ma20', '')}",
+        f"Price vs MA200: {gv(tech, 'price_vs_ma200', '')}",
+        f"Trend alignment: {gv(tech, 'trend_alignment', '')}",
+        f"Return 5d: {gv(tech, 'return_5d', '')}",
+        f"Return 21d: {gv(tech, 'return_21d', '')}",
+        f"Volatility 20d: {gv(tech, 'volatility_20d', '')}",
+        f"Volume ratio: {gv(tech, 'vol_ratio', '')}",
+        f"Max drawdown 20d: {gv(tech, 'max_drawdown_20d', '')}",
+        f"Composite signal: {gv(sig, 'composite', '')}",
+    ]
+
+    ctxs = [str(x) for x in (news_contexts or []) if str(x).strip()]
+    if ctxs:
+        lines.append("")
+        lines.append("News Context (may be empty):")
+        for i, c in enumerate(ctxs[:3], start=1):
+            lines.append(f"[{i}] {c}")
+    return lines
+
+
+def _build_system2_critic_messages(
+    *,
+    symbol: str,
+    date_str: str,
+    feats: Dict[str, Any],
+    news_contexts: List[str],
+    proposed_decision: str,
+    proposed_analysis: str,
+    allow_clear: bool,
+) -> List[Dict[str, str]]:
+    lines = _build_system2_context_lines(symbol=symbol, date_str=date_str, feats=feats, news_contexts=news_contexts)
+    lines.extend(["", f"Proposed decision: {str(proposed_decision).strip().upper()}", f"Proposed analysis: {str(proposed_analysis or '').strip()}"])
+    sys_prompt = SYSTEM2_CRITIC_PROMPT_STOCK_JSON
+    if bool(allow_clear):
+        sys_prompt = _patch_prompt_allow_clear(sys_prompt)
+    return [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": "\n".join(lines)},
+    ]
+
+
+def _build_system2_judge_messages(
+    *,
+    symbol: str,
+    date_str: str,
+    feats: Dict[str, Any],
+    news_contexts: List[str],
+    proposal: Dict[str, Any],
+    critic: Dict[str, Any],
+    allow_clear: bool,
+) -> List[Dict[str, str]]:
+    lines = _build_system2_context_lines(symbol=symbol, date_str=date_str, feats=feats, news_contexts=news_contexts)
+    lines.extend(["", "Proposal JSON:", json.dumps(proposal, ensure_ascii=False), "", "Critic JSON:", json.dumps(critic, ensure_ascii=False)])
+    sys_prompt = SYSTEM2_JUDGE_PROMPT_STOCK_JSON
+    if bool(allow_clear):
+        sys_prompt = _patch_prompt_allow_clear(sys_prompt)
+    return [
+        {"role": "system", "content": sys_prompt},
+        {"role": "user", "content": "\n".join(lines)},
+    ]
 
 
 def _load_macro_risk_map(csv_path: str) -> Dict[str, float]:
@@ -891,6 +1026,14 @@ def main() -> None:
     parser.add_argument("--min-news-abs-impact", type=float, default=0.5)
     parser.add_argument("--max-news-signals", type=int, default=3)
     parser.add_argument(
+        "--system2-debate",
+        default="off",
+        choices=["off", "buy_only", "all"],
+        help="System-2 debate: proposal->critic->judge. off=disabled, buy_only=run only when proposal is BUY, all=run for all proposals.",
+    )
+    parser.add_argument("--system2-max-new-tokens", type=int, default=256)
+    parser.add_argument("--system2-temperature", type=float, default=0.0)
+    parser.add_argument(
         "--chart-signals-file",
         default="",
         help="Optional Chartist signals jsonl (ticker/asof/signal/confidence) keyed by (date,ticker)",
@@ -1416,15 +1559,9 @@ def main() -> None:
             parsed: Optional[Dict[str, Any]] = None
             parse_error = ""
             try:
-                raw_json = extract_json_text(raw_text.strip())
-                if raw_json is None:
-                    raise ValueError("no json found in model output")
-
-                obj = repair_and_parse_json(raw_json)
-                if not isinstance(obj, dict):
-                    raise ValueError("model output json is not object")
-
-                parsed = obj
+                parsed, parse_error = _try_parse_json_dict(raw_text)
+                if parsed is None:
+                    raise ValueError(parse_error or "parse failed")
                 if use_stock:
                     if not str(parsed.get("ticker") or "").strip():
                         parsed["ticker"] = str(symbol)
@@ -1459,6 +1596,96 @@ def main() -> None:
                     label = parsed.get("label") if isinstance(parsed.get("label"), dict) else {}
                     proposed_action = str(label.get("action") or "hold")
                     proposed_pos = label.get("target_position", 0.0)
+
+            system2_meta: Optional[Dict[str, Any]] = None
+            s2_mode = str(getattr(args, "system2_debate", "off") or "off").strip().lower()
+            if use_stock and parsed is not None and s2_mode in {"buy_only", "all"}:
+                decision_up = str(proposed_action).strip().upper()
+                if (s2_mode == "all") or (decision_up == "BUY"):
+                    proposal_obj = dict(parsed)
+                    critic_obj: Optional[Dict[str, Any]] = None
+                    judge_obj: Optional[Dict[str, Any]] = None
+                    critic_raw = ""
+                    judge_raw = ""
+                    critic_err = ""
+                    judge_err = ""
+
+                    ctx_for_s2 = []
+                    if isinstance(stock_news_contexts, list) and stock_news_contexts:
+                        ctx_for_s2 = list(stock_news_contexts)
+                    elif isinstance(route_news_contexts, list) and route_news_contexts:
+                        ctx_for_s2 = list(route_news_contexts)
+
+                    critic_msgs = _build_system2_critic_messages(
+                        symbol=str(symbol),
+                        date_str=str(date_str),
+                        feats=etf_item,
+                        news_contexts=ctx_for_s2,
+                        proposed_decision=str(proposal_obj.get("decision") or "HOLD"),
+                        proposed_analysis=str(proposal_obj.get("analysis") or ""),
+                        allow_clear=bool(args.allow_clear),
+                    )
+                    critic_raw = _llm_generate(
+                        model=model,
+                        tokenizer=tokenizer,
+                        messages=critic_msgs,
+                        max_new_tokens=int(getattr(args, "system2_max_new_tokens", 256) or 256),
+                        temperature=float(getattr(args, "system2_temperature", 0.0) or 0.0),
+                    )
+                    critic_obj, critic_err = _try_parse_json_dict(critic_raw)
+                    if isinstance(critic_obj, dict):
+                        if not isinstance(critic_obj.get("accept"), bool):
+                            critic_err = "critic schema missing/invalid accept"
+                            critic_obj = None
+                        sd = str(critic_obj.get("suggested_decision") or "").strip().upper()
+                        if sd not in {"BUY", "SELL", "HOLD", "CLEAR"}:
+                            critic_err = "critic schema missing/invalid suggested_decision"
+                            critic_obj = None
+                        rs = critic_obj.get("reasons")
+                        if critic_obj is not None and (not isinstance(rs, list) or len(rs) != 3):
+                            critic_err = "critic schema missing/invalid reasons"
+                            critic_obj = None
+
+                    if critic_obj is not None:
+                        judge_msgs = _build_system2_judge_messages(
+                            symbol=str(symbol),
+                            date_str=str(date_str),
+                            feats=etf_item,
+                            news_contexts=ctx_for_s2,
+                            proposal=proposal_obj,
+                            critic=critic_obj,
+                            allow_clear=bool(args.allow_clear),
+                        )
+                        judge_raw = _llm_generate(
+                            model=model,
+                            tokenizer=tokenizer,
+                            messages=judge_msgs,
+                            max_new_tokens=int(getattr(args, "system2_max_new_tokens", 256) or 256),
+                            temperature=float(getattr(args, "system2_temperature", 0.0) or 0.0),
+                        )
+                        judge_obj, judge_err = _try_parse_json_dict(judge_raw)
+                        if isinstance(judge_obj, dict):
+                            fd = str(judge_obj.get("final_decision") or "").strip().upper()
+                            if fd not in {"BUY", "SELL", "HOLD", "CLEAR"}:
+                                judge_err = "judge schema missing/invalid final_decision"
+                                judge_obj = None
+                            if judge_obj is not None and not str(judge_obj.get("rationale") or "").strip():
+                                judge_err = "judge schema missing/invalid rationale"
+                                judge_obj = None
+
+                    if judge_obj is not None:
+                        final_from_s2 = str(judge_obj.get("final_decision") or "HOLD").strip().upper()
+                        proposed_action = final_from_s2
+                        proposed_pos = 0.5 if final_from_s2 == "BUY" else 0.0
+
+                    system2_meta = {
+                        "mode": s2_mode,
+                        "proposal": proposal_obj,
+                        "critic": critic_obj,
+                        "judge": judge_obj,
+                        "raw": {"critic": critic_raw, "judge": judge_raw},
+                        "errors": {"critic": critic_err, "judge": judge_err},
+                    }
 
             chartist_meta: Optional[Dict[str, Any]] = None
             ensemble_trace: List[str] = []
@@ -1521,6 +1748,9 @@ def main() -> None:
                 "final": {"action": final_action, "target_position": final_pos, "trace": final_trace},
                 "raw": raw_text,
             }
+
+            if system2_meta is not None:
+                rec["system2"] = system2_meta
 
             if chartist_meta is not None:
                 rec["chartist"] = chartist_meta
