@@ -11,6 +11,12 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import pandas as pd
 import yaml
 
+project_root = Path(__file__).resolve().parents[1]
+if str(project_root) not in sys.path:
+    sys.path.insert(0, str(project_root))
+
+from src.execution.simulator import ExecutionSimulator
+
 
 def _to_float(x: Any) -> float:
     try:
@@ -324,6 +330,13 @@ def _run_inference(
     if cfg.get("temperature") is not None:
         args.extend(["--temperature", str(cfg.get("temperature"))])
 
+    if str(cfg.get("system2_debate") or "").strip():
+        args.extend(["--system2-debate", str(cfg.get("system2_debate"))])
+    if cfg.get("system2_max_new_tokens") is not None:
+        args.extend(["--system2-max-new-tokens", str(cfg.get("system2_max_new_tokens"))])
+    if cfg.get("system2_temperature") is not None:
+        args.extend(["--system2-temperature", str(cfg.get("system2_temperature"))])
+
     if str(macro_file or "").strip():
         args.extend(["--macro-file", str(macro_file).strip()])
 
@@ -351,6 +364,8 @@ def _compute_system_metrics(
     decision_path: Path,
     default_expert: str,
     daily_dir: Path,
+    raw_dir: Optional[Path],
+    execution_sim: Optional[ExecutionSimulator],
     start: str,
     end: str,
     horizons: List[int],
@@ -361,13 +376,13 @@ def _compute_system_metrics(
 ) -> Tuple[Dict[str, Any], pd.DataFrame]:
     payload = json.loads(decision_path.read_text(encoding="utf-8"))
 
-    dates = _iter_dates_inclusive(start, end)
-    trading_dates, close_map = _load_stock_close_map(daily_dir, dates)
+    all_dates = _iter_dates_inclusive(start, end)
+    trading_dates, close_map = _load_stock_close_map(daily_dir, all_dates)
+    dates = list(trading_dates)
 
     gk_stats = _gatekeeper_stats_from_decisions(payload=payload, dates=dates)
 
     strong_news_days = _detect_strong_news_days(daily_dir, dates, float(min_news_abs_impact))
-
     cost_rate = float(trade_cost_bps) / 10000.0 if float(trade_cost_bps) > 0 else 0.0
 
     # Build per-day, per-ticker records first, then compute turnover in chronological order.
@@ -422,19 +437,159 @@ def _compute_system_metrics(
             }
         )
 
-    # Compute turnover + fee in deterministic date order (independent from cost)
     if dates:
         tickers: List[str] = sorted(set([sym for (_d, sym) in pos_map.keys()]))
         last_pos: Dict[str, float] = {t: 0.0 for t in tickers}
         turnover_map: Dict[Tuple[str, str], float] = {}
-        for d in dates:
+        desired_pos_map: Dict[Tuple[str, str], float] = dict(pos_map)
+        exec_meta: Dict[Tuple[str, str], Dict[str, Any]] = {}
+
+        ohlc: Dict[Tuple[str, str], Dict[str, Optional[float]]] = {}
+        if raw_dir is not None and raw_dir.exists():
             for t in tickers:
-                cur = float(pos_map.get((str(d), str(t)), 0.0))
+                fp = raw_dir / f"{t}.parquet"
+                if not fp.exists():
+                    continue
+                try:
+                    dfp = pd.read_parquet(fp)
+                except Exception:
+                    continue
+                if dfp is None or dfp.empty:
+                    continue
+                dfp.columns = [str(c).strip().lower() for c in dfp.columns]
+                if "date" in dfp.columns:
+                    dfp["date"] = pd.to_datetime(dfp["date"], errors="coerce")
+                    dfp = dfp.dropna(subset=["date"]).set_index("date")
+                if not isinstance(dfp.index, pd.DatetimeIndex):
+                    dfp.index = pd.to_datetime(dfp.index, errors="coerce")
+                # Normalize tz-aware parquet indices to naive dates so lookups by YYYY-MM-DD succeed.
+                try:
+                    if getattr(dfp.index, "tz", None) is not None:
+                        dfp.index = dfp.index.tz_convert(None)
+                except Exception:
+                    try:
+                        dfp.index = dfp.index.tz_localize(None)
+                    except Exception:
+                        pass
+                try:
+                    dfp.index = dfp.index.normalize()
+                except Exception:
+                    pass
+                dfp = dfp.sort_index()
+                cols = set(dfp.columns)
+                if "close" not in cols:
+                    continue
+                want = [c for c in ["open", "close", "high", "low"] if c in cols]
+                if not want:
+                    continue
+                dfp = dfp[want]
+                for d in dates:
+                    ts = pd.to_datetime(str(d)).normalize()
+                    try:
+                        row = dfp.loc[ts]
+                    except Exception:
+                        continue
+                    if isinstance(row, pd.DataFrame):
+                        row = row.iloc[0]
+                    ohlc[(str(d), str(t))] = {
+                        "open": None if row.get("open") is None else _to_float(row.get("open")),
+                        "close": _to_float(row.get("close")),
+                        "high": None if row.get("high") is None else _to_float(row.get("high")),
+                        "low": None if row.get("low") is None else _to_float(row.get("low")),
+                    }
+
+        for i_d, d in enumerate(dates):
+            prev_d = str(dates[i_d - 1]) if i_d > 0 else str(d)
+            for t in tickers:
+                desired = float(desired_pos_map.get((str(d), str(t)), 0.0))
                 prev = float(last_pos.get(str(t), 0.0))
-                turnover = abs(cur - prev)
+
+                delta = float(desired) - float(prev)
+
+                close = close_map.get((str(d), str(t)))
+                open_p = None
+                high = None
+                low = None
+                od = ohlc.get((str(d), str(t)))
+                od_prev = ohlc.get((str(prev_d), str(t)))
+                if isinstance(od, dict):
+                    if close is None:
+                        close = od.get("close")
+                    open_p = od.get("open")
+                    high = od.get("high")
+                    low = od.get("low")
+
+                close_f = _to_float(close)
+                open_f = None if open_p is None else _to_float(open_p)
+
+                turnover = 0.0
+                fee = 0.0
+                commission = 0.0
+                slippage_cost = 0.0
+                exec_edge = 0.0
+                exec_cost = 0.0
+                filled = True
+                note = "no_trade"
+                exec_price = close_f
+
+                if abs(delta) > 1e-12:
+                    side = "buy" if delta > 0 else "sell"
+                    filled = True
+                    note = "moc_fill"
+                    exec_price = close_f
+                    if execution_sim is not None:
+                        if side == "buy":
+                            res = execution_sim.execute_buy(
+                                close=close_f,
+                                open=open_f,
+                                high=high,
+                                low=low,
+                            )
+                        else:
+                            res = execution_sim.execute_sell(
+                                close=close_f,
+                                open=open_f,
+                                high=high,
+                                low=low,
+                            )
+                        filled = bool(res.filled)
+                        note = str(res.note)
+                        exec_price = float(res.price)
+
+                    if filled:
+                        turnover = abs(delta)
+                        commission = float(turnover) * float(cost_rate)
+                        exec_cost = 0.0
+                        if execution_sim is not None:
+                            exec_cost = float(turnover) * float(
+                                execution_sim.execution_cost_rate(side=side, close=close_f, exec_price=exec_price)
+                            )
+                        slippage_cost = float(exec_cost) if float(exec_cost) > 0 else 0.0
+                        exec_edge = float(-exec_cost) if float(exec_cost) < 0 else 0.0
+                        fee = float(commission) + float(slippage_cost)
+                        pos_map[(str(d), str(t))] = float(desired)
+                        last_pos[str(t)] = float(desired)
+                    else:
+                        turnover = 0.0
+                        fee = 0.0
+                        commission = 0.0
+                        slippage_cost = 0.0
+                        exec_edge = 0.0
+                        exec_cost = 0.0
+                        pos_map[(str(d), str(t))] = float(prev)
+                        last_pos[str(t)] = float(prev)
+
                 turnover_map[(str(d), str(t))] = float(turnover)
-                fee_map[(str(d), str(t))] = float(turnover) * float(cost_rate)
-                last_pos[str(t)] = float(cur)
+                fee_map[(str(d), str(t))] = float(fee)
+                exec_meta[(str(d), str(t))] = {
+                    "filled": bool(filled),
+                    "note": str(note),
+                    "exec_price": float(exec_price),
+                    "exec_cost": float(exec_cost),
+                    "commission": float(commission),
+                    "slippage_cost": float(slippage_cost),
+                    "exec_edge": float(exec_edge),
+                }
 
         for d in dates:
             for r in per_day_rows.get(str(d), []):
@@ -442,9 +597,18 @@ def _compute_system_metrics(
                 cur = float(pos_map.get((str(d), sym_u), float(r.get("target_position") or 0.0)))
                 turnover = float(turnover_map.get((str(d), sym_u), 0.0))
                 fee = float(fee_map.get((str(d), sym_u), 0.0))
+                meta = exec_meta.get((str(d), sym_u))
                 r["target_position"] = float(cur)
                 r["turnover"] = float(turnover)
                 r["fee"] = float(fee)
+                if isinstance(meta, dict):
+                    r["exec_filled"] = bool(meta.get("filled"))
+                    r["exec_note"] = str(meta.get("note") or "")
+                    r["exec_price"] = float(meta.get("exec_price") or 0.0)
+                    r["exec_cost"] = float(meta.get("exec_cost") or 0.0)
+                    r["commission"] = float(meta.get("commission") or 0.0)
+                    r["slippage_cost"] = float(meta.get("slippage_cost") or 0.0)
+                    r["exec_edge"] = float(meta.get("exec_edge") or 0.0)
 
     # Flatten decision-level rows and compute forward returns / pnl
     decision_rows: List[Dict[str, Any]] = []
@@ -453,6 +617,7 @@ def _compute_system_metrics(
             sym = str(r.get("ticker") or "")
             pos = float(r.get("target_position") or 0.0)
             fee = float(r.get("fee") or 0.0)
+            exec_edge = float(r.get("exec_edge") or 0.0)
 
             fr_by_h: Dict[str, Optional[float]] = {}
             pnl_by_h: Dict[str, float] = {}
@@ -465,7 +630,7 @@ def _compute_system_metrics(
                     pnl_by_h[str(h)] = float(pos) * float(fr)
 
             # Fees are charged on turnover; apply to h=1 net only.
-            pnl_h1_net = float(pnl_by_h.get("1", 0.0)) - float(fee)
+            pnl_h1_net = float(pnl_by_h.get("1", 0.0)) - float(fee) + float(exec_edge)
 
             out = dict(r)
             out.update(
@@ -501,6 +666,7 @@ def _compute_system_metrics(
     for d in dates:
         rows = by_date.get(str(d), [])
         day_fee = sum(float(r.get("fee") or 0.0) for r in rows)
+        day_edge = sum(float(r.get("exec_edge") or 0.0) for r in rows)
         fees_total += float(day_fee)
 
         # trade_count counts turnover events (rebalance actions)
@@ -517,9 +683,9 @@ def _compute_system_metrics(
                 day_ret_h1 = float(day_pnl)
 
         # Fees applied to h=1 net only
-        pnl_sum_net_by_h["1"] = float(pnl_sum_net_by_h.get("1", 0.0)) - float(day_fee)
+        pnl_sum_net_by_h["1"] = float(pnl_sum_net_by_h.get("1", 0.0)) - float(day_fee) + float(day_edge)
 
-        nav = nav * (1.0 + (float(day_ret_h1) - float(day_fee)))
+        nav = nav * (1.0 + (float(day_ret_h1) - float(day_fee) + float(day_edge)))
         peak = max(peak, nav)
         dd = (nav / peak) - 1.0
         max_drawdown = min(max_drawdown, dd)
@@ -538,12 +704,20 @@ def _compute_system_metrics(
         "pnl_sum_net": {str(k): float(v) for k, v in pnl_sum_net_by_h.items()},
         "trade_count": int(trade_count),
         "fees_total": float(fees_total),
+        "exec_edge_total": float(df_decisions.get("exec_edge", 0.0).sum()) if len(df_decisions) else 0.0,
         "nav": {"start": 1.0, "end": float(nav)},
         "max_drawdown": float(max_drawdown),
         "analyst_coverage": float(analyst_coverage),
         "planner_allow_rate": allow_rate,
         "gate_present_rate": float(gk_stats.get("gate_present_rate", 0.0)),
         "gate_allow_rate": float(gk_stats.get("gate_allow_rate", 0.0)),
+        "execution": {
+            "mode": "" if execution_sim is None else str(execution_sim.mode),
+            "slippage_bps": 0.0 if execution_sim is None else float(execution_sim.slippage) * 10000.0,
+            "limit_threshold_bps": 0.0 if execution_sim is None else float(execution_sim.limit_k) * 10000.0,
+            "raw_dir": "" if raw_dir is None else str(raw_dir),
+            "stats": {} if execution_sim is None else dict(getattr(execution_sim, "stats", {}) or {}),
+        },
         "inputs": {"decision_json": str(decision_path), "sha256": _hash_file(decision_path)},
     }
 
@@ -555,6 +729,16 @@ def main() -> None:
     p.add_argument("--baseline-config", default="configs/baseline_fast_v1.yaml")
     p.add_argument("--golden-config", default="configs/golden_strict_v1.yaml")
     p.add_argument("--run-id", required=True)
+    p.add_argument(
+        "--execution-mode",
+        type=str,
+        default="close",
+        choices=["close", "passive", "midpoint"],
+        help="Execution mode used when scoring backtest metrics",
+    )
+    p.add_argument("--slippage-bps", type=float, default=10.0, help="Slippage in basis points")
+    p.add_argument("--limit-threshold-bps", type=float, default=50.0, help="Passive limit offset (bps) vs open")
+    p.add_argument("--raw-dir", default="data/raw", help="Raw OHLC parquet directory (for execution simulation)")
     p.add_argument(
         "--chart-signals-file",
         default="",
@@ -737,6 +921,8 @@ def main() -> None:
     baseline_daily_all: List[pd.DataFrame] = []
     golden_daily_all: List[pd.DataFrame] = []
 
+    raw_dir = Path(str(args.raw_dir))
+
     for w_start, w_end in windows:
         base_out = run_dir / "baseline_fast" / f"decisions_{w_start}_{w_end}.json".replace(":", "")
         gold_out = run_dir / "golden_strict" / f"decisions_{w_start}_{w_end}.json".replace(":", "")
@@ -783,6 +969,12 @@ def main() -> None:
             decision_path=base_out,
             default_expert="scalper",
             daily_dir=daily_dir,
+            raw_dir=raw_dir,
+            execution_sim=ExecutionSimulator(
+                mode=str(args.execution_mode),
+                slippage_bps=float(args.slippage_bps),
+                limit_threshold_bps=float(getattr(args, "limit_threshold_bps", 50.0)),
+            ),
             start=str(w_start),
             end=str(w_end),
             horizons=horizons,
@@ -797,6 +989,12 @@ def main() -> None:
             decision_path=gold_out,
             default_expert="unknown",
             daily_dir=daily_dir,
+            raw_dir=raw_dir,
+            execution_sim=ExecutionSimulator(
+                mode=str(args.execution_mode),
+                slippage_bps=float(args.slippage_bps),
+                limit_threshold_bps=float(getattr(args, "limit_threshold_bps", 50.0)),
+            ),
             start=str(w_start),
             end=str(w_end),
             horizons=horizons,
@@ -859,6 +1057,14 @@ def main() -> None:
         for c in ["turnover", "fee", "pnl_h1", "pnl_h5", "pnl_h10"]:
             if c in df.columns:
                 df[c] = pd.to_numeric(df[c], errors="coerce").fillna(0.0)
+        if "exec_cost" in df.columns:
+            df["exec_cost"] = pd.to_numeric(df["exec_cost"], errors="coerce").fillna(0.0)
+        if "exec_edge" in df.columns:
+            df["exec_edge"] = pd.to_numeric(df["exec_edge"], errors="coerce").fillna(0.0)
+        if "slippage_cost" in df.columns:
+            df["slippage_cost"] = pd.to_numeric(df["slippage_cost"], errors="coerce").fillna(0.0)
+        if "commission" in df.columns:
+            df["commission"] = pd.to_numeric(df["commission"], errors="coerce").fillna(0.0)
         if "expert" in df.columns:
             df["expert"] = df["expert"].astype(str)
         if "planner_allow" in df.columns:
@@ -867,9 +1073,10 @@ def main() -> None:
         horizons_local = horizons
         pnl_sum = {str(h): float(df.get(f"pnl_h{int(h)}", 0.0).sum()) for h in horizons_local}
         fees_total_local = float(df.get("fee", 0.0).sum())
+        exec_edge_total_local = float(df.get("exec_edge", 0.0).sum())
         pnl_sum_net = dict(pnl_sum)
         if "1" in pnl_sum_net:
-            pnl_sum_net["1"] = float(pnl_sum_net["1"]) - float(fees_total_local)
+            pnl_sum_net["1"] = float(pnl_sum_net["1"]) - float(fees_total_local) + float(exec_edge_total_local)
 
         trade_count_local = int((df.get("turnover", 0.0) > 1e-12).sum())
         analyst_cov_local = float((df.get("expert", "").astype(str) == "analyst").sum()) / float(len(df)) if len(df) else 0.0
@@ -909,6 +1116,35 @@ def main() -> None:
         gate_present_rate_local = float(gate_present_days) / float(total_days) if total_days else 0.0
         gate_allow_rate_local = float(gate_allow_days) / float(gate_present_days) if gate_present_days else 1.0
 
+        exec_total = 0
+        exec_filled = 0
+        exec_missed = 0
+        if "exec_note" in df.columns:
+            notes = df["exec_note"].astype(str)
+            exec_total = int((notes != "no_trade").sum())
+            exec_missed = int((notes == "missed_limit").sum())
+            exec_filled = int(exec_total - exec_missed)
+        exec_cost_total = float(df.get("exec_cost", 0.0).sum())
+        slippage_cost_total = float(df.get("slippage_cost", 0.0).sum())
+        exec_edge_total = float(df.get("exec_edge", 0.0).sum())
+        commission_total = float(df.get("commission", 0.0).sum())
+
+        execution_cfg = {
+            "mode": str(getattr(args, "execution_mode", "")),
+            "slippage_bps": float(getattr(args, "slippage_bps", 0.0)),
+            "limit_threshold_bps": float(getattr(args, "limit_threshold_bps", 0.0)),
+            "raw_dir": str(raw_dir),
+            "stats": {
+                "total_orders": int(exec_total),
+                "filled_orders": int(exec_filled),
+                "missed_orders": int(exec_missed),
+                "commission_total": float(commission_total),
+                "slippage_cost_total": float(slippage_cost_total),
+                "exec_edge_total": float(exec_edge_total),
+                "exec_cost_signed_total": float(exec_cost_total),
+            },
+        }
+
         return {
             "system": system_key,
             "range": {"start": str(range_start), "end": str(range_end)},
@@ -917,10 +1153,12 @@ def main() -> None:
             "pnl_sum_net": pnl_sum_net,
             "trade_count": int(trade_count_local),
             "fees_total": float(fees_total_local),
+            "exec_edge_total": float(exec_edge_total_local),
             "analyst_coverage": float(analyst_cov_local),
             "planner_allow_rate": float(planner_allow_rate_local),
             "gate_present_rate": float(gate_present_rate_local),
             "gate_allow_rate": float(gate_allow_rate_local),
+            "execution": execution_cfg,
         }
 
     base_combined_metrics = _aggregate_metrics_from_daily(
