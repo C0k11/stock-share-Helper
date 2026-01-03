@@ -9,6 +9,7 @@ Usage:
 from __future__ import annotations
 
 import json
+import importlib
 import os
 import random
 import sys
@@ -446,6 +447,9 @@ def main():
     parser.add_argument("--cash", type=float, default=500000.0, help="Initial cash")
     parser.add_argument("--data-source", default="auto", choices=["auto", "yfinance", "simulated"])
     parser.add_argument("--load-models", action="store_true", help="Load real MoE models (requires GPU)")
+    parser.add_argument("--with-api", action="store_true", help="Start FastAPI server for live dashboard")
+    parser.add_argument("--api-host", default="127.0.0.1")
+    parser.add_argument("--api-port", type=int, default=8000)
     args = parser.parse_args()
     
     print("=" * 60)
@@ -460,6 +464,22 @@ def main():
         data_source=args.data_source,
         load_models=args.load_models,
     )
+
+    if args.with_api:
+        try:
+            api_mod = importlib.import_module("src.api.main")
+            api_mod.set_live_runner(runner)
+            uvicorn = importlib.import_module("uvicorn")
+
+            def _run_api() -> None:
+                uvicorn.run(api_mod.app, host=str(args.api_host), port=int(args.api_port), log_level="warning")
+
+            t = threading.Thread(target=_run_api, daemon=True)
+            t.start()
+            print(f"Live API started: http://{args.api_host}:{args.api_port}/api/v1/live/status")
+        except Exception as e:
+            print(f"[API] Failed to start live API server: {e}")
+
     runner.start()
 
     try:
