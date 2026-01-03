@@ -887,7 +887,7 @@ class MainWindow(QMainWindow):
         }
         data = json.dumps({"message": str(message), "context": ctx}, ensure_ascii=False).encode("utf-8")
         req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
-        with urllib.request.urlopen(req, timeout=30.0) as resp:
+        with urllib.request.urlopen(req, timeout=120.0) as resp:  # 120s for local model loading
             raw = resp.read().decode("utf-8", errors="replace")
         obj: Any = json.loads(raw)
         if isinstance(obj, dict) and isinstance(obj.get("reply"), str):
