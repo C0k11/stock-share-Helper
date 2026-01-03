@@ -56,12 +56,13 @@ def _load_secretary_config() -> Dict[str, Any]:
 
 
 class TTSQueue:
-    """Async TTS queue to prevent voice lag"""
+    """Async TTS queue with aggressive lag prevention"""
 
     def __init__(self):
         self.queue: list[str] = []
         self.lock = threading.Lock()
         self.running = True
+        self.max_queue_size = 2  # Keep queue very short to reduce lag
         self.thread = threading.Thread(target=self._worker, daemon=True)
         self.thread.start()
         
@@ -80,11 +81,15 @@ class TTSQueue:
             pygame.mixer.init()
 
     def speak(self, text: str) -> None:
-        """Add text to TTS queue"""
+        """Add text to TTS queue with lag prevention"""
         with self.lock:
-            # Skip if queue is too long (voice lag prevention)
-            if len(self.queue) < 5:
-                self.queue.append(text)
+            # Drop oldest messages if queue is full (prefer fresh content)
+            while len(self.queue) >= self.max_queue_size:
+                self.queue.pop(0)  # Drop oldest
+            # Truncate long messages for faster synthesis
+            if len(text) > 50:
+                text = text[:47] + "..."
+            self.queue.append(text)
 
     def _worker(self) -> None:
         """Background worker to process TTS queue"""
@@ -101,7 +106,7 @@ class TTSQueue:
 
     def _speak_sync(self, text: str) -> None:
         """Synchronously speak text using GPT-SoVITS"""
-        print(f"🗣️ Mari: {text}")
+        print(f"[TTS] Mari: {text}")
         
         if not HAS_REQUESTS or not HAS_PYGAME:
             return
@@ -176,13 +181,11 @@ class LivePaperTradingRunner:
             priority = event.priority
             t_str = event.timestamp.strftime("%H:%M:%S")
             
-            print(f"[{t_str}] 🤖 {msg}")
+            print(f"[{t_str}] [Agent] {msg}")
 
-            if priority >= 2:  # High priority -> Always speak
-                self.tts.speak(f"Sensei，{msg}")
-            elif priority == 1:  # Medium -> Occasionally speak
-                if random.random() > 0.6:
-                    self.tts.speak(msg)
+            # Only speak high priority messages to reduce queue backup
+            if priority >= 2:
+                self.tts.speak(msg)
 
         elif event.type == EventType.FILL:
             fill = event.payload
@@ -191,22 +194,22 @@ class LivePaperTradingRunner:
             price = fill.get("price", 0)
             
             msg = f"成交报告：{action} {ticker}，价格 {price:.2f}"
-            print(f"[FILL] 💰 {msg}")
+            print(f"[FILL] {msg}")
             self.tts.speak(f"好消息！{msg}")
 
         elif event.type == EventType.ERROR:
             err = event.payload
-            print(f"[ERROR] ❌ {err}")
+            print(f"[ERROR] {err}")
 
     def start(self) -> None:
         """Start the live paper trading engine"""
         self.engine.start()
         
         print("=" * 60)
-        print("🚀 Phase 3.3: Live Paper Trading Engine")
+        print("Phase 3.3: Live Paper Trading Engine")
         print("=" * 60)
-        print(f"💰 Initial Cash: ${self.broker.cash:,.2f}")
-        print(f"📊 Tickers: {', '.join(self.strategy.tickers)}")
+        print(f"Initial Cash: ${self.broker.cash:,.2f}")
+        print(f"Tickers: {', '.join(self.strategy.tickers)}")
         print("=" * 60)
         
         self.tts.speak("Sensei，实盘模拟系统已启动。Mari 正在监视所有 Agent 的活动呢。")
@@ -215,7 +218,7 @@ class LivePaperTradingRunner:
         """Stop the engine"""
         self.engine.stop()
         self.tts.stop()
-        print("🛑 System Shutdown.")
+        print("System Shutdown.")
 
     def simulate_market_tick(self, ticker: Optional[str] = None) -> None:
         """Simulate a market tick (for demo purposes)"""
@@ -236,7 +239,7 @@ class LivePaperTradingRunner:
 
 
 def main():
-    print("🚀 Initializing Paper Trading Engine (Phase 3.3)...")
+    print("Initializing Paper Trading Engine (Phase 3.3)...")
     
     runner = LivePaperTradingRunner(initial_cash=500000.0)
     runner.start()
@@ -249,7 +252,7 @@ def main():
             runner.simulate_market_tick()
 
     except KeyboardInterrupt:
-        print("\n\n🛑 Shutting down...")
+        print("\n\nShutting down...")
         runner.stop()
 
 

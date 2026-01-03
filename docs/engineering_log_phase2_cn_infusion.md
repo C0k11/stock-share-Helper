@@ -3817,3 +3817,85 @@ Status: Completed
   - `exec_edge_total > fees_total`（执行层 alpha 覆盖硬成本）
 
 **结论**：确立 `Passive + 40bps` 为下一阶段（Phase 3 / Paper Trading）的实盘执行标准；它通过较高的踏空率过滤低质量入场点，同时保持 `Edge > Fees` 的可持续执行优势。
+
+---
+
+## Phase 3.3：Live Paper Trading Engine + Mari Secretary（2026-01-03）
+
+目标：把"跑录像"的回测机器升级为实时运转的战术指挥中心，Mari 作为实时解说员转述 Multi-Agent 内部的"思考过程"。
+
+### 3.3.1 Event System Enhancement
+
+**文件**：`src/trading/event.py`
+
+变更：
+- 新增 `LOG` 事件类型：用于传输 Agent 的内部状态/思考过程
+- 新增 `priority` 字段：控制 TTS 播报优先级
+  - `0`：仅文本打印
+  - `1`：偶尔语音播报
+  - `2`：始终语音播报（高优先级事件）
+
+### 3.3.2 MultiAgentStrategy 封装
+
+**文件**：`src/trading/strategy.py`
+
+核心流程（Mock 实现，真实模型钩子已预留）：
+1. **Planner** 扫描 ticker
+2. **Gatekeeper** 波动率过滤
+3. **MoE Router** 选择专家（Scalper/Analyst/Momentum/MeanReversion）
+4. **Expert Inference** 生成 BUY/SELL/HOLD 建议
+5. **System 2 Debate**：Chartist Overlay + Macro Governor + Judge 裁决
+6. **Execution**：通过事件总线发出 SIGNAL
+
+### 3.3.3 Live Paper Trading Runner
+
+**文件**：`scripts/run_live_paper_trading.py`
+
+功能：
+- 启动 TradingEngine + PaperBroker + MultiAgentStrategy
+- TTSQueue 异步队列：防止语音阻塞主线程
+- 事件回调：LOG/FILL 事件触发 Mari 语音播报
+- 市场数据模拟：每 4 秒生成一个 tick
+
+运行命令：
+```powershell
+.\venv311\Scripts\python.exe scripts\run_live_paper_trading.py
+```
+
+### 3.3.4 Secretary Integration
+
+**配置**：`configs/secretary.yaml`
+
+变更：
+- 称呼规则：用户为 "Sensei"（せんせい），名字为 "Cokii"（コキー）
+- 新增实时解说模式指令
+- LLM 后端：Ollama `qwen2.5:7b-instruct`（端口 11434）
+
+**API 端点**：
+- `GET /api/v1/status`：聚合 trading engine 状态 + voice training 状态
+- `POST /api/v1/chat`：自动注入实时状态到 system prompt
+
+### 3.3.5 GPT-SoVITS Voice Training（完成）
+
+训练产物：
+- S1（GPT semantic）：`logs/mari_v2_01/logs_s1_v2/ckpt/epoch=14-step=15.ckpt`
+- S2（SoVITS vocoder）：`logs/mari_v2_01/logs_s2_v2/G_64.pth`
+
+推理权重（转换后）：
+- `logs/mari_v2_01/mari_s1_infer.ckpt`
+- `logs/mari_v2_01/mari_s2G_infer.pth`
+
+### 3.3.6 Services Configuration
+
+| 服务 | 端口 | 说明 |
+|------|------|------|
+| GPT-SoVITS TTS | 9880 | Mari 权重自动加载 |
+| Stock FastAPI | 8000 | 后端 API |
+| Stock Streamlit | 8501 | 控制塔 UI |
+| Ollama LLM | 11434 | qwen2.5:7b-instruct |
+
+### 3.3.7 Next Steps（Phase 3.4）
+
+- 将 `strategy.py` 中的 mock 替换为真实模型推理
+- 接入实时行情数据源
+- WebSocket 推送实时 UI 更新
