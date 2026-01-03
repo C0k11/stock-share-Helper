@@ -3899,3 +3899,10 @@ Status: Completed
 - 将 `strategy.py` 中的 mock 替换为真实模型推理
 - 接入实时行情数据源
 - WebSocket 推送实时 UI 更新
+
+### 3.4.0 Phase 3.4 Progress Update
+
+- Live Paper Trading：修复 `PaperBroker` 落账（cash/positions 真实变化），修复 yfinance bar 时间戳与 K 线渲染（避免扁平蜡烛/重复 bar）。
+- Mari Context：注入 live_trading 状态（data_source/trading_mode/latest_bars）并扩大记忆窗口。
+- Agent Hub（News）：新增新闻提交→多分析员（macro/risk/factcheck/sentiment）→回收总结的后台任务流，带 audit.jsonl 审计与写入 Mari 长期记忆。
+- Tools/Actions：新增网页抓取工具与统一动作执行器（start_rl/stop_rl/set_mode/submit_news/fetch_url/remember），便于桌面端按钮/动作一键触发。
