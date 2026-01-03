@@ -524,20 +524,17 @@ def _call_llm(*, text: str, ctx: Dict[str, Any]) -> Optional[str]:
     llm_cfg = cfg.get("llm") if isinstance(cfg.get("llm"), dict) else {}
     sec_cfg = cfg.get("secretary") if isinstance(cfg.get("secretary"), dict) else {}
 
-    api_base = str((llm_cfg or {}).get("api_base") or "").strip()
-    api_key = str((llm_cfg or {}).get("api_key") or "").strip() or "local"
-    model = str((llm_cfg or {}).get("model") or "").strip()
-    if not api_base or not model:
-        return None
-
+    # Check mode: local or api
+    mode = str((llm_cfg or {}).get("mode") or "api").strip().lower()
+    
     try:
         temperature = float((llm_cfg or {}).get("temperature", 0.7))
     except Exception:
         temperature = 0.7
     try:
-        max_tokens = int((llm_cfg or {}).get("max_tokens", 220))
+        max_tokens = int((llm_cfg or {}).get("max_tokens", 256))
     except Exception:
-        max_tokens = 220
+        max_tokens = 256
 
     system_prompt = str((sec_cfg or {}).get("system_prompt") or "You are a helpful assistant.").strip()
     merged_ctx = _build_secretary_context(ctx)
@@ -563,7 +560,41 @@ def _call_llm(*, text: str, ctx: Dict[str, Any]) -> Optional[str]:
     if rag:
         system_prompt = system_prompt + rag
 
+    # === LOCAL MODE: Direct model inference ===
+    if mode == "local":
+        try:
+            from src.llm.local_chat import chat as local_chat
+            local_model = str((llm_cfg or {}).get("local_model") or "Qwen/Qwen2.5-7B-Instruct")
+            use_4bit = bool((llm_cfg or {}).get("use_4bit", True))
+            
+            logger.info(f"[LLM] Local mode: {local_model} (4bit={use_4bit})")
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": str(text)},
+            ]
+            response = local_chat(
+                messages,
+                model_name=local_model,
+                temperature=temperature,
+                max_new_tokens=max_tokens,
+                use_4bit=use_4bit,
+            )
+            if response:
+                return response.strip()
+            return None
+        except Exception as e:
+            logger.error(f"[LLM] Local mode error: {e}")
+            return None
+
+    # === API MODE: Ollama/OpenAI compatible ===
+    api_base = str((llm_cfg or {}).get("api_base") or "").strip()
+    api_key = str((llm_cfg or {}).get("api_key") or "").strip() or "local"
+    model = str((llm_cfg or {}).get("model") or "").strip()
+    if not api_base or not model:
+        return None
+
     client = OpenAI(base_url=api_base, api_key=api_key)
+    logger.info(f"[LLM] API mode: {api_base} model={model}")
     resp = client.chat.completions.create(
         model=model,
         messages=[
@@ -573,16 +604,19 @@ def _call_llm(*, text: str, ctx: Dict[str, Any]) -> Optional[str]:
         temperature=temperature,
         max_tokens=max_tokens,
     )
+    logger.info(f"[LLM] Response received, choices={bool(getattr(resp, 'choices', None))}")
     if not getattr(resp, "choices", None):
         return None
     msg = resp.choices[0].message
     content = getattr(msg, "content", None)
+    logger.info(f"[LLM] Raw content type={type(content)}, len={len(content) if content else 0}")
     
     # Qwen3 may return content with <think>...</think> tags, strip them
     if isinstance(content, str):
         import re
         # Remove thinking tags if present
         content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+        logger.info(f"[LLM] Cleaned content len={len(content)}")
         if content:
             return content
     return None
