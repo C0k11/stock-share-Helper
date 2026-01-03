@@ -483,7 +483,7 @@ def main() -> None:
     lines.append(f"- max_news_impact(day): `{max_news_impact:.2f}`")
     lines.append("")
 
-    lines.append("## 🧠 Planner AI Insight")
+    lines.append("## Planner AI Insight")
     lines.extend(
         _planner_ai_insight_lines(
             day_decisions=day_decisions,

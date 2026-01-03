@@ -243,6 +243,62 @@ def _get_secretary_config() -> Dict[str, Any]:
 
 def _build_secretary_context(extra: Dict[str, Any]) -> Dict[str, Any]:
     ctx: Dict[str, Any] = {}
+    
+    # Add live trading data if available
+    if _live_runner is not None:
+        try:
+            live_ctx: Dict[str, Any] = {
+                "mode": "live_paper_trading",
+                "cash": _live_runner.broker.cash,
+                "initial_cash": getattr(_live_runner.broker, "initial_cash", 500000.0),
+            }
+            # Calculate PnL
+            positions = getattr(_live_runner.broker, "positions", {})
+            total_value = _live_runner.broker.cash
+            position_details = []
+            for ticker, pos in positions.items():
+                if hasattr(pos, "shares") and hasattr(pos, "avg_price"):
+                    # Get current price
+                    current_price = pos.avg_price  # fallback
+                    if hasattr(_live_runner, "price_history") and ticker in _live_runner.price_history:
+                        prices = _live_runner.price_history[ticker]
+                        if prices:
+                            current_price = prices[-1].get("close", pos.avg_price)
+                    position_value = pos.shares * current_price
+                    total_value += position_value
+                    unrealized_pnl = (current_price - pos.avg_price) * pos.shares
+                    position_details.append({
+                        "ticker": ticker,
+                        "shares": pos.shares,
+                        "avg_price": round(pos.avg_price, 2),
+                        "current_price": round(current_price, 2),
+                        "unrealized_pnl": round(unrealized_pnl, 2),
+                    })
+            
+            initial = getattr(_live_runner.broker, "initial_cash", 500000.0)
+            live_ctx["total_value"] = round(total_value, 2)
+            live_ctx["total_pnl"] = round(total_value - initial, 2)
+            live_ctx["total_pnl_pct"] = round((total_value - initial) / initial * 100, 2)
+            live_ctx["positions"] = position_details
+            live_ctx["trade_count"] = len(_live_runner.trade_log)
+            
+            # Recent trades (last 5)
+            if _live_runner.trade_log:
+                recent = _live_runner.trade_log[-5:]
+                live_ctx["recent_trades"] = [
+                    {"action": t.get("action"), "ticker": t.get("ticker"), 
+                     "price": t.get("price"), "shares": t.get("shares")}
+                    for t in recent
+                ]
+            
+            # Recent agent logs (last 10)
+            if hasattr(_live_runner, "agent_logs") and _live_runner.agent_logs:
+                live_ctx["recent_agent_logs"] = _live_runner.agent_logs[-10:]
+            
+            ctx["live_trading"] = live_ctx
+        except Exception as e:
+            ctx["live_trading"] = {"error": str(e)}
+    
     try:
         runs = _list_run_dirs()
         if runs:
@@ -1071,6 +1127,16 @@ async def get_live_chat(limit: int = 50):
     
     chat = _live_runner.mari.chat_log[-limit:] if _live_runner.mari.chat_log else []
     return {"messages": chat, "count": len(chat)}
+
+
+@app.get("/api/v1/live/agent_logs")
+async def get_agent_logs(limit: int = 100):
+    """Get Multi-Agent system logs for terminal display"""
+    if _live_runner is None:
+        raise HTTPException(status_code=404, detail="No live trading session")
+    
+    logs = getattr(_live_runner, "agent_logs", [])
+    return {"logs": logs[-limit:] if logs else [], "count": len(logs)}
 
 
 # ========== 启动 ==========

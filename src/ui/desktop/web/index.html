@@ -1,0 +1,673 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Mari Live2D</title>
+  <style>
+    :root {
+      --bubble-bg: rgba(255, 255, 255, 0.9);
+      --bubble-fg: #333;
+      --bubble-border: #4e8cff;
+      --fallback-card-bg: rgba(20, 20, 26, 0.70);
+      --fallback-text: rgba(255,255,255,0.9);
+    }
+    [data-theme="light"] {
+      --bubble-bg: rgba(255, 255, 255, 0.92);
+      --bubble-fg: #111827;
+      --bubble-border: #2563eb;
+      --fallback-card-bg: rgba(255, 255, 255, 0.82);
+      --fallback-text: rgba(17, 24, 39, 0.92);
+    }
+    html, body { margin: 0; overflow: hidden; background-color: rgba(0,0,0,0); position: relative; }
+    #canvas { display: block; background: transparent; }
+    .bubble {
+      position: absolute;
+      top: 20px;
+      right: 20px;
+      background: var(--bubble-bg);
+      border: 2px solid var(--bubble-border);
+      padding: 15px;
+      border-radius: 15px 15px 0 15px;
+      font-family: 'Segoe UI', sans-serif;
+      font-size: 16px;
+      color: var(--bubble-fg);
+      box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+      max-width: 320px;
+      display: none;
+      opacity: 0;
+      transition: opacity 0.3s;
+      pointer-events: none;
+      z-index: 3;
+    }
+
+    #fallback-avatar {
+      position: absolute;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Segoe UI', sans-serif;
+      color: var(--fallback-text);
+      z-index: 2;
+    }
+
+    .fallback-card {
+      width: 360px;
+      height: 520px;
+      background: var(--fallback-card-bg);
+      border: 1px solid rgba(255,255,255,0.15);
+      border-radius: 18px;
+      box-shadow: 0 10px 30px rgba(0,0,0,0.35);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      user-select: none;
+    }
+
+    .fallback-face {
+      width: 220px;
+      height: 220px;
+      border-radius: 999px;
+      background: radial-gradient(circle at 35% 35%, #fce7f3 0%, #f9a8d4 32%, #7c3aed 100%);
+      position: relative;
+      border: 2px solid rgba(255,255,255,0.35);
+      box-shadow: 0 10px 25px rgba(0,0,0,0.25);
+    }
+
+    .fallback-eye {
+      width: 22px;
+      height: 30px;
+      border-radius: 12px;
+      background: rgba(20, 20, 26, 0.85);
+      position: absolute;
+      top: 78px;
+    }
+
+    .fallback-eye.left { left: 70px; }
+    .fallback-eye.right { right: 70px; }
+
+    .fallback-mouth {
+      width: 64px;
+      height: 10px;
+      border-radius: 999px;
+      background: rgba(20, 20, 26, 0.75);
+      position: absolute;
+      left: 50%;
+      top: 140px;
+      transform: translateX(-50%);
+      transition: height 60ms linear;
+      overflow: hidden;
+    }
+
+    .fallback-mouth-inner {
+      width: 100%;
+      height: 100%;
+      background: rgba(239, 68, 68, 0.85);
+      transform: scaleY(0);
+      transform-origin: center;
+    }
+
+    .fallback-hint {
+      font-size: 13px;
+      opacity: 0.85;
+      text-align: center;
+      padding: 0 18px;
+      line-height: 1.45;
+    }
+  </style>
+  <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qwebchannel/6.5.3/qwebchannel.js"></script>
+</head>
+<body>
+  <canvas id="canvas"></canvas>
+  <div id="bubble" class="bubble">...</div>
+  <div id="fallback-avatar">
+    <div class="fallback-card" id="fallback-card">
+      <div class="fallback-face">
+        <div class="fallback-eye left"></div>
+        <div class="fallback-eye right"></div>
+        <div class="fallback-mouth" id="fallback-mouth">
+          <div class="fallback-mouth-inner" id="fallback-mouth-inner"></div>
+        </div>
+      </div>
+      <div class="fallback-hint" id="fallback-hint">
+        Mari（离线模式）<br/>网络/CDN 不可用时将显示简化形态。
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let backend;
+    let currentModel = null;
+    let fallbackEnabled = false;
+    let fallbackMouthInner = null;
+    let gazeState = null;
+    let cornerMask = null;
+    let dockContainer = null;
+    window.__dock_hint = null;
+    window.__layout_hint = null;
+    window.__scene_hint = null;
+
+    function showBubble(text) {
+      const b = document.getElementById('bubble');
+      b.innerText = text;
+      b.style.display = 'block';
+      setTimeout(() => { b.style.opacity = 1; }, 10);
+      setTimeout(() => {
+        b.style.opacity = 0;
+        setTimeout(() => { b.style.display = 'none'; }, 300);
+      }, 4000);
+    }
+
+    function setMouthOpen(y) {
+      if (currentModel && currentModel.internalModel && currentModel.internalModel.coreModel) {
+        currentModel.internalModel.coreModel.setParameterValueById('ParamMouthOpenY', y);
+        return;
+      }
+      if (fallbackEnabled && fallbackMouthInner) {
+        const v = Math.max(0, Math.min(1, Number(y || 0)));
+        fallbackMouthInner.style.transform = `scaleY(${v})`;
+      }
+    }
+
+    function enableFallback(reasonText) {
+      fallbackEnabled = true;
+      const host = document.getElementById('fallback-avatar');
+      const hint = document.getElementById('fallback-hint');
+      fallbackMouthInner = document.getElementById('fallback-mouth-inner');
+      if (hint && reasonText) {
+        hint.innerHTML = `Mari（离线模式）<br/>${reasonText}`;
+      }
+      if (host) {
+        host.style.display = 'flex';
+      }
+      const card = document.getElementById('fallback-card');
+      if (card) {
+        card.addEventListener('click', () => {
+          if (backend && backend.log) backend.log('Fallback avatar clicked');
+          showBubble('老师，我在（离线形态）。');
+        });
+      }
+    }
+
+    function connectBridge() {
+      try {
+        if (typeof QWebChannel === 'undefined' || !qt || !qt.webChannelTransport) {
+          return;
+        }
+        new QWebChannel(qt.webChannelTransport, (channel) => {
+          backend = channel.objects.backend;
+          if (backend && backend.log) backend.log("Bridge connected!");
+        });
+      } catch (e) {
+        return;
+      }
+    }
+
+    function loadScript(url) {
+      return new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = url;
+        s.async = true;
+        s.onload = () => resolve(url);
+        s.onerror = () => reject(new Error('failed:' + url));
+        document.head.appendChild(s);
+      });
+    }
+
+    async function loadFirstOk(urls) {
+      for (const u of urls) {
+        try {
+          await loadScript(u);
+          return u;
+        } catch (e) {
+          continue;
+        }
+      }
+      throw new Error('all_failed');
+    }
+
+    function _getQueryParam(key) {
+      try {
+        const p = new URLSearchParams(window.location.search || '');
+        return p.get(key);
+      } catch (e) {
+        return null;
+      }
+    }
+
+    async function initLive2D() {
+      const cubismCoreUrls = [
+        'vendor/live2dcubismcore.min.js',
+        'https://cubism.live2d.com/sdk-web/cubismcore/live2dcubismcore.min.js'
+      ];
+      const pixiUrls = [
+        'vendor/node_modules/pixi.js/dist/browser/pixi.min.js',
+        'vendor/pixi.min.js',
+        'https://cdn.jsdelivr.net/npm/pixi.js@6.5.8/dist/browser/pixi.min.js',
+        'https://unpkg.com/pixi.js@6.5.8/dist/browser/pixi.min.js',
+        'https://cdnjs.cloudflare.com/ajax/libs/pixi.js/6.5.8/browser/pixi.min.js'
+      ];
+      const live2dUrls = [
+        'vendor/node_modules/pixi-live2d-display/dist/cubism4.min.js',
+        'vendor/pixi-live2d-display.min.js',
+        'https://cdn.jsdelivr.net/npm/pixi-live2d-display@0.4.0/dist/cubism4.min.js',
+        'https://unpkg.com/pixi-live2d-display@0.4.0/dist/cubism4.min.js'
+      ];
+
+      try {
+        if (typeof Live2DCubismCore === 'undefined') {
+          await loadFirstOk(cubismCoreUrls);
+        }
+      } catch (e) {
+        try { console.error('Cubism Core load failed', e); } catch (_) {}
+        try { if (backend && backend.log) backend.log('Cubism Core load failed'); } catch (_) {}
+        enableFallback('Cubism Core 加载失败（无网络且未提供本地 vendor）。');
+        showBubble('右侧离线模式：Cubism Core 加载失败。');
+        return;
+      }
+
+      try {
+        if (typeof PIXI === 'undefined') {
+          await loadFirstOk(pixiUrls);
+        }
+      } catch (e) {
+        try { console.error('PixiJS load failed', e); } catch (_) {}
+        try { if (backend && backend.log) backend.log('PixiJS load failed'); } catch (_) {}
+        enableFallback('PixiJS 加载失败（无网络/无CDN）。');
+        showBubble('右侧离线模式：PixiJS 加载失败。');
+        return;
+      }
+
+      try {
+        if (!PIXI || !PIXI.utils) {
+          showBubble('PixiJS 初始化异常（检查网络/CDN）。');
+          return;
+        }
+        if (!PIXI.live2d || !PIXI.live2d.Live2DModel) {
+          await loadFirstOk(live2dUrls);
+        }
+      } catch (e) {
+        try { console.error('Live2D display library load failed', e); } catch (_) {}
+        try { if (backend && backend.log) backend.log('Live2D display library load failed'); } catch (_) {}
+        enableFallback('Live2D 渲染库加载失败（无网络/无CDN）。');
+        showBubble('右侧离线模式：Live2D 渲染库加载失败。');
+        return;
+      }
+
+      if (!PIXI.live2d || !PIXI.live2d.Live2DModel) {
+        enableFallback('Live2D 渲染库未就绪（无网络/无CDN）。');
+        showBubble('右侧离线模式：Live2D 渲染库未就绪。');
+        return;
+      }
+
+      const app = new PIXI.Application({
+        view: document.getElementById('canvas'),
+        autoStart: true,
+        resizeTo: window,
+        backgroundAlpha: 0
+      });
+
+      if (!dockContainer) {
+        dockContainer = new PIXI.Container();
+        app.stage.addChild(dockContainer);
+      }
+
+      const modelFromQuery = _getQueryParam('model');
+      const modelUrl = modelFromQuery && String(modelFromQuery).trim()
+        ? String(modelFromQuery).trim()
+        : 'https://cdn.jsdelivr.net/gh/Eikanya/Live2d-model/Hiyori/Hiyori.model3.json';
+
+      function layoutModel(model) {
+        // Robust framing across different model sizes:
+        // - pivot to bottom-center based on real local bounds
+        // - scale to fit both width & height with padding
+        let b;
+        try {
+          b = model.getLocalBounds();
+        } catch (e) {
+          b = { x: 0, y: 0, width: model.width || 1, height: model.height || 1 };
+        }
+
+        const availH = Math.max(1, window.innerHeight);
+        const bw = Math.max(1, Number(b.width || 1));
+        const bh = Math.max(1, Number(b.height || 1));
+
+        const sh = window.__scene_hint || { cx: 0, overflow: 0, bottomPad: 0, anchorRight: 0, controlRight: 0, topLimitRatio: 0.52, headTop: 0 };
+        const baseCenterX = (typeof sh.cx === 'number' && sh.cx > 0) ? sh.cx : (window.innerWidth * 0.5);
+        const bottomPad = Math.max(0, Number(sh.bottomPad || 0));
+        let overflow = Math.max(0, Number(sh.overflow || 0));
+        overflow = Math.min(overflow, window.innerHeight * 0.80);
+
+        const stageLeft = Math.max(0, Number(sh.controlRight || 0));
+        const stageRight = Math.max(0, Number(sh.anchorRight || 0));
+        const topLimitRatio = Math.max(0.20, Math.min(0.85, Number(sh.topLimitRatio || 0.52)));
+        const headTopPx = Math.max(0, Number(sh.headTop || 0));
+
+        // Full-body framing: pivot at bottom-center and place at bottom-mid of the gap.
+        try {
+          model.pivot.set(b.x + bw / 2, b.y + bh);
+        } catch (e) {
+          // ignore
+        }
+
+        // Two modes:
+        // 1) stage-bounds mode (older): constrain into [stageLeft, stageRight]
+        // 2) bottom-layout mode (new): anchor to right edge of this view and optionally align head top
+        let stageW = 0;
+        if (stageRight > 0 && stageLeft > 0) {
+          stageW = Math.max(0, stageRight - stageLeft);
+        }
+
+        // Stage-bounds mode keeps responsive scaling (width+height). Bottom-layout mode keeps fixed scale
+        // w.r.t. height changes (splitter drag): scale is based on width only so dragging vertically won't shrink Mary.
+        const targetH = Math.max(1, window.innerHeight * 1.12);
+        const targetW = stageW > 0 ? Math.max(1, stageW * 0.92) : Math.max(1, window.innerWidth * 1.35);
+
+        let scale;
+        if (stageW > 0) {
+          const baseScale = Math.min(targetW / bw, targetH / bh);
+          scale = baseScale;
+        } else {
+          const baseScaleW = (targetW / bw);
+          scale = baseScaleW * 1.00;
+        }
+
+        // Hard safety clamp (avoid NaN/Infinity/extremes).
+        if (!isFinite(scale) || scale <= 0) scale = 1.0;
+        scale = Math.max(0.01, Math.min(50.0, scale));
+
+        let bottomY;
+        if (stageW > 0) {
+          bottomY = window.innerHeight + overflow - bottomPad;
+
+          // Enforce: avatar head stays below a top-limit line (keeps upper content above her head).
+          const topLimitY = window.innerHeight * topLimitRatio;
+          const maxScaleByTop = (bottomY - topLimitY) / bh;
+          if (isFinite(maxScaleByTop) && maxScaleByTop > 0) {
+            scale = Math.min(scale, maxScaleByTop);
+          }
+        } else {
+          // Bottom-layout mode:
+          // - keep scale independent from height
+          // - keep head near splitter (top of this view) using headTopPx
+          bottomY = headTopPx + (bh * scale) + bottomPad;
+        }
+
+        model.scale.set(scale);
+
+        const halfW = (bw * scale) * 0.5;
+        let centerX = baseCenterX;
+
+        if (stageW > 0) {
+          // Anchor near chat edge (slightly inside chat padding). anchorRight represents the desired right-edge.
+          if (stageRight > 0) {
+            centerX = stageRight - halfW;
+          }
+          // Clamp into the gap so it never overlaps the Control Tower.
+          const minX = stageLeft > 0 ? (stageLeft + halfW + 8) : 0;
+          const maxX = stageRight > 0 ? (stageRight - halfW) : window.innerWidth;
+          centerX = Math.max(minX, Math.min(maxX, centerX));
+          centerX = Math.max(0, Math.min(window.innerWidth, centerX));
+        } else {
+          // New bottom-layout: anchor to the right edge of this view.
+          const edgePad = 2;
+          centerX = window.innerWidth - edgePad - (halfW * 0.72);
+          centerX = Math.max(0, Math.min(window.innerWidth, centerX));
+        }
+
+        model.position.set(centerX, bottomY);
+
+        // Eye anchor (approximate midpoint between eyes) in screen coordinates.
+        // Model pivot is bottom-center; bounds height is bh.
+        try {
+          const cfg = window.__track_cfg;
+          const topY = bottomY - (bh * scale);
+          const eyeYRRaw = Number(cfg.eyeYOffsetRatio);
+          const eyeYR = Math.max(0.0, Math.min(0.40, isFinite(eyeYRRaw) ? eyeYRRaw : 0.12));
+          const eyeY = topY + (bh * scale * eyeYR);
+          window.__eye_anchor = {
+            x: Number(centerX || 0),
+            y: Number(eyeY || 0),
+            w: Number(bw * scale),
+            h: Number(bh * scale)
+          };
+        } catch (e) {
+          // ignore
+        }
+
+        // Ensure no bust mask is applied in the new layout.
+        try {
+          dockContainer.mask = null;
+          if (cornerMask) cornerMask.visible = false;
+        } catch (e) {
+          // ignore
+        }
+      }
+
+      PIXI.live2d.Live2DModel.from(modelUrl).then(model => {
+        dockContainer.removeChildren();
+        dockContainer.addChild(model);
+        currentModel = model;
+        layoutModel(model);
+
+        // Smooth gaze application inside PIXI ticker to reduce runJavaScript overhead.
+        gazeState = { tx: 0, ty: 0, x: 0, y: 0, acc: 0 };
+        app.ticker.add((delta) => {
+          if (!currentModel || !gazeState) return;
+          // Apply every frame (60fps ticker), keep smoothing to avoid jitter.
+
+          const cfg = window.__track_cfg;
+          const a = cfg.lockon ? 0.32 : 0.18;
+          gazeState.x = gazeState.x + (gazeState.tx - gazeState.x) * a;
+          gazeState.y = gazeState.y + (gazeState.ty - gazeState.y) * a;
+
+          const nx = gazeState.x;
+          const ny = gazeState.y;
+          const nx2 = (cfg && cfg.invertX) ? (-nx) : nx;
+          const downB = Math.max(1.0, Math.min(2.2, Number(cfg.downLookBoost || 1.35)));
+          const nyFocus = ny < 0 ? (ny * downB) : ny;
+
+          try {
+            if (typeof currentModel.focus === 'function') {
+              currentModel.focus(nx2, nyFocus);
+            }
+          } catch (e) {}
+
+          if (currentModel.internalModel && currentModel.internalModel.coreModel) {
+            try {
+              const core = currentModel.internalModel.coreModel;
+              const leftS = Math.max(0.10, Math.min(2.0, Number(cfg.leftTurnScale || 0.90)));
+              const rightS = Math.max(0.10, Math.min(2.0, Number(cfg.rightTurnScale || 1.35)));
+              const rb = Math.max(0.80, Math.min(2.0, Number(cfg.rightHeadBoost || 1.20)));
+              const lx = (nx2 < 0) ? (nx2 * leftS) : (nx2 * rightS);
+              const hx = (lx > 0) ? (lx * rb) : lx;
+              const downB = Math.max(1.0, Math.min(2.2, Number(cfg.downLookBoost || 1.35)));
+              const nyb = ny < 0 ? ny * downB : ny;
+              core.setParameterValueById('ParamEyeBallX', Math.max(-1, Math.min(1, lx * 1.70)));
+              core.setParameterValueById('ParamEyeBallY', Math.max(-1, Math.min(1, nyb * 1.35)));
+              const ny2 = nyb < 0 ? nyb * 1.15 : nyb;
+              core.setParameterValueById('ParamAngleX', hx * 24.0);
+              core.setParameterValueById('ParamAngleY', ny2 * 18.0);
+              core.setParameterValueById('ParamBodyAngleX', hx * 4.8);
+              core.setParameterValueById('ParamBodyAngleY', ny2 * 5.0);
+            } catch (e) {}
+          }
+        });
+
+        model.interactive = true;
+        model.on('hit', (hitAreas) => {
+          if (hitAreas.includes('Body')) {
+            try {
+              if (typeof model.motion === 'function') {
+                model.motion('TapBody');
+              }
+            } catch (e) {
+              // Ignore missing motions for custom models
+            }
+            if (backend && backend.log) backend.log("Mari poked!");
+            showBubble("老师，有什么需要玛丽帮忙的吗？");
+          }
+        });
+
+        showBubble("老师，你来了。玛丽一直在等你呢。");
+      }).catch(err => {
+        console.error(err);
+        enableFallback('模型加载失败（无网络/无CDN）。');
+        showBubble('右侧离线模式：模型加载失败。');
+      });
+
+      window.addEventListener('resize', () => {
+        if (currentModel) layoutModel(currentModel);
+      });
+    }
+
+    // Centralized tuning knobs (edit these values to fine-tune gaze center & amplitude).
+    window.__track_cfg = window.__track_cfg || {
+      lockon: true,
+      invertX: false,
+      // Gaze center calibration:
+      // - Increase (toward 0) to move center to the RIGHT; decrease (more negative) to move LEFT.
+      eyeXOffsetRatio: -0.04,
+      // Smaller => higher on face; larger => lower.
+      eyeYOffsetRatio: 0.13,
+      // Asymmetric turn calibration:
+      leftTurnScale: 0.90,
+      rightTurnScale: 1.35,
+      rightHeadBoost: 1.20,
+      // Downward look tuning (mouse below eye anchor => negative Y):
+      // - Larger => stronger downward look.
+      downLookBoost: 1.35,
+      // Vertical sensitivity: denomY = max(70, anchorHeight * denomYScale)
+      // - Smaller => more sensitive (less mouse travel needed).
+      denomYScale: 0.24
+    };
+
+    connectBridge();
+    initLive2D();
+
+    // Expose for Python runJavaScript()
+    window.showBubble = showBubble;
+    window.setMouthOpen = setMouthOpen;
+    window.setLayoutHint = function(leftW, rightW, topPad, bottomPad) {
+      try {
+        window.__layout_hint = {
+          lw: Number(leftW || 0),
+          rw: Number(rightW || 0),
+          top: Number(topPad || 0),
+          bottom: Number(bottomPad || 0)
+        };
+      } catch (e) {
+        return;
+      }
+    };
+
+    window.setSceneHint = function(controlCenterX, bottomOverflowPx, bottomPad, anchorRightX, controlRightX, topLimitRatio, headTopPx) {
+      try {
+        window.__scene_hint = {
+          cx: Number(controlCenterX || 0),
+          overflow: Number(bottomOverflowPx || 0),
+          bottomPad: Number(bottomPad || 0),
+          anchorRight: Number(anchorRightX || 0),
+          controlRight: Number(controlRightX || 0),
+          topLimitRatio: Number(topLimitRatio || 0.52),
+          headTop: Number(headTopPx || 0)
+        };
+      } catch (e) {
+        return;
+      }
+
+      try {
+        if (currentModel) {
+          window.dispatchEvent(new Event('resize'));
+        }
+      } catch (e) {
+        return;
+      }
+    };
+
+    window.setEye = function(x, y) {
+      if (!gazeState) {
+        gazeState = { tx: 0, ty: 0, x: 0, y: 0, acc: 0 };
+      }
+
+      const cfg = window.__track_cfg || {};
+      const gain = cfg.lockon ? 2.15 : 1.75;
+      const clamp = (v) => Math.max(-1, Math.min(1, v));
+      const applyDeadzone = (v, dz) => {
+        const av = Math.abs(v);
+        if (av <= dz) return 0;
+        const s = v >= 0 ? 1 : -1;
+        return s * ((av - dz) / (1 - dz));
+      };
+      const curve = (v) => {
+        const s = v >= 0 ? 1 : -1;
+        const a = Math.min(1, Math.abs(v));
+        return s * Math.pow(a, 1.08);
+      };
+
+      let xx = Number(x || 0);
+      if (cfg && cfg.invertX) xx = -xx;
+      const leftS = Math.max(0.10, Math.min(2.0, Number(cfg.leftTurnScale || 0.90)));
+      const rightS = Math.max(0.10, Math.min(2.0, Number(cfg.rightTurnScale || 1.35)));
+      if (xx < 0) xx = xx * leftS;
+      if (xx > 0) xx = xx * rightS;
+      xx = applyDeadzone(clamp(xx), 0.04);
+
+      let yy = Number(y || 0);
+      const downB = Math.max(1.0, Math.min(2.2, Number(cfg.downLookBoost || 1.35)));
+      if (yy < 0) yy = yy * downB;
+      yy = applyDeadzone(clamp(yy), 0.04);
+
+      gazeState.tx = curve(clamp(xx * gain));
+      gazeState.ty = curve(clamp(yy * gain));
+    };
+
+    window.setMousePx = function(mx, my) {
+      const cfg = window.__track_cfg || {};
+      const a = window.__eye_anchor;
+      if (!a || !isFinite(a.x) || !isFinite(a.y)) {
+        // Fallback: treat as normalized around view center.
+        const nx = ((Number(mx || 0) / Math.max(1, window.innerWidth)) - 0.5) * 2.0;
+        const ny = (0.5 - (Number(my || 0) / Math.max(1, window.innerHeight))) * 2.0;
+        if (window.setEye) window.setEye(nx, ny);
+        return;
+      }
+
+      const eyeX = Number(a.x || 0) + (Number(cfg.eyeXOffsetRatio || 0) * Number(a.w || 0));
+      const dx = Number(mx || 0) - eyeX;
+      const dy = a.y - Number(my || 0);
+      const denomX = Math.max(90, Number(a.w || 0) * 0.28);
+      const dyScale = Math.max(0.12, Math.min(0.40, Number(cfg.denomYScale || 0.24)));
+      const denomY = Math.max(70, Number(a.h || 0) * dyScale);
+      let nx = Math.max(-1, Math.min(1, dx / denomX));
+      const leftS = Math.max(0.10, Math.min(2.0, Number(cfg.leftTurnScale || 0.90)));
+      const rightS = Math.max(0.10, Math.min(2.0, Number(cfg.rightTurnScale || 1.35)));
+      if (nx < 0) nx = nx * leftS;
+      if (nx > 0) nx = nx * rightS;
+      const ny = Math.max(-1, Math.min(1, dy / denomY));
+      if (window.setEye) window.setEye(nx, ny);
+    };
+
+    window.setDockHint = function(centerX, topY, width, height) {
+      try {
+        window.__dock_hint = {
+          cx: Number(centerX || 0),
+          top: Number(topY || 0),
+          w: Number(width || 0),
+          h: Number(height || 0)
+        };
+      } catch (e) {
+        return;
+      }
+    };
+    window.setTheme = function(theme) {
+      const t = String(theme || '').toLowerCase() === 'light' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', t);
+    };
+  </script>
+</body>
+</html>

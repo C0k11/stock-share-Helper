@@ -77,9 +77,15 @@
     <div id="chart"></div>
   </div>
 
-  <div class="card" id="tradeLogCard">
-    <h3>Recent Trades</h3>
-    <div id="tradeLog">(No trades yet)</div>
+  <div class="card" id="bottomPanels" style="display: flex; gap: 14px;">
+    <div style="flex: 1;">
+      <h3>Agent Terminal</h3>
+      <div id="agentLog" style="height: 180px; overflow-y: auto; font-family: 'Consolas', 'Monaco', monospace; font-size: 12px; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 8px;">(Waiting for logs...)</div>
+    </div>
+    <div style="flex: 1;">
+      <h3>Recent Trades</h3>
+      <div id="tradeLog" style="height: 180px; overflow-y: auto;">(No trades yet)</div>
+    </div>
   </div>
 
   <div class="card hidden" id="traceCard">
@@ -419,10 +425,33 @@
       }).join('');
     }
 
+    async function loadAgentLogs() {
+      try {
+        const data = await apiGet('/live/agent_logs?limit=50');
+        const logs = data.logs || [];
+        const el = document.getElementById('agentLog');
+        if (!logs.length) {
+          el.innerHTML = '<span style="color: #6b7280;">(Waiting for logs...)</span>';
+          return;
+        }
+        el.innerHTML = logs.slice(-30).map(log => {
+          let color = '#9ca3af';
+          if (log.type === 'fill') color = '#10b981';
+          else if (log.type === 'error') color = '#ef4444';
+          else if (log.priority >= 2) color = '#60a5fa';
+          return `<div style="color: ${color}; margin-bottom: 2px;"><span style="color: #6b7280;">[${log.time}]</span> ${log.message}</div>`;
+        }).join('');
+        el.scrollTop = el.scrollHeight;
+      } catch (e) {
+        // Silently fail if not available
+      }
+    }
+
     async function loadLiveData() {
       setLiveStatus('Refreshing...');
       await loadLiveStatus();
       await loadLiveChart();
+      await loadAgentLogs();
       renderTradeLog();
       setLiveStatus('Updated ' + new Date().toLocaleTimeString());
     }
