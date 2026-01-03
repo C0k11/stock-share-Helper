@@ -493,6 +493,10 @@ def _extract_run_from_text(text: str) -> Optional[str]:
 
 def _maybe_build_trade_rag(*, user_text: str, ctx: Dict[str, Any]) -> str:
     """Return RAG context string or empty."""
+    # Skip historical RAG if live trading is active - use real-time data instead
+    if _live_runner is not None:
+        return ""  # Live trading context is already in _build_secretary_context
+    
     ticker = _extract_ticker_from_text(user_text)
     if not ticker:
         return ""

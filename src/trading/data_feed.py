@@ -178,9 +178,12 @@ def create_data_feed(
     
     if source == "yfinance" or (source == "auto" and HAS_YFINANCE):
         try:
-            return YFinanceDataFeed(tickers, interval_sec)
-        except Exception:
-            pass
+            feed = YFinanceDataFeed(tickers, interval_sec)
+            print(f"[DataFeed] Using REAL market data (yfinance)")
+            return feed
+        except Exception as e:
+            print(f"[DataFeed] yfinance failed: {e}, falling back to simulated")
     
     # Fallback to simulated
+    print("[DataFeed] WARNING: Using SIMULATED data (not real market!)")
     return SimulatedDataFeed(tickers, interval_sec)
