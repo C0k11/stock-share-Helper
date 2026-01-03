@@ -123,6 +123,53 @@
 
 ---
 
+## Mari Agent Hub（新闻分发 + 多分析员）
+
+新增后端能力：从聊天或 API 提交一段新闻（可附 URL），系统自动分发给多个分析员（macro/risk/factcheck/sentiment），回收结构化结果并生成可执行总结；全流程写入审计日志，并保存到 Mari 长期记忆。
+
+### API
+
+- `POST /api/v1/news/submit`：提交新闻（text/url/source）并返回 `news_id`
+- `GET /api/v1/news/{news_id}`：查询分析进度与最终总结
+- `GET /api/v1/agents/audit?limit=200`：查看审计日志（JSONL）
+- `GET /api/v1/tools/fetch_url?url=...`：网页抓取工具（支持全网，默认阻断内网/localhost）
+- `POST /api/v1/actions/execute`：统一动作执行器（按钮/系统动作）
+
+### Chat 使用
+
+在聊天框里直接输入：
+
+- `/news 这里粘贴新闻正文或链接`
+
+完成后会返回 `news_id`，你也可以把 `news_id` 再发给 Mari 获取总结。
+
+### ACTION（让 Mari “点按钮”）
+
+当 Mari 需要触发按钮/系统动作时，会输出一个或多个：
+
+```action
+{"action":"start_rl","params":{}}
+```
+
+桌面端可配置为自动执行（见 `configs/secretary.yaml`）。
+
+支持的 action：
+
+- `start_rl` / `stop_rl`
+- `set_mode`（params: `{ "mode": "online" | "offline" }`）
+- `submit_news`（params: `{text, url?, source?}`）
+- `fetch_url`（params: `{url, timeout_sec?}`）
+- `remember`（params: `{content, category?, importance?}`）
+
+### 配置开关（configs/secretary.yaml）
+
+- `network.allow_all`: 是否允许全网抓取
+- `network.block_private`: 是否阻断内网/localhost（SSRF 防护）
+- `actions.auto_execute`: 桌面端是否自动执行 `action` 指令
+- `rl.auto_start`: Live runner 启动时是否自动开启在线 RL
+
+---
+
 ## MVP 定义（v1）
 
 | 维度 | 决定 |

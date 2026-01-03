@@ -182,6 +182,103 @@ def _extract_news_id(text: str) -> Optional[str]:
     return str(m.group(1))
 
 
+def _is_portfolio_question(text: str) -> bool:
+    t = str(text or "")
+    keys = [
+        "持仓", "仓位", "现金", "资金", "余额", "多少钱", "总资产", "净值", "pnl", "盈亏",
+        "赚", "亏", "交易", "成交", "买了", "卖了", "多少股", "持有",
+        "我们现在", "目前",
+    ]
+    tl = t.lower()
+    for k in keys:
+        if k in t or k.lower() in tl:
+            return True
+    return False
+
+
+def _format_money(x: Any) -> str:
+    try:
+        return f"${float(x):,.2f}"
+    except Exception:
+        return "$0.00"
+
+
+def _live_portfolio_answer(user_text: str) -> str:
+    if _live_runner is None:
+        return "Sensei, 当前没有正在运行的实盘/模拟盘会话，我拿不到实时仓位数据呢…"
+
+    cash = float(getattr(_live_runner.broker, "cash", 0.0) or 0.0)
+    initial = float(getattr(_live_runner.broker, "initial_cash", getattr(_live_runner, "initial_cash", 0.0)) or 0.0)
+    positions = getattr(_live_runner.broker, "positions", {})
+    if not isinstance(positions, dict):
+        positions = {}
+
+    total_value = cash
+    pos_lines: List[str] = []
+    best = None  # (pnl, ticker)
+    worst = None
+    biggest = None  # (value, ticker)
+
+    for ticker, pos in positions.items():
+        tk = str(ticker).upper()
+        try:
+            shares = float(getattr(pos, "shares", 0.0) or 0.0)
+            avg = float(getattr(pos, "avg_price", 0.0) or 0.0)
+        except Exception:
+            continue
+        if shares == 0:
+            continue
+
+        current = avg
+        try:
+            if hasattr(_live_runner, "price_history") and tk in _live_runner.price_history and _live_runner.price_history[tk]:
+                current = float(_live_runner.price_history[tk][-1].get("close", avg) or avg)
+        except Exception:
+            current = avg
+
+        value = shares * current
+        pnl = (current - avg) * shares
+        total_value += value
+
+        pos_lines.append(f"- {tk}: {shares:.0f} 股 @ 均价 {avg:.2f}，现价 {current:.2f}，浮动盈亏 {pnl:+.2f}")
+
+        if biggest is None or value > biggest[0]:
+            biggest = (value, tk)
+        if best is None or pnl > best[0]:
+            best = (pnl, tk)
+        if worst is None or pnl < worst[0]:
+            worst = (pnl, tk)
+
+    total_pnl = total_value - initial
+    trade_count = len(getattr(_live_runner, "trade_log", []) or [])
+    mode = str(getattr(_live_runner, "trading_mode", "online") or "online")
+
+    lines: List[str] = []
+    lines.append(f"Sensei, 我按实时引擎状态给您汇报（mode={mode}）…")
+    lines.append(f"现金：{_format_money(cash)}")
+    lines.append(f"总资产：{_format_money(total_value)}（总盈亏 {total_pnl:+.2f}）")
+    lines.append(f"交易次数：{trade_count}")
+
+    if pos_lines:
+        lines.append("当前持仓：")
+        lines.extend(pos_lines[:12])
+        if biggest is not None:
+            lines.append(f"最大仓位：{biggest[1]}")
+        if best is not None:
+            lines.append(f"当前赚最多：{best[1]}（{best[0]:+.2f}）")
+        if worst is not None:
+            lines.append(f"当前亏最多：{worst[1]}（{worst[0]:+.2f}）")
+    else:
+        lines.append("当前没有持仓（positions=0）。")
+
+    return "\n".join(lines).strip()
+
+
+def _is_news_question(text: str) -> bool:
+    t = str(text or "")
+    return ("新闻" in t) or ("news" in t.lower())
+
+
 def _wait_news_done(news_id: str, timeout_sec: int = 25) -> Optional[Dict[str, Any]]:
     t0 = time.time()
     while time.time() - t0 < float(timeout_sec):
@@ -1209,6 +1306,14 @@ def _secretary_reply(text: str, ctx: Dict[str, Any]) -> str:
         url = _extract_first_url(t)
         news_id = _enqueue_news_job(text=t, url=url, source="chat")
         return f"Sensei, 我收到新闻了，已分发给分析员。编号：{news_id}（你可以直接把这个编号发给我获取总结）"
+
+    # Portfolio state questions must be answered from live engine state (no LLM guessing)
+    if _is_portfolio_question(t):
+        return _live_portfolio_answer(t)
+
+    # News questions without concrete input -> ask user to submit news to avoid fabrication
+    if _is_news_question(t) and (not _extract_news_id(t)):
+        return "Sensei, 如果要我让分析员评估‘新闻是否影响股价’，请您用 `/news` 把新闻正文或链接贴给我；否则我这边不会凭空编造结论呢…"
 
     # Handle memory commands first
     mem_cmd = parse_memory_command(t)
