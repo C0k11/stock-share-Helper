@@ -378,34 +378,6 @@ class MainWindow(QMainWindow):
         except Exception as e:
             print(f"[TTS Config] Error loading config: {e}")
 
-    def _extract_action_blocks(self, text: str) -> tuple[str, list[dict]]:
-        t = str(text or "")
-        actions: list[dict] = []
-        pattern = re.compile(r"```action\s*(\{[\s\S]*?\})\s*```", re.IGNORECASE)
-
-        def _repl(m: re.Match) -> str:
-            raw = m.group(1)
-            try:
-                obj = json.loads(raw)
-                if isinstance(obj, dict) and isinstance(obj.get("action"), str):
-                    actions.append(obj)
-            except Exception:
-                pass
-            return ""
-
-        cleaned = pattern.sub(_repl, t)
-        cleaned = cleaned.strip()
-        return cleaned, actions
-
-    def _post_action(self, action_obj: dict) -> dict:
-        url = f"{self._api_base}/api/v1/actions/execute"
-        data = json.dumps(action_obj, ensure_ascii=False).encode("utf-8")
-        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
-        with urllib.request.urlopen(req, timeout=60.0) as resp:
-            raw = resp.read().decode("utf-8", errors="replace")
-        obj: Any = json.loads(raw)
-        return obj if isinstance(obj, dict) else {"ok": False, "error": "bad response"}
-
         if start_services:
             self._start_services(api_host=api_host, api_port=api_port, ui_host=ui_host, ui_port=ui_port)
 
@@ -547,6 +519,34 @@ class MainWindow(QMainWindow):
             bottom_splitter.splitterMoved.connect(lambda _pos, _idx: self._push_dock_hint())
         except Exception:
             pass
+
+    def _extract_action_blocks(self, text: str) -> tuple[str, list[dict]]:
+        t = str(text or "")
+        actions: list[dict] = []
+        pattern = re.compile(r"```action\s*(\{[\s\S]*?\})\s*```", re.IGNORECASE)
+
+        def _repl(m: re.Match) -> str:
+            raw = m.group(1)
+            try:
+                obj = json.loads(raw)
+                if isinstance(obj, dict) and isinstance(obj.get("action"), str):
+                    actions.append(obj)
+            except Exception:
+                pass
+            return ""
+
+        cleaned = pattern.sub(_repl, t)
+        cleaned = cleaned.strip()
+        return cleaned, actions
+
+    def _post_action(self, action_obj: dict) -> dict:
+        url = f"{self._api_base}/api/v1/actions/execute"
+        data = json.dumps(action_obj, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=60.0) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+        obj: Any = json.loads(raw)
+        return obj if isinstance(obj, dict) else {"ok": False, "error": "bad response"}
 
     def _apply_initial_splitter_sizes(self) -> None:
         try:
