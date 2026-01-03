@@ -31,31 +31,45 @@
   </style>
 </head>
 <body>
-  <div class="card">
-    <h2>Control Tower</h2>
-    <div class="tabs">
-      <div class="tab active" id="tabLive" onclick="switchTab('live')"><span class="live-indicator"></span>Live Trading</div>
-      <div class="tab" id="tabBacktest" onclick="switchTab('backtest')">Backtest</div>
+  <div class="card" style="display: flex; gap: 16px;">
+    <!-- Left: Controls -->
+    <div style="flex: 1;">
+      <h2>Control Tower</h2>
+      <div class="tabs">
+        <div class="tab active" id="tabLive" onclick="switchTab('live')"><span class="live-indicator"></span>Live Trading</div>
+        <div class="tab" id="tabBacktest" onclick="switchTab('backtest')">Backtest</div>
+      </div>
+
+      <!-- Live Trading Controls -->
+      <div id="liveControls">
+        <div class="row" style="margin-bottom: 10px;">
+          <select id="liveTickerSelect"></select>
+          <button id="btnRefresh" onclick="loadLiveData()">Refresh</button>
+          <label style="font-size: 13px;"><input type="checkbox" id="autoRefresh" checked> Auto (5s)</label>
+          <span class="small" id="liveStatus"></span>
+        </div>
+        <div class="row">
+          <div class="metric"><div class="label">Cash</div><div class="val" id="l_cash">--</div></div>
+          <div class="metric"><div class="label">Positions</div><div class="val" id="l_positions">--</div></div>
+          <div class="metric"><div class="label">Trades</div><div class="val" id="l_trades">--</div></div>
+          <div class="metric"><div class="label">Status</div><div class="val" id="l_status">--</div></div>
+        </div>
+      </div>
     </div>
 
-    <!-- Live Trading Controls -->
-    <div id="liveControls">
-      <div class="row" style="margin-bottom: 10px;">
-        <select id="liveTickerSelect"></select>
-        <button id="btnRefresh" onclick="loadLiveData()">Refresh</button>
-        <label style="font-size: 13px;"><input type="checkbox" id="autoRefresh" checked> Auto (5s)</label>
-        <span class="small" id="liveStatus"></span>
-      </div>
-      <div class="row">
-        <div class="metric"><div class="label">Cash</div><div class="val" id="l_cash">--</div></div>
-        <div class="metric"><div class="label">Positions</div><div class="val" id="l_positions">--</div></div>
-        <div class="metric"><div class="label">Trades</div><div class="val" id="l_trades">--</div></div>
-        <div class="metric"><div class="label">Status</div><div class="val" id="l_status">--</div></div>
+    <!-- Right: Agent Decisions -->
+    <div id="agentDecisions" style="flex: 1; border-left: 1px solid rgba(255,255,255,0.1); padding-left: 16px;">
+      <h3 style="margin-bottom: 8px;">🤖 Agent Decisions</h3>
+      <div id="agentDecisionPanel" style="height: 120px; overflow-y: auto; font-family: 'Consolas', monospace; font-size: 11px; background: rgba(0,0,0,0.25); border-radius: 8px; padding: 8px;">
+        <div style="color: #6b7280;">(Waiting for agent activity...)</div>
       </div>
     </div>
+  </div>
 
-    <!-- Backtest Controls (hidden by default) -->
-    <div id="backtestControls" class="hidden">
+  <!-- Backtest Controls Card (hidden by default) -->
+  <div class="card hidden" id="backtestControlsCard">
+    <div id="backtestControls">
+      <h3>Backtest Analysis</h3>
       <div class="row" style="margin-bottom: 10px;">
         <select id="runSelect"></select>
         <select id="systemSelect"></select>
@@ -108,8 +122,9 @@
       document.getElementById('tabLive').classList.toggle('active', tab === 'live');
       document.getElementById('tabBacktest').classList.toggle('active', tab === 'backtest');
       document.getElementById('liveControls').classList.toggle('hidden', tab !== 'live');
-      document.getElementById('backtestControls').classList.toggle('hidden', tab !== 'backtest');
-      document.getElementById('tradeLogCard').classList.toggle('hidden', tab !== 'live');
+      document.getElementById('agentDecisions').classList.toggle('hidden', tab !== 'live');
+      document.getElementById('backtestControlsCard').classList.toggle('hidden', tab !== 'backtest');
+      document.getElementById('bottomPanels').classList.toggle('hidden', tab !== 'live');
       document.getElementById('traceCard').classList.toggle('hidden', tab !== 'backtest');
       
       if (tab === 'live') {
@@ -429,19 +444,50 @@
       try {
         const data = await apiGet('/live/agent_logs?limit=50');
         const logs = data.logs || [];
+        
+        // Bottom terminal panel
         const el = document.getElementById('agentLog');
         if (!logs.length) {
           el.innerHTML = '<span style="color: #6b7280;">(Waiting for logs...)</span>';
-          return;
+        } else {
+          el.innerHTML = logs.slice(-30).map(log => {
+            let color = '#9ca3af';
+            if (log.type === 'fill') color = '#10b981';
+            else if (log.type === 'error') color = '#ef4444';
+            else if (log.priority >= 2) color = '#60a5fa';
+            return `<div style="color: ${color}; margin-bottom: 2px;"><span style="color: #6b7280;">[${log.time}]</span> ${log.message}</div>`;
+          }).join('');
+          el.scrollTop = el.scrollHeight;
         }
-        el.innerHTML = logs.slice(-30).map(log => {
-          let color = '#9ca3af';
-          if (log.type === 'fill') color = '#10b981';
-          else if (log.type === 'error') color = '#ef4444';
-          else if (log.priority >= 2) color = '#60a5fa';
-          return `<div style="color: ${color}; margin-bottom: 2px;"><span style="color: #6b7280;">[${log.time}]</span> ${log.message}</div>`;
-        }).join('');
-        el.scrollTop = el.scrollHeight;
+        
+        // Top Agent Decisions panel (show recent high-priority decisions)
+        const decisionPanel = document.getElementById('agentDecisionPanel');
+        const decisions = logs.filter(l => l.message && (
+          l.message.includes('Planner') ||
+          l.message.includes('MoE') ||
+          l.message.includes('Gatekeeper') ||
+          l.message.includes('System 2') ||
+          l.message.includes('FILL') ||
+          l.priority >= 2
+        )).slice(-8);
+        
+        if (!decisions.length) {
+          decisionPanel.innerHTML = '<div style="color: #6b7280;">(Waiting for agent activity...)</div>';
+        } else {
+          decisionPanel.innerHTML = decisions.map(log => {
+            let icon = '📋';
+            let color = '#9ca3af';
+            if (log.message.includes('Planner')) { icon = '🎯'; color = '#60a5fa'; }
+            else if (log.message.includes('MoE') || log.message.includes('Router')) { icon = '🔀'; color = '#a78bfa'; }
+            else if (log.message.includes('Gatekeeper')) { icon = '🛡️'; color = '#fbbf24'; }
+            else if (log.message.includes('System 2')) { icon = '🧠'; color = '#34d399'; }
+            else if (log.message.includes('Scalper')) { icon = '⚡'; color = '#f472b6'; }
+            else if (log.message.includes('Analyst')) { icon = '📊'; color = '#38bdf8'; }
+            else if (log.type === 'fill') { icon = '✅'; color = '#10b981'; }
+            return `<div style="color: ${color}; margin-bottom: 3px;">${icon} <span style="color: #6b7280;">[${log.time}]</span> ${log.message}</div>`;
+          }).join('');
+          decisionPanel.scrollTop = decisionPanel.scrollHeight;
+        }
       } catch (e) {
         // Silently fail if not available
       }
