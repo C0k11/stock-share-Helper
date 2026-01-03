@@ -53,8 +53,10 @@
         </div>
         <select id="liveTickerSelect"></select>
         <button id="btnRefresh" onclick="loadLiveData()">Refresh</button>
+        <button id="btnRL" onclick="startOnlineRL()" style="background: rgba(139,92,246,0.92);">🧠 Start RL</button>
         <label style="font-size: 13px;"><input type="checkbox" id="autoRefresh" checked> Auto (2s)</label>
         <span class="small" id="liveStatus"></span>
+        <span class="small" id="rlStatus" style="color: #a78bfa;"></span>
       </div>
       <div class="row">
         <div class="metric"><div class="label">Cash</div><div class="val" id="l_cash" style="color: #10b981;">--</div></div>
@@ -369,6 +371,39 @@
       }).catch(e => console.log('Mode switch:', e));
       
       loadLiveData();
+    }
+    
+    // ===== ONLINE RL =====
+    let rlRunning = false;
+    
+    async function startOnlineRL() {
+      const btn = document.getElementById('btnRL');
+      const status = document.getElementById('rlStatus');
+      
+      if (rlRunning) {
+        // Stop RL
+        try {
+          await fetch(apiBase + '/live/rl/stop', { method: 'POST' });
+          btn.textContent = '🧠 Start RL';
+          btn.style.background = 'rgba(139,92,246,0.92)';
+          status.textContent = 'RL stopped';
+          rlRunning = false;
+        } catch(e) {
+          status.textContent = 'Error: ' + e.message;
+        }
+      } else {
+        // Start RL
+        try {
+          const resp = await fetch(apiBase + '/live/rl/start', { method: 'POST' });
+          const data = await resp.json();
+          btn.textContent = '⏹️ Stop RL';
+          btn.style.background = 'rgba(16,185,129,0.92)';
+          status.textContent = 'RL active: ' + (data.message || 'learning from trades');
+          rlRunning = true;
+        } catch(e) {
+          status.textContent = 'Error: ' + e.message;
+        }
+      }
     }
 
     // ===== LIVE TRADING FUNCTIONS =====

@@ -1263,6 +1263,60 @@ async def get_agent_logs(limit: int = 100):
     return {"logs": logs[-limit:] if logs else [], "count": len(logs)}
 
 
+# ========== Online RL API ==========
+
+@app.post("/api/v1/live/rl/start")
+async def start_online_rl():
+    """Start online reinforcement learning"""
+    if _live_runner is None:
+        raise HTTPException(status_code=404, detail="No live trading session")
+    
+    rl_manager = getattr(_live_runner, "rl_manager", None)
+    if rl_manager is None:
+        raise HTTPException(status_code=500, detail="RL manager not initialized")
+    
+    # Enable online learning
+    rl_manager.enabled = True
+    rl_manager.learning_rate = 0.001
+    
+    return {
+        "status": "started",
+        "message": "Online RL enabled - learning from trades",
+        "buffer_size": len(rl_manager.buffer) if hasattr(rl_manager, "buffer") else 0,
+    }
+
+
+@app.post("/api/v1/live/rl/stop")
+async def stop_online_rl():
+    """Stop online reinforcement learning"""
+    if _live_runner is None:
+        raise HTTPException(status_code=404, detail="No live trading session")
+    
+    rl_manager = getattr(_live_runner, "rl_manager", None)
+    if rl_manager:
+        rl_manager.enabled = False
+    
+    return {"status": "stopped", "message": "Online RL disabled"}
+
+
+@app.get("/api/v1/live/rl/status")
+async def get_rl_status():
+    """Get online RL status"""
+    if _live_runner is None:
+        return {"active": False}
+    
+    rl_manager = getattr(_live_runner, "rl_manager", None)
+    if rl_manager is None:
+        return {"active": False, "message": "RL manager not initialized"}
+    
+    return {
+        "active": True,
+        "enabled": getattr(rl_manager, "enabled", False),
+        "buffer_size": len(rl_manager.buffer) if hasattr(rl_manager, "buffer") else 0,
+        "updates": getattr(rl_manager, "update_count", 0),
+    }
+
+
 # ========== 启动 ==========
 
 def start_server(host: str = "0.0.0.0", port: int = 8000):

@@ -327,7 +327,7 @@ class MainWindow(QMainWindow):
         ui_port: int = 8501,
     ) -> None:
         super().__init__()
-        self.setWindowTitle("AI 交易终端")
+        self.setWindowTitle("AI 玛丽交易秘书")
         self.resize(1280, 820)
 
         self._theme = "dark"

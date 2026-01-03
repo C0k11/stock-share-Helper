@@ -5,8 +5,8 @@ param (
 )
 
 Write-Host "============================================================" -ForegroundColor Cyan
-Write-Host "  AI Trading Terminal - Full Stack Launcher" -ForegroundColor Cyan
-Write-Host "  Ollama + GPT-SoVITS + Paper Trading Engine + Desktop App" -ForegroundColor Cyan
+Write-Host "  AI 玛丽交易秘书 - Full Stack Launcher" -ForegroundColor Cyan
+Write-Host "  Mari Voice + Paper Trading Engine + Desktop App" -ForegroundColor Cyan
 Write-Host "============================================================" -ForegroundColor Cyan
 
 # Ensure we're at repo root when running
