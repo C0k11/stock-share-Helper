@@ -34,6 +34,7 @@ _GPT_SOVITS_REF_CACHE_LOCK = threading.Lock()
 
 class TTSThread(QThread):
     finished_signal = Signal(str)
+    started_signal = Signal()  # Emitted when audio starts playing
 
     def __init__(
         self,
@@ -56,6 +57,7 @@ class TTSThread(QThread):
             pygame.mixer.init()
             pygame.mixer.music.load(path)
             pygame.mixer.music.play()
+            self.started_signal.emit()  # Signal that audio started
             while pygame.mixer.music.get_busy():
                 pygame.time.Clock().tick(20)
             pygame.mixer.quit()
@@ -763,6 +765,33 @@ class MainWindow(QMainWindow):
             return
         t = "light" if str(self._theme).lower() == "light" else "dark"
         self.avatar_view.page().runJavaScript(f"if (window.setTheme) window.setTheme('{t}');")
+        
+        # Mari greeting on startup (delayed to ensure everything is loaded)
+        QTimer.singleShot(1500, self._mari_greeting)
+
+    def _mari_greeting(self) -> None:
+        """Mari greets Sensei on startup"""
+        greeting = "Sensei, 早上好。系统已就绪，随时为您服务。"
+        self._pending_reply = greeting
+        
+        def _on_voice_started() -> None:
+            label = self._append_chat(role="assistant", text=greeting)
+            safe = greeting.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
+            self.avatar_view.page().runJavaScript(f"window.showBubble('{safe}');")
+            self.is_talking = True
+            self.mouth_timer.start(50)
+        
+        preset = self._pick_tts_preset(greeting)
+        self.tts_thread = TTSThread(
+            greeting,
+            voice=str(getattr(self, "_tts_voice", "zh-CN-XiaoxiaoNeural")),
+            backend=str(getattr(self, "_tts_backend", "edge")),
+            gpt_sovits=dict(getattr(self, "_gpt_sovits_cfg", {}) or {}),
+            preset=str(preset),
+        )
+        self.tts_thread.started_signal.connect(_on_voice_started)
+        self.tts_thread.finished_signal.connect(self._on_tts_finished)
+        self.tts_thread.start()
 
     def _append_chat(self, *, role: str, text: str) -> QLabel:
         bubble = QFrame()
@@ -870,15 +899,18 @@ class MainWindow(QMainWindow):
         self.input_box.clear()
 
         self._append_chat(role="user", text=text)
-        assistant_label = self._append_chat(role="assistant", text="思考中...")
+        assistant_label = self._append_chat(role="assistant", text="...")
 
-        def _done(reply_text: str) -> None:
-            assistant_label.setText(reply_text)
-            safe = reply_text.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
+        def _on_voice_started() -> None:
+            # Show text and start mouth animation only when voice starts
+            assistant_label.setText(self._pending_reply)
+            safe = self._pending_reply.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
             self.avatar_view.page().runJavaScript(f"window.showBubble('{safe}');")
-
             self.is_talking = True
             self.mouth_timer.start(50)
+
+        def _done(reply_text: str) -> None:
+            self._pending_reply = reply_text
             preset = self._pick_tts_preset(reply_text)
             self.tts_thread = TTSThread(
                 reply_text,
@@ -887,6 +919,7 @@ class MainWindow(QMainWindow):
                 gpt_sovits=dict(getattr(self, "_gpt_sovits_cfg", {}) or {}),
                 preset=str(preset),
             )
+            self.tts_thread.started_signal.connect(_on_voice_started)
             self.tts_thread.finished_signal.connect(self._on_tts_finished)
             self.tts_thread.start()
 
@@ -902,7 +935,7 @@ class MainWindow(QMainWindow):
                 try:
                     r = self.outer._post_chat(self.msg)
                 except Exception as e:
-                    r = f"请求失败：{e}"
+                    r = f"请求失败: {e}"
                 self.finished.emit(str(r))
 
         t = _ChatThread(self, text)

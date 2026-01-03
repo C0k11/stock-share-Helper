@@ -28,41 +28,72 @@
     .trade-row { padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
     .trade-buy { color: #10b981; }
     .trade-sell { color: #ef4444; }
+    .agent-panel { background: rgba(0,0,0,0.25); border: 1px solid rgba(96,165,250,0.3); border-radius: 8px; padding: 8px; min-height: 100px; }
+    .agent-title { font-size: 11px; font-weight: 700; color: #60a5fa; margin-bottom: 6px; text-align: center; border-bottom: 1px solid rgba(96,165,250,0.2); padding-bottom: 4px; }
+    .agent-log { font-size: 10px; font-family: 'Consolas', monospace; color: #9ca3af; height: 80px; overflow-y: auto; line-height: 1.4; }
+    .agent-log .entry { margin-bottom: 3px; }
+    .agent-log .time { color: #6b7280; }
+    .agent-log .active { color: #10b981; }
+    .agent-log .decision { color: #60a5fa; }
   </style>
 </head>
 <body>
-  <div class="card" style="display: flex; gap: 16px;">
-    <!-- Left: Controls -->
-    <div style="flex: 1;">
-      <h2>Control Tower</h2>
-      <div class="tabs">
-        <div class="tab active" id="tabLive" onclick="switchTab('live')"><span class="live-indicator"></span>Live Trading</div>
-        <div class="tab" id="tabBacktest" onclick="switchTab('backtest')">Backtest</div>
+  <div class="card">
+    <h2>Control Tower</h2>
+    <div class="tabs">
+      <div class="tab active" id="tabLive" onclick="switchTab('live')"><span class="live-indicator"></span>Live Trading</div>
+      <div class="tab" id="tabBacktest" onclick="switchTab('backtest')">Backtest</div>
+    </div>
+    <!-- Live Trading Controls -->
+    <div id="liveControls">
+      <div class="row" style="margin-bottom: 10px;">
+        <select id="liveTickerSelect"></select>
+        <button id="btnRefresh" onclick="loadLiveData()">Refresh</button>
+        <label style="font-size: 13px;"><input type="checkbox" id="autoRefresh" checked> Auto (5s)</label>
+        <span class="small" id="liveStatus"></span>
       </div>
-
-      <!-- Live Trading Controls -->
-      <div id="liveControls">
-        <div class="row" style="margin-bottom: 10px;">
-          <select id="liveTickerSelect"></select>
-          <button id="btnRefresh" onclick="loadLiveData()">Refresh</button>
-          <label style="font-size: 13px;"><input type="checkbox" id="autoRefresh" checked> Auto (5s)</label>
-          <span class="small" id="liveStatus"></span>
-        </div>
-        <div class="row">
-          <div class="metric"><div class="label">Cash</div><div class="val" id="l_cash">--</div></div>
-          <div class="metric"><div class="label">Positions</div><div class="val" id="l_positions">--</div></div>
-          <div class="metric"><div class="label">Trades</div><div class="val" id="l_trades">--</div></div>
-          <div class="metric"><div class="label">Status</div><div class="val" id="l_status">--</div></div>
-        </div>
+      <div class="row">
+        <div class="metric"><div class="label">Cash</div><div class="val" id="l_cash">--</div></div>
+        <div class="metric"><div class="label">Positions</div><div class="val" id="l_positions">--</div></div>
+        <div class="metric"><div class="label">Trades</div><div class="val" id="l_trades">--</div></div>
+        <div class="metric"><div class="label">Status</div><div class="val" id="l_status">--</div></div>
       </div>
     </div>
+  </div>
 
-    <!-- Right: Agent Decisions -->
-    <div id="agentDecisions" style="flex: 1; border-left: 1px solid rgba(255,255,255,0.1); padding-left: 16px;">
-      <h3 style="margin-bottom: 8px;">🤖 Agent Decisions</h3>
-      <div id="agentDecisionPanel" style="height: 120px; overflow-y: auto; font-family: 'Consolas', monospace; font-size: 11px; background: rgba(0,0,0,0.25); border-radius: 8px; padding: 8px;">
-        <div style="color: #6b7280;">(Waiting for agent activity...)</div>
-      </div>
+  <!-- 8 Agent Panels -->
+  <div id="agentPanelsRow" class="card" style="display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; padding: 10px;">
+    <div class="agent-panel" id="panel_planner">
+      <div class="agent-title">Planner (SFT)</div>
+      <div class="agent-log" id="log_planner">--</div>
+    </div>
+    <div class="agent-panel" id="panel_gatekeeper">
+      <div class="agent-title">RL Gatekeeper</div>
+      <div class="agent-log" id="log_gatekeeper">--</div>
+    </div>
+    <div class="agent-panel" id="panel_scalper">
+      <div class="agent-title">Scalper</div>
+      <div class="agent-log" id="log_scalper">--</div>
+    </div>
+    <div class="agent-panel" id="panel_analyst">
+      <div class="agent-title">Analyst (DPO)</div>
+      <div class="agent-log" id="log_analyst">--</div>
+    </div>
+    <div class="agent-panel" id="panel_chartist">
+      <div class="agent-title">Chartist (VLM)</div>
+      <div class="agent-log" id="log_chartist">--</div>
+    </div>
+    <div class="agent-panel" id="panel_macro">
+      <div class="agent-title">Macro Governor</div>
+      <div class="agent-log" id="log_macro">--</div>
+    </div>
+    <div class="agent-panel" id="panel_system2">
+      <div class="agent-title">System 2 Debate</div>
+      <div class="agent-log" id="log_system2">--</div>
+    </div>
+    <div class="agent-panel" id="panel_execution">
+      <div class="agent-title">Execution</div>
+      <div class="agent-log" id="log_execution">--</div>
     </div>
   </div>
 
@@ -122,7 +153,7 @@
       document.getElementById('tabLive').classList.toggle('active', tab === 'live');
       document.getElementById('tabBacktest').classList.toggle('active', tab === 'backtest');
       document.getElementById('liveControls').classList.toggle('hidden', tab !== 'live');
-      document.getElementById('agentDecisions').classList.toggle('hidden', tab !== 'live');
+      document.getElementById('agentPanelsRow').classList.toggle('hidden', tab !== 'live');
       document.getElementById('backtestControlsCard').classList.toggle('hidden', tab !== 'backtest');
       document.getElementById('bottomPanels').classList.toggle('hidden', tab !== 'live');
       document.getElementById('traceCard').classList.toggle('hidden', tab !== 'backtest');
@@ -442,10 +473,42 @@
 
     async function loadAgentLogs() {
       try {
-        const data = await apiGet('/live/agent_logs?limit=50');
+        const data = await apiGet('/live/agent_logs?limit=100');
         const logs = data.logs || [];
         
-        // Bottom terminal panel
+        // Categorize logs into 8 agent panels
+        const panels = {
+          planner: [], gatekeeper: [], scalper: [], analyst: [],
+          chartist: [], macro: [], system2: [], execution: []
+        };
+        
+        logs.forEach(log => {
+          const msg = (log.message || '').toLowerCase();
+          if (msg.includes('planner')) panels.planner.push(log);
+          else if (msg.includes('gatekeeper') || msg.includes('risk')) panels.gatekeeper.push(log);
+          else if (msg.includes('scalper')) panels.scalper.push(log);
+          else if (msg.includes('analyst')) panels.analyst.push(log);
+          else if (msg.includes('chartist') || msg.includes('chart')) panels.chartist.push(log);
+          else if (msg.includes('macro')) panels.macro.push(log);
+          else if (msg.includes('system 2') || msg.includes('debate')) panels.system2.push(log);
+          else if (msg.includes('fill') || msg.includes('execution') || msg.includes('order') || log.type === 'fill') panels.execution.push(log);
+        });
+        
+        // Update each panel
+        Object.keys(panels).forEach(key => {
+          const el = document.getElementById('log_' + key);
+          const items = panels[key].slice(-5);
+          if (!items.length) {
+            el.innerHTML = '<span class="time">--</span>';
+          } else {
+            el.innerHTML = items.map(log => {
+              return `<div class="entry"><span class="time">[${log.time}]</span> ${log.message}</div>`;
+            }).join('');
+            el.scrollTop = el.scrollHeight;
+          }
+        });
+        
+        // Bottom terminal panel (all logs)
         const el = document.getElementById('agentLog');
         if (!logs.length) {
           el.innerHTML = '<span style="color: #6b7280;">(Waiting for logs...)</span>';
@@ -458,35 +521,6 @@
             return `<div style="color: ${color}; margin-bottom: 2px;"><span style="color: #6b7280;">[${log.time}]</span> ${log.message}</div>`;
           }).join('');
           el.scrollTop = el.scrollHeight;
-        }
-        
-        // Top Agent Decisions panel (show recent high-priority decisions)
-        const decisionPanel = document.getElementById('agentDecisionPanel');
-        const decisions = logs.filter(l => l.message && (
-          l.message.includes('Planner') ||
-          l.message.includes('MoE') ||
-          l.message.includes('Gatekeeper') ||
-          l.message.includes('System 2') ||
-          l.message.includes('FILL') ||
-          l.priority >= 2
-        )).slice(-8);
-        
-        if (!decisions.length) {
-          decisionPanel.innerHTML = '<div style="color: #6b7280;">(Waiting for agent activity...)</div>';
-        } else {
-          decisionPanel.innerHTML = decisions.map(log => {
-            let icon = '📋';
-            let color = '#9ca3af';
-            if (log.message.includes('Planner')) { icon = '🎯'; color = '#60a5fa'; }
-            else if (log.message.includes('MoE') || log.message.includes('Router')) { icon = '🔀'; color = '#a78bfa'; }
-            else if (log.message.includes('Gatekeeper')) { icon = '🛡️'; color = '#fbbf24'; }
-            else if (log.message.includes('System 2')) { icon = '🧠'; color = '#34d399'; }
-            else if (log.message.includes('Scalper')) { icon = '⚡'; color = '#f472b6'; }
-            else if (log.message.includes('Analyst')) { icon = '📊'; color = '#38bdf8'; }
-            else if (log.type === 'fill') { icon = '✅'; color = '#10b981'; }
-            return `<div style="color: ${color}; margin-bottom: 3px;">${icon} <span style="color: #6b7280;">[${log.time}]</span> ${log.message}</div>`;
-          }).join('');
-          decisionPanel.scrollTop = decisionPanel.scrollHeight;
         }
       } catch (e) {
         // Silently fail if not available
