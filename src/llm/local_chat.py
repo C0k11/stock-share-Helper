@@ -116,6 +116,10 @@ def chat(
     model, tokenizer = _load_model(model_name, use_4bit=use_4bit, use_8bit=use_8bit)
     
     # Format messages for Qwen chat template
+    # Disable Qwen3 thinking mode by adding /no_think suffix
+    if messages and messages[-1].get("role") == "user":
+        messages[-1]["content"] = messages[-1]["content"] + " /no_think"
+    
     text = tokenizer.apply_chat_template(
         messages,
         tokenize=False,
