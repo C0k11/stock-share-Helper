@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 import json
 import re
 import sys
+import time
 import csv
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -15,6 +16,38 @@ if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
 from src.utils.llm_tools import extract_json_text, repair_and_parse_json
+
+
+def _infer_state_dir(out_path: Path) -> Path:
+    p = Path(out_path)
+    parents = [p.parent] + list(p.parents)
+    for i, par in enumerate(parents):
+        if str(par.name).lower() == "results":
+            if i > 0:
+                run_dir = parents[i - 1]
+                if run_dir.exists() and run_dir.is_dir():
+                    return run_dir
+            break
+    return p.parent
+
+
+def _write_engine_state(state_dir: Path, payload: Dict[str, Any]) -> None:
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        fp = state_dir / "engine_state.json"
+        fp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        return
+
+
+def _append_engine_event(state_dir: Path, payload: Dict[str, Any]) -> None:
+    try:
+        state_dir.mkdir(parents=True, exist_ok=True)
+        fp = state_dir / "events.jsonl"
+        with fp.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    except Exception:
+        return
 
 
 SYSTEM_PROMPT_STOCK_STRICT_JSON = """You are a strictly compliant trading signal generator.
@@ -1170,7 +1203,57 @@ def main() -> None:
         out = {}
 
     total_dates = len(date_list)
+    out_path_for_state = Path(str(getattr(args, "out", "data/decisions_inference.json") or "data/decisions_inference.json")).resolve()
+    state_dir = _infer_state_dir(out_path_for_state)
+    run_id = str(state_dir.name) if str(state_dir.parent.name).lower() == "results" else ""
+    run_started_ts = float(time.time())
+    _write_engine_state(
+        state_dir,
+        {
+            "kind": "trading",
+            "run_id": run_id,
+            "status": "running",
+            "stage": "init",
+            "out": str(out_path_for_state),
+            "updated_at": float(time.time()),
+        },
+    )
+    _append_engine_event(
+        state_dir,
+        {
+            "ts": float(time.time()),
+            "type": "run_start",
+            "run_id": run_id,
+            "out": str(out_path_for_state),
+        },
+    )
+
     for i, date_str in enumerate(date_list, start=1):
+        _write_engine_state(
+            state_dir,
+            {
+                "kind": "trading",
+                "run_id": run_id,
+                "status": "running",
+                "stage": "date_start",
+                "date_index": int(i),
+                "date_total": int(total_dates),
+                "current_date": str(date_str),
+                "out": str(out_path_for_state),
+                "updated_at": float(time.time()),
+            },
+        )
+        _append_engine_event(
+            state_dir,
+            {
+                "ts": float(time.time()),
+                "type": "date_start",
+                "run_id": run_id,
+                "date": str(date_str),
+                "date_index": int(i),
+                "date_total": int(total_dates),
+            },
+        )
         if bool(args.progress) and total_dates > 1:
             print(f"[date {i}/{total_dates}] {date_str}", flush=True)
 
@@ -1421,11 +1504,35 @@ def main() -> None:
                 }
                 decisions["items"][symbol] = rec
                 print(f"{symbol}: CLEAR 0.0")
+                _append_engine_event(
+                    state_dir,
+                    {
+                        "ts": float(time.time()),
+                        "type": "ticker_end",
+                        "run_id": run_id,
+                        "date": str(date_str),
+                        "ticker": str(symbol),
+                        "final_action": "CLEAR",
+                        "final_position": 0.0,
+                        "reason": "gatekeeper_deny",
+                    },
+                )
 
             if multi_day:
                 out["days"][str(date_str)] = decisions
             else:
                 out = decisions
+            _append_engine_event(
+                state_dir,
+                {
+                    "ts": float(time.time()),
+                    "type": "date_end",
+                    "run_id": run_id,
+                    "date": str(date_str),
+                    "date_index": int(i),
+                    "date_total": int(total_dates),
+                },
+            )
             continue
 
         for symbol, etf_item in items:
@@ -1766,6 +1873,21 @@ def main() -> None:
             else:
                 print(f"{symbol}: PARSE_ERROR {parse_error}")
 
+            _append_engine_event(
+                state_dir,
+                {
+                    "ts": float(time.time()),
+                    "type": "ticker_end",
+                    "run_id": run_id,
+                    "date": str(date_str),
+                    "ticker": str(symbol),
+                    "expert": str(expert) if bool(args.moe_mode) and use_stock else "",
+                    "final_action": str(final_action),
+                    "final_position": float(final_pos),
+                    "parse_error": str(parse_error)[:200] if parse_error else "",
+                },
+            )
+
         if multi_day:
             if macro_file:
                 decisions["macro"] = {
@@ -1778,10 +1900,45 @@ def main() -> None:
         else:
             out = decisions
 
+        _append_engine_event(
+            state_dir,
+            {
+                "ts": float(time.time()),
+                "type": "date_end",
+                "run_id": run_id,
+                "date": str(date_str),
+                "date_index": int(i),
+                "date_total": int(total_dates),
+            },
+        )
+
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(out, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"Saved: {out_path}")
+
+    _write_engine_state(
+        state_dir,
+        {
+            "kind": "trading",
+            "run_id": run_id,
+            "status": "done",
+            "stage": "complete",
+            "out": str(out_path.resolve()),
+            "elapsed_sec": float(time.time() - run_started_ts),
+            "updated_at": float(time.time()),
+        },
+    )
+    _append_engine_event(
+        state_dir,
+        {
+            "ts": float(time.time()),
+            "type": "run_end",
+            "run_id": run_id,
+            "out": str(out_path.resolve()),
+            "elapsed_sec": float(time.time() - run_started_ts),
+        },
+    )
 
 
 if __name__ == "__main__":
