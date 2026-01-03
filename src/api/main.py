@@ -994,6 +994,85 @@ async def snapshot(run_id: str, system: str, date_str: str, ticker: str, lookbac
     }
 
 
+# ========== Phase 3.4: Live Paper Trading API ==========
+
+# Global reference to live trading runner (set by external script)
+_live_runner = None
+
+
+def set_live_runner(runner):
+    """Set the live trading runner for API access"""
+    global _live_runner
+    _live_runner = runner
+
+
+@app.get("/api/v1/live/status")
+async def get_live_status():
+    """Get live paper trading engine status"""
+    if _live_runner is None:
+        return {"active": False, "message": "No live trading session"}
+    
+    return {
+        "active": True,
+        "tickers": _live_runner.strategy.tickers,
+        "cash": _live_runner.broker.cash,
+        "positions": getattr(_live_runner.broker, "positions", {}),
+        "trade_count": len(_live_runner.trade_log),
+    }
+
+
+@app.get("/api/v1/live/chart/{ticker}")
+async def get_live_chart(ticker: str, limit: int = 100):
+    """Get price history for live chart rendering"""
+    if _live_runner is None:
+        raise HTTPException(status_code=404, detail="No live trading session")
+    
+    ticker = ticker.upper()
+    prices = _live_runner.get_chart_data(ticker)
+    
+    if limit > 0:
+        prices = prices[-limit:]
+    
+    return {
+        "ticker": ticker,
+        "prices": prices,
+        "count": len(prices),
+    }
+
+
+@app.get("/api/v1/live/trades")
+async def get_live_trades():
+    """Get trade markers for chart overlay (buy/sell points)"""
+    if _live_runner is None:
+        raise HTTPException(status_code=404, detail="No live trading session")
+    
+    trades = _live_runner.get_trade_markers()
+    
+    # Format for chart markers
+    markers = []
+    for t in trades:
+        markers.append({
+            "time": t.get("time"),
+            "ticker": t.get("ticker"),
+            "action": t.get("action"),
+            "price": t.get("price"),
+            "shares": t.get("shares"),
+            "marker_type": "buy" if t.get("action") == "BUY" else "sell",
+        })
+    
+    return {"trades": markers, "count": len(markers)}
+
+
+@app.get("/api/v1/live/chat")
+async def get_live_chat(limit: int = 50):
+    """Get Mari's chat history"""
+    if _live_runner is None:
+        raise HTTPException(status_code=404, detail="No live trading session")
+    
+    chat = _live_runner.mari.chat_log[-limit:] if _live_runner.mari.chat_log else []
+    return {"messages": chat, "count": len(chat)}
+
+
 # ========== 启动 ==========
 
 def start_server(host: str = "0.0.0.0", port: int = 8000):

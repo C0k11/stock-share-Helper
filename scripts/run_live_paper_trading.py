@@ -29,6 +29,7 @@ from src.trading.engine import TradingEngine
 from src.trading.strategy import MultiAgentStrategy
 from src.trading.broker import PaperBroker
 from src.trading.event import Event, EventType
+from src.trading.data_feed import create_data_feed, DataFeed
 
 try:
     import requests
@@ -237,18 +238,28 @@ class MariVoice:
 class LivePaperTradingRunner:
     """Main runner for live paper trading with Mari commentary"""
 
-    def __init__(self, initial_cash: float = 500000.0):
+    def __init__(
+        self,
+        initial_cash: float = 500000.0,
+        data_source: str = "auto",
+        load_models: bool = False,
+    ):
         self.engine = TradingEngine()
         self.broker = PaperBroker(self.engine, cash=initial_cash)
-        self.strategy = MultiAgentStrategy(self.engine)
+        self.strategy = MultiAgentStrategy(self.engine, load_models=load_models)
         self.mari = MariVoice()
         
         self.engine.broker = self.broker
         self.engine.strategy = self.strategy
         
+        # Data feed
+        self.data_feed: Optional[DataFeed] = None
+        self.data_source = data_source
+        
         # Paper trading data for system upgrade
         self.trade_log: List[Dict] = []
         self.pnl_history: List[Dict] = []
+        self.price_history: Dict[str, List[Dict]] = {}  # For UI charts
         self.initial_cash = initial_cash
         self.last_nav = initial_cash
         
@@ -323,15 +334,56 @@ class LivePaperTradingRunner:
             direction = "上涨" if pnl > 0 else "下跌"
             self.mari.speak(f"市场波动剧烈，{direction} {abs(pnl_pct)*100:.1f}%。")
 
+    def _on_market_data(self, data: Dict) -> None:
+        """Handle incoming market data from data feed"""
+        ticker = data.get("ticker", "")
+        price = data.get("close", 0)
+        
+        # Store for UI charts
+        if ticker not in self.price_history:
+            self.price_history[ticker] = []
+        self.price_history[ticker].append({
+            "time": data.get("time", datetime.now()).isoformat() if hasattr(data.get("time"), "isoformat") else str(data.get("time")),
+            "open": data.get("open", price),
+            "high": data.get("high", price),
+            "low": data.get("low", price),
+            "close": price,
+            "volume": data.get("volume", 0),
+        })
+        # Keep last 200 bars per ticker
+        if len(self.price_history[ticker]) > 200:
+            self.price_history[ticker] = self.price_history[ticker][-200:]
+        
+        print(f">> {ticker} @ ${price:.2f}")
+        
+        # Push to engine
+        event = Event(
+            EventType.MARKET_DATA,
+            datetime.now(),
+            data,
+            priority=0,
+        )
+        self.engine.push_event(event)
+
     def start(self) -> None:
         """Start the live paper trading engine"""
         self.engine.start()
+        
+        # Initialize data feed
+        self.data_feed = create_data_feed(
+            self.strategy.tickers,
+            source=self.data_source,
+            interval_sec=5.0,
+        )
+        self.data_feed.subscribe(self._on_market_data)
+        self.data_feed.start()
         
         print("=" * 60)
         print("Phase 3.4: Live Paper Trading Engine")
         print("=" * 60)
         print(f"Initial Cash: ${self.broker.cash:,.2f}")
         print(f"Tickers: {', '.join(self.strategy.tickers)}")
+        print(f"Data Source: {self.data_source}")
         print("=" * 60)
         
         # Mari announces startup (through LLM)
@@ -339,6 +391,8 @@ class LivePaperTradingRunner:
 
     def stop(self) -> None:
         """Stop the engine and save trading data"""
+        if self.data_feed:
+            self.data_feed.stop()
         self.engine.stop()
         self.mari.stop()
         
@@ -370,46 +424,60 @@ class LivePaperTradingRunner:
             chat_file = data_dir / f"chat_{timestamp}.json"
             chat_file.write_text(json.dumps(self.mari.chat_log, indent=2, ensure_ascii=False))
             print(f"Saved {len(self.mari.chat_log)} chat messages to {chat_file.name}")
+        
+        # Save price history for charts
+        if self.price_history:
+            price_file = data_dir / f"prices_{timestamp}.json"
+            price_file.write_text(json.dumps(self.price_history, indent=2, ensure_ascii=False))
+            print(f"Saved price history for {len(self.price_history)} tickers to {price_file.name}")
 
-    def simulate_market_tick(self, ticker: Optional[str] = None) -> None:
-        """Simulate a market tick (for demo purposes)"""
-        if ticker is None:
-            ticker = random.choice(self.strategy.tickers)
-        
-        price = round(random.uniform(100, 900), 2)
-        
-        print(f"\n>> Market Tick: {ticker} @ ${price:.2f}")
-        
-        event = Event(
-            EventType.MARKET_DATA,
-            datetime.now(),
-            {"ticker": ticker, "close": price},
-            priority=0,
-        )
-        self.engine.push_event(event)
+    def get_chart_data(self, ticker: str) -> List[Dict]:
+        """Get price history for UI chart rendering"""
+        return self.price_history.get(ticker.upper(), [])
+
+    def get_trade_markers(self) -> List[Dict]:
+        """Get trade markers for chart overlay (buy/sell points)"""
+        return self.trade_log
 
 
 def main():
-    print("Initializing Paper Trading Engine (Phase 3.4)...")
+    import argparse
+    parser = argparse.ArgumentParser(description="Phase 3.4: Live Paper Trading Engine")
+    parser.add_argument("--cash", type=float, default=500000.0, help="Initial cash")
+    parser.add_argument("--data-source", default="auto", choices=["auto", "yfinance", "simulated"])
+    parser.add_argument("--load-models", action="store_true", help="Load real MoE models (requires GPU)")
+    args = parser.parse_args()
+    
+    print("=" * 60)
+    print("Phase 3.4: Live Paper Trading Engine")
+    print("=" * 60)
+    print(f"Data Source: {args.data_source}")
+    print(f"Load Models: {args.load_models}")
     print("Loading Mari's voice model...")
     
-    runner = LivePaperTradingRunner(initial_cash=500000.0)
+    runner = LivePaperTradingRunner(
+        initial_cash=args.cash,
+        data_source=args.data_source,
+        load_models=args.load_models,
+    )
     runner.start()
 
     try:
         print("\n[Press Ctrl+C to stop]\n")
         tick_count = 0
         while True:
-            time.sleep(4)
-            runner.simulate_market_tick()
+            time.sleep(1)  # Just wait, data feed handles ticks
             tick_count += 1
             
             # Periodically check for significant PnL events
-            if tick_count % 5 == 0:
-                # In real implementation, calculate NAV from positions
-                # For now, simulate NAV changes
-                simulated_nav = runner.initial_cash + random.uniform(-2000, 3000)
-                runner._check_significant_events(simulated_nav)
+            if tick_count % 20 == 0:
+                # Calculate NAV from positions (simplified)
+                nav = runner.broker.cash
+                for ticker, pos in getattr(runner.broker, 'positions', {}).items():
+                    if ticker in runner.price_history and runner.price_history[ticker]:
+                        last_price = runner.price_history[ticker][-1].get("close", 0)
+                        nav += pos * last_price
+                runner._check_significant_events(nav)
 
     except KeyboardInterrupt:
         print("\n\nShutting down...")
