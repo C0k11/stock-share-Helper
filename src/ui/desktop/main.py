@@ -768,8 +768,8 @@ class MainWindow(QMainWindow):
         t = "light" if str(self._theme).lower() == "light" else "dark"
         self.avatar_view.page().runJavaScript(f"if (window.setTheme) window.setTheme('{t}');")
         
-        # Mari greeting on startup (delayed to ensure everything is loaded)
-        QTimer.singleShot(1500, self._mari_greeting)
+        # Mari greeting disabled - was causing dual voice issue
+        # QTimer.singleShot(1500, self._mari_greeting)
 
     def _mari_greeting(self) -> None:
         """Mari greets Sensei on startup"""

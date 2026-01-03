@@ -284,9 +284,9 @@ class OnlineLearningManager:
     
     def __init__(
         self,
-        update_interval_trades: int = 100,
-        min_experiences: int = 500,
-        enable_updates: bool = False  # Set True when ready for live updates
+        update_interval_trades: int = 50,
+        min_experiences: int = 100,
+        enable_updates: bool = True  # Enabled for live learning
     ):
         self.experience_buffer = ExperienceBuffer()
         self.reward_shaper = RewardShaper()
