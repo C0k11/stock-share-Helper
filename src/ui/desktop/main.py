@@ -371,8 +371,10 @@ class MainWindow(QMainWindow):
                     g = (voice_cfg or {}).get("gpt_sovits")
                     if isinstance(g, dict):
                         self._gpt_sovits_cfg = dict(g)
-        except Exception:
-            pass
+                    print(f"[TTS Config] backend={self._tts_backend}, voice={self._tts_voice}")
+                    print(f"[TTS Config] gpt_sovits fallback_to_edge={self._gpt_sovits_cfg.get('fallback_to_edge')}")
+        except Exception as e:
+            print(f"[TTS Config] Error loading config: {e}")
 
         if start_services:
             self._start_services(api_host=api_host, api_port=api_port, ui_host=ui_host, ui_port=ui_port)

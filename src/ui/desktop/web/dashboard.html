@@ -484,14 +484,15 @@
         
         logs.forEach(log => {
           const msg = (log.message || '').toLowerCase();
+          // Match to appropriate panel - each log can go to multiple panels if relevant
           if (msg.includes('planner')) panels.planner.push(log);
-          else if (msg.includes('gatekeeper') || msg.includes('risk')) panels.gatekeeper.push(log);
-          else if (msg.includes('scalper')) panels.scalper.push(log);
-          else if (msg.includes('analyst')) panels.analyst.push(log);
-          else if (msg.includes('chartist') || msg.includes('chart')) panels.chartist.push(log);
-          else if (msg.includes('macro')) panels.macro.push(log);
-          else if (msg.includes('system 2') || msg.includes('debate')) panels.system2.push(log);
-          else if (msg.includes('fill') || msg.includes('execution') || msg.includes('order') || log.type === 'fill') panels.execution.push(log);
+          if (msg.includes('gatekeeper')) panels.gatekeeper.push(log);
+          if (msg.includes('scalper')) panels.scalper.push(log);
+          if (msg.includes('analyst') || msg.includes('dpo')) panels.analyst.push(log);
+          if (msg.includes('chartist') || msg.includes('vlm') || msg.includes('pattern')) panels.chartist.push(log);
+          if (msg.includes('macro') || msg.includes('governor') || msg.includes('regime')) panels.macro.push(log);
+          if (msg.includes('system 2') || msg.includes('debate') || msg.includes('judge')) panels.system2.push(log);
+          if (msg.includes('fill') || msg.includes('execution') || msg.includes('order') || log.type === 'fill') panels.execution.push(log);
         });
         
         // Update each panel

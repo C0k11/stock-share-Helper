@@ -19,6 +19,7 @@ from loguru import logger
 from pydantic import BaseModel
 
 from src.analysis.narrator import narrate_trade_context
+from src.memory.mari_memory import get_mari_memory, parse_memory_command
 
 app = FastAPI(
     title="QuantAI API",
@@ -542,6 +543,15 @@ def _call_llm(*, text: str, ctx: Dict[str, Any]) -> Optional[str]:
     merged_ctx = _build_secretary_context(ctx)
     rag = _maybe_build_trade_rag(user_text=str(text), ctx=ctx)
 
+    # Add Mari's long-term memory context
+    try:
+        memory = get_mari_memory()
+        memory_ctx = memory.get_context_for_llm(limit=5)
+        if memory_ctx:
+            system_prompt = system_prompt + "\n\n" + memory_ctx
+    except Exception as e:
+        logger.debug(f"Memory context error: {e}")
+
     if merged_ctx:
         try:
             ctx_yaml = yaml.safe_dump(merged_ctx, allow_unicode=True, sort_keys=False)
@@ -575,6 +585,34 @@ def _call_llm(*, text: str, ctx: Dict[str, Any]) -> Optional[str]:
 def _secretary_reply(text: str, ctx: Dict[str, Any]) -> str:
     t = str(text or "").strip()
     tl = t.lower()
+
+    # Handle memory commands first
+    mem_cmd = parse_memory_command(t)
+    if mem_cmd:
+        memory = get_mari_memory()
+        action = mem_cmd.get("action")
+        
+        if action == "remember":
+            content = mem_cmd.get("content", "")
+            memory.remember(content, category="instruction", importance=3)
+            return f"Sensei, 我已经记住了: {content}"
+        
+        elif action == "forget":
+            query = mem_cmd.get("query", "")
+            memories = memory.recall(query=query, limit=1)
+            if memories:
+                memory.forget(memories[0].get("id", ""))
+                return f"Sensei, 我已经忘记了关于'{query}'的记忆。"
+            return f"Sensei, 我没有找到关于'{query}'的记忆。"
+        
+        elif action == "list":
+            all_mems = memory.get_all_memories()
+            if not all_mems:
+                return "Sensei, 我还没有任何记忆呢。"
+            lines = ["Sensei, 这是我记住的内容:"]
+            for m in all_mems[-10:]:
+                lines.append(f"- {m.get('content', '')}")
+            return "\n".join(lines)
 
     is_status = tl.startswith("/status") or ("监控" in t) or ("在干什么" in t) or ("应该做什么" in t) or ("状态" in t)
     is_help = tl.startswith("/help") or ("怎么用" in t) or ("找不到" in t) or ("在哪" in t) or ("位置" in t) or ("向导" in t)

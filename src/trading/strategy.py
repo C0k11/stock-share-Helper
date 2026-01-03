@@ -170,22 +170,25 @@ class MultiAgentStrategy:
             self._log(f"[{expert}] {ticker}: HOLD - {analysis[:50]}", priority=0)
             return None
         
-        self._log(f"[{expert}] {ticker}: {action} - {analysis[:50]}", priority=1)
+        if expert == "scalper":
+            self._log(f"Scalper: {ticker} {action} - {analysis[:40]}", priority=1)
+        else:
+            self._log(f"Analyst (DPO): {ticker} {action} - {analysis[:40]}", priority=1)
         confidence = 0.75
         
         # --- 5. System 2 Debate (if enabled) ---
         if self.system2_enabled:
             if not self.system2_buy_only or action == "BUY":
-                self._log("System 2: Debate initiated...", priority=1)
+                self._log("System 2 Debate: initiated...", priority=1)
                 
                 # Chartist Overlay
                 chart_score = self._chartist_overlay(ticker, action)
                 chart_view = "supports" if chart_score > 0 else ("opposes" if chart_score < 0 else "neutral")
-                self._log(f"Chartist: {chart_view} proposal", priority=0)
+                self._log(f"Chartist (VLM): {ticker} pattern {chart_view} ({chart_score:+.2f})", priority=1)
                 
                 # Macro Governor
                 macro_gear, macro_label = self._macro_governor_assess()
-                self._log(f"Macro Governor: risk={macro_label}", priority=0)
+                self._log(f"Macro Governor: regime={macro_label} (gear={macro_gear})", priority=1)
                 
                 # Judge Decision
                 approved, confidence, reason = self._system2_judge(
