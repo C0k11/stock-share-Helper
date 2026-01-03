@@ -142,8 +142,10 @@ def chat(
         skip_special_tokens=True,
     )
     
-    # Strip Qwen3 thinking tags if present
-    response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
+    # Strip Qwen3 thinking tags if present (handle incomplete tags too)
+    response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL)
+    response = re.sub(r'<think>.*', '', response, flags=re.DOTALL)  # Handle unclosed tag
+    response = response.strip()
     
     return response
 
