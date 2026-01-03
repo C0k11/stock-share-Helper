@@ -93,6 +93,12 @@ class YFinanceDataFeed(DataFeed):
                     continue
                 
                 latest = hist.iloc[-1]
+                bar_time = hist.index[-1]
+                try:
+                    if hasattr(bar_time, "to_pydatetime"):
+                        bar_time = bar_time.to_pydatetime()
+                except Exception:
+                    pass
                 price = float(latest["Close"])
                 
                 # Skip if price unchanged
@@ -103,7 +109,7 @@ class YFinanceDataFeed(DataFeed):
                 
                 data = {
                     "ticker": ticker,
-                    "time": datetime.now(),
+                    "time": bar_time,
                     "open": float(latest["Open"]),
                     "high": float(latest["High"]),
                     "low": float(latest["Low"]),

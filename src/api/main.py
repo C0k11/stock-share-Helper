@@ -252,6 +252,8 @@ def _build_secretary_context(extra: Dict[str, Any]) -> Dict[str, Any]:
                 "mode": "live_paper_trading",
                 "cash": _live_runner.broker.cash,
                 "initial_cash": getattr(_live_runner.broker, "initial_cash", 500000.0),
+                "data_source": getattr(_live_runner, "data_source", "unknown"),
+                "trading_mode": getattr(_live_runner, "trading_mode", "online"),
             }
             # Calculate PnL
             positions = getattr(_live_runner.broker, "positions", {})
@@ -282,6 +284,20 @@ def _build_secretary_context(extra: Dict[str, Any]) -> Dict[str, Any]:
             live_ctx["total_pnl_pct"] = round((total_value - initial) / initial * 100, 2)
             live_ctx["positions"] = position_details
             live_ctx["trade_count"] = len(_live_runner.trade_log)
+
+            # Latest bar time (per ticker, best-effort)
+            try:
+                latest_bars: Dict[str, str] = {}
+                if hasattr(_live_runner, "price_history") and isinstance(_live_runner.price_history, dict):
+                    for tk, rows in _live_runner.price_history.items():
+                        if rows:
+                            t0 = rows[-1].get("time")
+                            if t0:
+                                latest_bars[str(tk)] = str(t0)
+                if latest_bars:
+                    live_ctx["latest_bars"] = latest_bars
+            except Exception:
+                pass
             
             # Recent trades (last 5)
             if _live_runner.trade_log:
@@ -547,7 +563,7 @@ def _call_llm(*, text: str, ctx: Dict[str, Any]) -> Optional[str]:
     # Add Mari's long-term memory context
     try:
         memory = get_mari_memory()
-        memory_ctx = memory.get_context_for_llm(limit=5)
+        memory_ctx = memory.get_context_for_llm(limit=20)
         if memory_ctx:
             system_prompt = system_prompt + "\n\n" + memory_ctx
     except Exception as e:

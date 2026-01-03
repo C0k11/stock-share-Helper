@@ -18,6 +18,7 @@ class PaperBroker:
     def __init__(self, engine: Any, cash: float = 100000.0) -> None:
         self.engine = engine
         self.cash = float(cash)
+        self.initial_cash = float(cash)
         self.positions: Dict[str, Position] = {}
         self.orders: list[dict] = []
 
@@ -29,6 +30,40 @@ class PaperBroker:
         if not ticker or not action or price <= 0 or shares == 0:
             return
 
+        commission = float(signal.get("commission") or 0.0)
+        notional = price * abs(shares)
+
+        if action == "BUY":
+            total_cost = notional + commission
+            if total_cost > self.cash:
+                return
+            self.cash -= total_cost
+            pos = self.positions.get(ticker)
+            if pos is None:
+                self.positions[ticker] = Position(ticker=ticker, shares=shares, avg_price=price)
+            else:
+                new_shares = pos.shares + shares
+                if new_shares == 0:
+                    self.positions.pop(ticker, None)
+                else:
+                    pos.avg_price = (pos.avg_price * pos.shares + price * shares) / new_shares
+                    pos.shares = new_shares
+
+        elif action == "SELL":
+            pos = self.positions.get(ticker)
+            if pos is None or pos.shares <= 0:
+                return
+            sell_shares = min(pos.shares, abs(shares))
+            proceeds = price * sell_shares - commission
+            self.cash += proceeds
+            remaining = pos.shares - sell_shares
+            if remaining <= 0:
+                self.positions.pop(ticker, None)
+            else:
+                pos.shares = remaining
+        else:
+            return
+
         self.orders.append({"ticker": ticker, "action": action, "price": price, "shares": shares})
         print(f"broker >> Processing Order: {action} {ticker} {shares} @ {price}")
 
@@ -37,6 +72,6 @@ class PaperBroker:
             "price": price,
             "shares": shares,
             "action": action,
-            "commission": 0.0,
+            "commission": commission,
         }
         self.engine.push_event(Event(type=EventType.FILL, timestamp=datetime.now(), payload=fill))

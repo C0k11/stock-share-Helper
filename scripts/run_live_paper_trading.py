@@ -440,14 +440,21 @@ class LivePaperTradingRunner:
         # Store for UI charts
         if ticker not in self.price_history:
             self.price_history[ticker] = []
-        self.price_history[ticker].append({
-            "time": data.get("time", datetime.now()).isoformat() if hasattr(data.get("time"), "isoformat") else str(data.get("time")),
+        ts = data.get("time", datetime.now())
+        time_str = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+        bar = {
+            "time": time_str,
             "open": data.get("open", price),
             "high": data.get("high", price),
             "low": data.get("low", price),
             "close": price,
             "volume": data.get("volume", 0),
-        })
+            "source": data.get("source", ""),
+        }
+        if self.price_history[ticker] and self.price_history[ticker][-1].get("time") == time_str:
+            self.price_history[ticker][-1] = bar
+        else:
+            self.price_history[ticker].append(bar)
         # Keep last 200 bars per ticker
         if len(self.price_history[ticker]) > 200:
             self.price_history[ticker] = self.price_history[ticker][-200:]
@@ -685,7 +692,7 @@ def main():
                 for ticker, pos in getattr(runner.broker, 'positions', {}).items():
                     if ticker in runner.price_history and runner.price_history[ticker]:
                         last_price = runner.price_history[ticker][-1].get("close", 0)
-                        nav += pos * last_price
+                        nav += float(getattr(pos, "shares", 0.0)) * float(last_price or 0.0)
                 runner._check_significant_events(nav)
 
     except KeyboardInterrupt:
