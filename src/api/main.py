@@ -6,6 +6,8 @@ import json
 import time
 import threading
 import uuid
+import ipaddress
+import socket
 import urllib.request
 import urllib.parse
 from datetime import date, datetime
@@ -128,6 +130,67 @@ class NewsJobStatusResponse(BaseModel):
     input: Dict[str, Any]
     results: Optional[Dict[str, Any]] = None
     summary: Optional[str] = None
+
+
+class ActionRequest(BaseModel):
+    action: str
+    params: Dict[str, Any] = {}
+
+
+class ActionResponse(BaseModel):
+    ok: bool
+    action: str
+    result: Dict[str, Any] = {}
+
+
+def _tool_instructions() -> str:
+    return (
+        "\n\n[Tools & Actions]\n"
+        "You can ask the system to execute actions by outputting one or more fenced code blocks with language 'action'.\n"
+        "Format exactly:\n"
+        "```action\n"
+        "{\"action\": \"submit_news\", \"params\": {\"text\": \"...\", \"url\": \"...\"}}\n"
+        "```\n"
+        "Supported actions:\n"
+        "- start_rl / stop_rl\n"
+        "- set_mode (params: {mode: online|offline})\n"
+        "- submit_news (params: {text, url?, source?})\n"
+        "- fetch_url (params: {url, timeout_sec?})\n"
+        "- remember (params: {content, category?, importance?})\n"
+        "If you don't have enough data, say you don't know. Never fabricate portfolio/trade numbers.\n"
+        "\n[UI Buttons]\n"
+        "- Online/Offline: switch trading mode\n"
+        "- Refresh: refresh live status/chart/logs\n"
+        "- Start RL: toggle online reinforcement learning\n"
+    )
+
+
+def _extract_first_url(text: str) -> Optional[str]:
+    t = str(text or "")
+    m = re.search(r"https?://\S+", t)
+    if not m:
+        return None
+    u = str(m.group(0)).strip().rstrip(")].,;\"")
+    return u if u else None
+
+
+def _extract_news_id(text: str) -> Optional[str]:
+    t = str(text or "")
+    m = re.search(r"\b(news_[0-9a-f]{12})\b", t, flags=re.IGNORECASE)
+    if not m:
+        return None
+    return str(m.group(1))
+
+
+def _wait_news_done(news_id: str, timeout_sec: int = 25) -> Optional[Dict[str, Any]]:
+    t0 = time.time()
+    while time.time() - t0 < float(timeout_sec):
+        with _AGENT_LOCK:
+            job = _NEWS_JOBS.get(str(news_id))
+            if isinstance(job, dict) and job.get("status") in {"done", "error"}:
+                return dict(job)
+        time.sleep(0.8)
+    return None
 
 
 # ========== 路由 ==========
@@ -330,6 +393,99 @@ def _call_llm_direct(*, system_prompt: str, user_text: str, temperature: Optiona
         return None
 
 
+def _is_blocked_ip(ip: str) -> bool:
+    try:
+        obj = ipaddress.ip_address(str(ip))
+        return bool(
+            obj.is_private
+            or obj.is_loopback
+            or obj.is_link_local
+            or obj.is_multicast
+            or obj.is_reserved
+        )
+    except Exception:
+        return True
+
+
+def _is_allowed_host(host: str) -> bool:
+    h = str(host or "").strip().lower()
+    if not h:
+        return False
+    if h in {"localhost", "localhost.localdomain"}:
+        return False
+    try:
+        infos = socket.getaddrinfo(h, None)
+    except Exception:
+        return False
+    for info in infos:
+        try:
+            ip = info[4][0]
+        except Exception:
+            continue
+        if _is_blocked_ip(ip):
+            return False
+    return True
+
+
+def _fetch_url_text(*, url: str, timeout_sec: int = 12, max_bytes: int = 500_000) -> Dict[str, Any]:
+    cfg = _get_secretary_config()
+    net_cfg = cfg.get("network") if isinstance(cfg.get("network"), dict) else {}
+    allow_all = bool(net_cfg.get("allow_all", False))
+    allowed = net_cfg.get("allowed_domains") if isinstance(net_cfg.get("allowed_domains"), list) else []
+    block_private = bool(net_cfg.get("block_private", True))
+
+    u = str(url or "").strip()
+    if not u:
+        raise ValueError("url is required")
+    if not (u.startswith("https://") or u.startswith("http://")):
+        raise ValueError("url must start with http(s)://")
+
+    parts = urllib.parse.urlparse(u)
+    host = (parts.hostname or "").lower().strip()
+    if not host:
+        raise ValueError("invalid url")
+
+    if block_private and not _is_allowed_host(host):
+        raise ValueError("host blocked")
+
+    if (not allow_all) and allowed:
+        ok = any(host == str(d).lower().strip() or host.endswith("." + str(d).lower().strip()) for d in allowed)
+        if not ok:
+            raise ValueError("domain not allowed")
+
+    req0 = urllib.request.Request(u, headers={"User-Agent": "MariSecretary/0.1"})
+    with urllib.request.urlopen(req0, timeout=int(timeout_sec)) as resp:
+        raw = resp.read(int(max_bytes))
+        ct = resp.headers.get("Content-Type", "")
+    try:
+        text = raw.decode("utf-8", errors="ignore")
+    except Exception:
+        text = str(raw)
+    return {"url": u, "content_type": ct, "text": text}
+
+
+def _enqueue_news_job(*, text: str, url: Optional[str] = None, source: Optional[str] = None) -> str:
+    news_id = "news_" + uuid.uuid4().hex[:12]
+    job = {
+        "news_id": news_id,
+        "status": "queued",
+        "created_at": datetime.now().isoformat(),
+        "finished_at": None,
+        "input": {
+            "text": str(text or "").strip(),
+            "url": str(url or "").strip() or None,
+            "source": str(source or "").strip() or None,
+        },
+        "results": None,
+        "summary": None,
+    }
+    with _AGENT_LOCK:
+        _NEWS_JOBS[news_id] = job
+    t = threading.Thread(target=_run_news_analysis_job, args=(news_id,), daemon=True)
+    t.start()
+    return news_id
+
+
 def _run_news_analysis_job(news_id: str) -> None:
     with _AGENT_LOCK:
         job = _NEWS_JOBS.get(news_id)
@@ -354,6 +510,20 @@ def _run_news_analysis_job(news_id: str) -> None:
         base_news = text
         if url:
             base_news = base_news + "\n\n[URL] " + url
+            try:
+                fetched = _fetch_url_text(url=url, timeout_sec=12)
+                page_txt = str(fetched.get("text") or "")
+                page_txt = page_txt.strip()
+                if page_txt:
+                    base_news = base_news + "\n\n[URL_CONTENT]\n" + page_txt[:20_000]
+            except Exception as e:
+                _append_audit({
+                    "time": datetime.now().isoformat(),
+                    "type": "tool.fetch_url.error",
+                    "news_id": news_id,
+                    "url": url,
+                    "error": str(e),
+                })
         if source:
             base_news = base_news + "\n[Source] " + source
 
@@ -438,26 +608,7 @@ async def submit_news(req: NewsSubmitRequest):
     if not text:
         raise HTTPException(status_code=400, detail="text is required")
 
-    news_id = "news_" + uuid.uuid4().hex[:12]
-    job = {
-        "news_id": news_id,
-        "status": "queued",
-        "created_at": datetime.now().isoformat(),
-        "finished_at": None,
-        "input": {
-            "text": text,
-            "url": str(req.url or "").strip() or None,
-            "source": str(req.source or "").strip() or None,
-        },
-        "results": None,
-        "summary": None,
-    }
-
-    with _AGENT_LOCK:
-        _NEWS_JOBS[news_id] = job
-
-    t = threading.Thread(target=_run_news_analysis_job, args=(news_id,), daemon=True)
-    t.start()
+    news_id = _enqueue_news_job(text=text, url=req.url, source=req.source)
     return NewsSubmitResponse(news_id=news_id, status="queued")
 
 
@@ -485,40 +636,92 @@ async def get_agents_audit(limit: int = 200):
 
 @app.get("/api/v1/tools/fetch_url")
 async def fetch_url(url: str, timeout_sec: int = 12):
-    cfg = _get_secretary_config()
-    net_cfg = cfg.get("network") if isinstance(cfg.get("network"), dict) else {}
-    allowed = net_cfg.get("allowed_domains") if isinstance(net_cfg.get("allowed_domains"), list) else []
-
-    u = str(url or "").strip()
-    if not u:
-        raise HTTPException(status_code=400, detail="url is required")
-    if not (u.startswith("https://") or u.startswith("http://")):
-        raise HTTPException(status_code=400, detail="url must start with http(s)://")
-
     try:
-        parts = urllib.parse.urlparse(u)
-        host = (parts.hostname or "").lower().strip()
-        if allowed:
-            ok = any(host == str(d).lower().strip() or host.endswith("." + str(d).lower().strip()) for d in allowed)
-            if not ok:
-                raise HTTPException(status_code=403, detail="domain not allowed")
-    except HTTPException:
-        raise
-    except Exception:
-        raise HTTPException(status_code=400, detail="invalid url")
-
-    try:
-        req0 = urllib.request.Request(u, headers={"User-Agent": "MariSecretary/0.1"})
-        with urllib.request.urlopen(req0, timeout=int(timeout_sec)) as resp:
-            raw = resp.read(500_000)
-            ct = resp.headers.get("Content-Type", "")
-        try:
-            text = raw.decode("utf-8", errors="ignore")
-        except Exception:
-            text = str(raw)
-        return {"url": u, "content_type": ct, "text": text}
+        return _fetch_url_text(url=url, timeout_sec=int(timeout_sec))
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"fetch failed: {e}")
+
+
+def _execute_action(*, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
+    a = str(action or "").strip().lower()
+    p = params if isinstance(params, dict) else {}
+    _append_audit({
+        "time": datetime.now().isoformat(),
+        "type": "action.request",
+        "action": a,
+        "params": p,
+    })
+
+    if a in {"start_rl", "rl_start"}:
+        if _live_runner is None:
+            return {"ok": False, "error": "no live session"}
+        rl_manager = getattr(_live_runner, "rl_manager", None)
+        if rl_manager is None:
+            return {"ok": False, "error": "rl manager not initialized"}
+        rl_manager.enabled = True
+        return {"ok": True, "enabled": True}
+
+    if a in {"stop_rl", "rl_stop"}:
+        if _live_runner is None:
+            return {"ok": False, "error": "no live session"}
+        rl_manager = getattr(_live_runner, "rl_manager", None)
+        if rl_manager is None:
+            return {"ok": False, "error": "rl manager not initialized"}
+        rl_manager.enabled = False
+        return {"ok": True, "enabled": False}
+
+    if a in {"set_mode", "trading_mode"}:
+        if _live_runner is None:
+            return {"ok": False, "error": "no live session"}
+        mode = str(p.get("mode") or "").strip().lower()
+        if mode not in {"online", "offline"}:
+            return {"ok": False, "error": "mode must be online/offline"}
+        _live_runner.trading_mode = mode
+        if mode == "offline":
+            _live_runner.start_offline_playback()
+        else:
+            _live_runner.stop_offline_playback()
+        return {"ok": True, "mode": mode}
+
+    if a in {"submit_news", "news"}:
+        text = str(p.get("text") or "").strip()
+        if not text:
+            return {"ok": False, "error": "text required"}
+        url = str(p.get("url") or "").strip() or None
+        source = str(p.get("source") or "chat").strip() or "chat"
+        news_id = _enqueue_news_job(text=text, url=url, source=source)
+        return {"ok": True, "news_id": news_id}
+
+    if a in {"fetch_url"}:
+        u = str(p.get("url") or "").strip()
+        if not u:
+            return {"ok": False, "error": "url required"}
+        try:
+            res = _fetch_url_text(url=u, timeout_sec=int(p.get("timeout_sec") or 12))
+            return {"ok": True, "url": res.get("url"), "content_type": res.get("content_type"), "text": res.get("text")}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    if a in {"remember"}:
+        mem_text = str(p.get("content") or "").strip()
+        if not mem_text:
+            return {"ok": False, "error": "content required"}
+        try:
+            memory = get_mari_memory()
+            mid = memory.remember(mem_text, category=str(p.get("category") or "general"), importance=int(p.get("importance") or 2))
+            return {"ok": True, "memory_id": mid}
+        except Exception as e:
+            return {"ok": False, "error": str(e)}
+
+    return {"ok": False, "error": f"unknown action: {a}"}
+
+
+@app.post("/api/v1/actions/execute", response_model=ActionResponse)
+async def execute_action(req: ActionRequest):
+    res = _execute_action(action=req.action, params=req.params)
+    return ActionResponse(ok=bool(res.get("ok")), action=str(req.action), result=res)
 
 
 @app.post("/api/v1/chat", response_model=ChatResponse)
@@ -901,6 +1104,8 @@ def _call_llm(*, text: str, ctx: Dict[str, Any]) -> Optional[str]:
     if rag:
         system_prompt = system_prompt + rag
 
+    system_prompt = system_prompt + _tool_instructions()
+
     # === LOCAL MODE: Direct model inference ===
     if mode == "local":
         try:
@@ -969,6 +1174,41 @@ def _call_llm(*, text: str, ctx: Dict[str, Any]) -> Optional[str]:
 def _secretary_reply(text: str, ctx: Dict[str, Any]) -> str:
     t = str(text or "").strip()
     tl = t.lower()
+
+    # News job status query by id
+    nid = _extract_news_id(t)
+    if nid:
+        with _AGENT_LOCK:
+            job = _NEWS_JOBS.get(str(nid))
+        if not isinstance(job, dict):
+            return f"Sensei, 我没有找到这个 news_id：{nid}"
+        st = str(job.get("status") or "")
+        if st == "done":
+            summary = str(job.get("summary") or "").strip()
+            return (summary + f"\n\n(news_id={nid})").strip()
+        if st == "error":
+            return f"Sensei, 这条新闻分析失败了：{job.get('error')} (news_id={nid})"
+        return f"Sensei, 这条新闻还在处理中：status={st} (news_id={nid})"
+
+    # Direct news submission from chat
+    if tl.startswith("/news") or tl.startswith("news:") or tl.startswith("新闻:"):
+        body = t.split("\n", 1)[-1]
+        body = re.sub(r"^(/news\s*|news:\s*|新闻:\s*)", "", body, flags=re.IGNORECASE).strip()
+        if not body:
+            return "Sensei, 请把新闻正文或链接贴给我。"
+        url = _extract_first_url(body)
+        news_id = _enqueue_news_job(text=body, url=url, source="chat")
+        done = _wait_news_done(news_id, timeout_sec=25)
+        if isinstance(done, dict) and done.get("status") == "done":
+            summary = str(done.get("summary") or "").strip()
+            return (summary + f"\n\n(news_id={news_id})").strip()
+        return f"Sensei, 我已经把新闻交给分析员们处理了。稍后你可以再问我这个编号：{news_id}"
+
+    # Heuristic: long pasted text with URL -> treat as news
+    if len(t) >= 350 and ("\n" in t or _extract_first_url(t)):
+        url = _extract_first_url(t)
+        news_id = _enqueue_news_job(text=t, url=url, source="chat")
+        return f"Sensei, 我收到新闻了，已分发给分析员。编号：{news_id}（你可以直接把这个编号发给我获取总结）"
 
     # Handle memory commands first
     mem_cmd = parse_memory_command(t)
@@ -1482,6 +1722,21 @@ def set_live_runner(runner):
     """Set the live trading runner for API access"""
     global _live_runner
     _live_runner = runner
+
+    try:
+        cfg = _get_secretary_config()
+        rl_cfg = cfg.get("rl") if isinstance(cfg.get("rl"), dict) else {}
+        if bool(rl_cfg.get("auto_start", False)):
+            rl_manager = getattr(_live_runner, "rl_manager", None)
+            if rl_manager is not None:
+                rl_manager.enabled = True
+                _append_audit({
+                    "time": datetime.now().isoformat(),
+                    "type": "rl.auto_start",
+                    "enabled": True,
+                })
+    except Exception as e:
+        logger.debug(f"rl auto_start failed: {e}")
 
 
 @app.get("/api/v1/live/status")

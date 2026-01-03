@@ -3,17 +3,16 @@ import argparse
 import contextlib
 import http.server
 import json
+import math
 import os
 import random
-import threading
 import subprocess
 import sys
-import tempfile
+import threading
 import time
-import urllib.error
-import urllib.request
 import urllib.parse
-import base64
+import urllib.request
+import re
 from pathlib import Path
 from typing import Any, Optional
 
@@ -355,6 +354,7 @@ class MainWindow(QMainWindow):
         self._tts_voice = "zh-CN-XiaoxiaoNeural"
         self._tts_backend = "edge"
         self._gpt_sovits_cfg: dict = {}
+        self._auto_execute_actions = False
 
         try:
             cfg_path = Path(self._repo_root()) / "configs" / "secretary.yaml"
@@ -371,10 +371,40 @@ class MainWindow(QMainWindow):
                     g = (voice_cfg or {}).get("gpt_sovits")
                     if isinstance(g, dict):
                         self._gpt_sovits_cfg = dict(g)
+                    actions_cfg = cfg.get("actions") if isinstance(cfg.get("actions"), dict) else {}
+                    self._auto_execute_actions = bool(actions_cfg.get("auto_execute", False))
                     print(f"[TTS Config] backend={self._tts_backend}, voice={self._tts_voice}")
                     print(f"[TTS Config] gpt_sovits fallback_to_edge={self._gpt_sovits_cfg.get('fallback_to_edge')}")
         except Exception as e:
             print(f"[TTS Config] Error loading config: {e}")
+
+    def _extract_action_blocks(self, text: str) -> tuple[str, list[dict]]:
+        t = str(text or "")
+        actions: list[dict] = []
+        pattern = re.compile(r"```action\s*(\{[\s\S]*?\})\s*```", re.IGNORECASE)
+
+        def _repl(m: re.Match) -> str:
+            raw = m.group(1)
+            try:
+                obj = json.loads(raw)
+                if isinstance(obj, dict) and isinstance(obj.get("action"), str):
+                    actions.append(obj)
+            except Exception:
+                pass
+            return ""
+
+        cleaned = pattern.sub(_repl, t)
+        cleaned = cleaned.strip()
+        return cleaned, actions
+
+    def _post_action(self, action_obj: dict) -> dict:
+        url = f"{self._api_base}/api/v1/actions/execute"
+        data = json.dumps(action_obj, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=60.0) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+        obj: Any = json.loads(raw)
+        return obj if isinstance(obj, dict) else {"ok": False, "error": "bad response"}
 
         if start_services:
             self._start_services(api_host=api_host, api_port=api_port, ui_host=ui_host, ui_port=ui_port)
@@ -912,10 +942,24 @@ class MainWindow(QMainWindow):
             self.mouth_timer.start(50)
 
         def _done(reply_text: str) -> None:
-            self._pending_reply = reply_text
+            display_text = str(reply_text)
+            cleaned, actions = self._extract_action_blocks(display_text)
+            action_notes: list[str] = []
+            if self._auto_execute_actions and actions:
+                for a in actions:
+                    try:
+                        res = self._post_action(a)
+                        ok = bool(res.get("ok"))
+                        action_notes.append(f"[Action] {a.get('action')} -> {'OK' if ok else 'FAIL'}")
+                    except Exception as e:
+                        action_notes.append(f"[Action] {a.get('action')} -> ERROR: {e}")
+            if action_notes:
+                cleaned = (cleaned + "\n\n" + "\n".join(action_notes)).strip()
+
+            self._pending_reply = cleaned
             preset = self._pick_tts_preset(reply_text)
             self.tts_thread = TTSThread(
-                reply_text,
+                cleaned,
                 voice=str(getattr(self, "_tts_voice", "zh-CN-XiaoxiaoNeural")),
                 backend=str(getattr(self, "_tts_backend", "edge")),
                 gpt_sovits=dict(getattr(self, "_gpt_sovits_cfg", {}) or {}),

@@ -621,6 +621,21 @@
       // Try live first
       try {
         await loadLiveData();
+        try {
+          const rs = await apiGet('/live/rl/status');
+          rlRunning = !!(rs && rs.enabled);
+          const btn = document.getElementById('btnRL');
+          const status = document.getElementById('rlStatus');
+          if (rlRunning) {
+            btn.textContent = '⏹️ Stop RL';
+            btn.style.background = 'rgba(16,185,129,0.92)';
+            status.textContent = 'RL active';
+          } else {
+            btn.textContent = '🧠 Start RL';
+            btn.style.background = 'rgba(139,92,246,0.92)';
+            status.textContent = '';
+          }
+        } catch (e) {}
         startAutoRefresh();
       } catch (e) {
         setLiveStatus('Live not available');
