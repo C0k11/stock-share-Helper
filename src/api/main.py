@@ -1106,13 +1106,59 @@ async def get_live_status():
     if _live_runner is None:
         return {"active": False, "message": "No live trading session"}
     
+    # Calculate total value and P&L
+    cash = _live_runner.broker.cash
+    positions = getattr(_live_runner.broker, "positions", {})
+    total_value = cash
+    
+    for ticker, pos in positions.items():
+        if hasattr(pos, "shares") and hasattr(pos, "avg_price"):
+            # Get current price from price history
+            current_price = pos.avg_price
+            if hasattr(_live_runner, "price_history") and ticker in _live_runner.price_history:
+                prices = _live_runner.price_history[ticker]
+                if prices:
+                    current_price = prices[-1].get("close", pos.avg_price)
+            total_value += pos.shares * current_price
+    
+    initial_cash = getattr(_live_runner, "initial_cash", 500000.0)
+    total_pnl = total_value - initial_cash
+    
     return {
         "active": True,
         "tickers": _live_runner.strategy.tickers,
-        "cash": _live_runner.broker.cash,
-        "positions": getattr(_live_runner.broker, "positions", {}),
+        "cash": cash,
+        "total_value": total_value,
+        "total_pnl": total_pnl,
+        "positions": positions,
         "trade_count": len(_live_runner.trade_log),
+        "mode": getattr(_live_runner, "trading_mode", "online"),
     }
+
+
+class SetModeRequest(BaseModel):
+    mode: str
+
+
+@app.post("/api/v1/live/set_mode")
+async def set_live_mode(req: SetModeRequest):
+    """Switch between online and offline trading modes"""
+    if _live_runner is None:
+        raise HTTPException(status_code=404, detail="No live trading session")
+    
+    mode = req.mode.lower()
+    if mode not in ("online", "offline"):
+        raise HTTPException(status_code=400, detail="Mode must be 'online' or 'offline'")
+    
+    _live_runner.trading_mode = mode
+    
+    # If switching to offline, start backtest playback
+    if mode == "offline":
+        _live_runner.start_offline_playback()
+    else:
+        _live_runner.stop_offline_playback()
+    
+    return {"mode": mode, "message": f"Switched to {mode} mode"}
 
 
 @app.get("/api/v1/live/chart/{ticker}")

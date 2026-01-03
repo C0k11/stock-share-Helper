@@ -47,16 +47,22 @@
     <!-- Live Trading Controls -->
     <div id="liveControls">
       <div class="row" style="margin-bottom: 10px;">
+        <div style="display: flex; gap: 6px; align-items: center; margin-right: 12px;">
+          <button id="btnOnline" class="active" onclick="setTradingMode('online')">Online</button>
+          <button id="btnOffline" onclick="setTradingMode('offline')">Offline</button>
+        </div>
         <select id="liveTickerSelect"></select>
         <button id="btnRefresh" onclick="loadLiveData()">Refresh</button>
-        <label style="font-size: 13px;"><input type="checkbox" id="autoRefresh" checked> Auto (5s)</label>
+        <label style="font-size: 13px;"><input type="checkbox" id="autoRefresh" checked> Auto (2s)</label>
         <span class="small" id="liveStatus"></span>
       </div>
       <div class="row">
-        <div class="metric"><div class="label">Cash</div><div class="val" id="l_cash">--</div></div>
+        <div class="metric"><div class="label">Cash</div><div class="val" id="l_cash" style="color: #10b981;">--</div></div>
+        <div class="metric"><div class="label">Total Value</div><div class="val" id="l_total_value" style="color: #60a5fa;">--</div></div>
+        <div class="metric"><div class="label">P&L</div><div class="val" id="l_pnl">--</div></div>
         <div class="metric"><div class="label">Positions</div><div class="val" id="l_positions">--</div></div>
         <div class="metric"><div class="label">Trades</div><div class="val" id="l_trades">--</div></div>
-        <div class="metric"><div class="label">Status</div><div class="val" id="l_status">--</div></div>
+        <div class="metric"><div class="label">Mode</div><div class="val" id="l_mode">Online</div></div>
       </div>
     </div>
   </div>
@@ -173,7 +179,7 @@
         if (document.getElementById('autoRefresh').checked && currentTab === 'live') {
           loadLiveData();
         }
-      }, 5000);
+      }, 2000);
     }
 
     function stopAutoRefresh() {
@@ -346,19 +352,58 @@
       setStatus('');
     }
 
+    // ===== TRADING MODE =====
+    let currentTradingMode = 'online';
+    
+    function setTradingMode(mode) {
+      currentTradingMode = mode;
+      document.getElementById('btnOnline').classList.toggle('active', mode === 'online');
+      document.getElementById('btnOffline').classList.toggle('active', mode === 'offline');
+      document.getElementById('l_mode').textContent = mode === 'online' ? 'Online' : 'Offline';
+      
+      // Call API to switch mode
+      fetch(apiBase + '/live/set_mode', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode: mode })
+      }).catch(e => console.log('Mode switch:', e));
+      
+      loadLiveData();
+    }
+
     // ===== LIVE TRADING FUNCTIONS =====
     async function loadLiveStatus() {
       try {
         const data = await apiGet('/live/status');
         if (!data.active) {
           setLiveStatus('Engine not running');
-          document.getElementById('l_status').textContent = 'Offline';
           return null;
         }
-        document.getElementById('l_cash').textContent = '$' + Number(data.cash || 0).toLocaleString();
+        
+        // Update cash with animation
+        const cashEl = document.getElementById('l_cash');
+        const newCash = '$' + Number(data.cash || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        if (cashEl.textContent !== newCash) {
+          cashEl.style.transition = 'color 0.3s';
+          cashEl.style.color = data.cash > 500000 ? '#10b981' : '#ef4444';
+          cashEl.textContent = newCash;
+        }
+        
+        // Update total value
+        const totalValue = data.total_value || data.cash || 0;
+        document.getElementById('l_total_value').textContent = '$' + Number(totalValue).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        
+        // Update P&L with color
+        const pnl = data.total_pnl || 0;
+        const pnlEl = document.getElementById('l_pnl');
+        pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + Number(pnl).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        pnlEl.style.color = pnl >= 0 ? '#10b981' : '#ef4444';
+        
         document.getElementById('l_positions').textContent = Object.keys(data.positions || {}).length;
         document.getElementById('l_trades').textContent = data.trade_count || 0;
-        document.getElementById('l_status').textContent = 'Active';
+        
+        // Update mode display
+        document.getElementById('l_mode').textContent = data.mode === 'offline' ? 'Offline' : 'Online';
         
         // Populate ticker select
         const sel = document.getElementById('liveTickerSelect');
@@ -372,7 +417,6 @@
         return data;
       } catch (e) {
         setLiveStatus('Error: ' + e.message);
-        document.getElementById('l_status').textContent = 'Error';
         return null;
       }
     }
