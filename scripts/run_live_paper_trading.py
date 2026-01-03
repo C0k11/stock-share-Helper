@@ -31,6 +31,7 @@ from src.trading.strategy import MultiAgentStrategy
 from src.trading.broker import PaperBroker
 from src.trading.event import Event, EventType
 from src.trading.data_feed import create_data_feed, DataFeed
+from src.rl.online_learning import get_online_learning_manager
 
 try:
     import requests
@@ -273,6 +274,10 @@ class LivePaperTradingRunner:
         # Control terminal verbosity
         self.verbose_terminal = False  # Set to True for debug
         
+        # Online RL learning manager
+        self.rl_manager = get_online_learning_manager()
+        self._pending_trades: Dict[str, Dict] = {}  # track open positions for RL
+        
         # Hook into event handling
         self._original_handle = self.engine._handle_event
         self.engine._handle_event = self._wrapped_handle_event
@@ -309,14 +314,49 @@ class LivePaperTradingRunner:
             shares = fill.get("shares", 0)
             
             # Record trade for data collection
+            trade_id = f"{ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
             trade_record = {
                 "time": datetime.now().isoformat(),
+                "trade_id": trade_id,
                 "ticker": ticker,
                 "action": action,
                 "price": price,
                 "shares": shares,
             }
             self.trade_log.append(trade_record)
+            
+            # Online RL: Track trades for learning
+            if action == "BUY":
+                self._pending_trades[ticker] = {
+                    "trade_id": trade_id,
+                    "entry_price": price,
+                    "shares": shares,
+                    "entry_time": datetime.now(),
+                    "state": self._get_current_state(ticker),
+                }
+                # Log decision for DPO preference pairs
+                self.rl_manager.preference_logger.log_decision(
+                    trade_id=trade_id,
+                    context={"ticker": ticker, "price": price},
+                    decision=action,
+                    reasoning=fill.get("analysis", ""),
+                    expert=fill.get("expert", "unknown"),
+                )
+            elif action == "SELL" and ticker in self._pending_trades:
+                pending = self._pending_trades.pop(ticker)
+                pnl = (price - pending["entry_price"]) * pending["shares"]
+                hold_bars = 1  # simplified
+                
+                # Record experience for RL
+                self.rl_manager.on_trade_complete(
+                    trade_id=pending["trade_id"],
+                    state=pending["state"],
+                    action="BUY",
+                    pnl=pnl,
+                    drawdown_pct=0,
+                    hold_bars=hold_bars,
+                    exit_reason="signal",
+                )
             
             # Log to agent_logs
             self.agent_logs.append({
@@ -372,6 +412,20 @@ class LivePaperTradingRunner:
                 "time": t_str, "type": "volatility", "priority": 2,
                 "message": f"[波动] 市场{direction} {abs(pnl_pct)*100:.1f}%",
             })
+
+    def _get_current_state(self, ticker: str) -> Dict[str, Any]:
+        """Get current market state for RL"""
+        state = {"ticker": ticker}
+        if ticker in self.price_history and self.price_history[ticker]:
+            recent = self.price_history[ticker][-20:]
+            prices = [p.get("close", 0) for p in recent]
+            if prices:
+                state["current_price"] = prices[-1]
+                state["price_mean_20"] = sum(prices) / len(prices)
+                state["price_std_20"] = (sum((p - state["price_mean_20"])**2 for p in prices) / len(prices)) ** 0.5
+        state["cash"] = self.broker.cash
+        state["positions"] = len(getattr(self.broker, "positions", {}))
+        return state
 
     def _on_market_data(self, data: Dict) -> None:
         """Handle incoming market data from data feed"""
