@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Control Tower</title>
+  <style>
+    body { background: #0b0f17; color: rgba(255,255,255,0.92); font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 18px; overflow-y: auto; }
+    .card { background: rgba(17,24,39,0.96); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 14px; margin-bottom: 14px; box-shadow: 0 10px 22px rgba(0,0,0,0.35); }
+    h2, h3 { margin: 0 0 10px 0; color: #60a5fa; letter-spacing: 0.2px; }
+    .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+    select, button { background: rgba(31,41,55,0.96); color: rgba(255,255,255,0.92); border: 1px solid rgba(255,255,255,0.14); padding: 8px 10px; border-radius: 10px; }
+    button { background: rgba(37,99,235,0.92); border: 0; cursor: pointer; font-weight: 700; }
+    button:hover { background: rgba(29,78,216,0.95); }
+    button.active { background: rgba(16,185,129,0.92); }
+    .metric { display: inline-block; margin-right: 16px; }
+    .label { font-size: 12px; color: rgba(229,231,235,0.78); }
+    .val { font-size: 15px; font-weight: 800; }
+    #chart { width: 100%; height: 420px; }
+    pre { white-space: pre-wrap; color: rgba(229,231,235,0.86); font-size: 12.5px; line-height: 1.45; margin: 0; }
+    .small { font-size: 12px; color: rgba(229,231,235,0.72); }
+    .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+    .tab { padding: 8px 16px; border-radius: 8px; cursor: pointer; background: rgba(31,41,55,0.8); border: 1px solid rgba(255,255,255,0.1); }
+    .tab.active { background: rgba(37,99,235,0.92); border-color: #3b82f6; }
+    .hidden { display: none !important; }
+    .live-indicator { display: inline-block; width: 8px; height: 8px; background: #10b981; border-radius: 50%; margin-right: 6px; animation: pulse 1.5s infinite; }
+    @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
+    .trade-row { padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
+    .trade-buy { color: #10b981; }
+    .trade-sell { color: #ef4444; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h2>Control Tower</h2>
+    <div class="tabs">
+      <div class="tab active" id="tabLive" onclick="switchTab('live')"><span class="live-indicator"></span>Live Trading</div>
+      <div class="tab" id="tabBacktest" onclick="switchTab('backtest')">Backtest</div>
+    </div>
+
+    <!-- Live Trading Controls -->
+    <div id="liveControls">
+      <div class="row" style="margin-bottom: 10px;">
+        <select id="liveTickerSelect"></select>
+        <button id="btnRefresh" onclick="loadLiveData()">Refresh</button>
+        <label style="font-size: 13px;"><input type="checkbox" id="autoRefresh" checked> Auto (5s)</label>
+        <span class="small" id="liveStatus"></span>
+      </div>
+      <div class="row">
+        <div class="metric"><div class="label">Cash</div><div class="val" id="l_cash">--</div></div>
+        <div class="metric"><div class="label">Positions</div><div class="val" id="l_positions">--</div></div>
+        <div class="metric"><div class="label">Trades</div><div class="val" id="l_trades">--</div></div>
+        <div class="metric"><div class="label">Status</div><div class="val" id="l_status">--</div></div>
+      </div>
+    </div>
+
+    <!-- Backtest Controls (hidden by default) -->
+    <div id="backtestControls" class="hidden">
+      <div class="row" style="margin-bottom: 10px;">
+        <select id="runSelect"></select>
+        <select id="systemSelect"></select>
+        <select id="dateSelect"></select>
+        <select id="tickerSelect"></select>
+        <button id="btnLoad">Load</button>
+        <span class="small" id="statusText"></span>
+      </div>
+      <div class="row">
+        <div class="metric"><div class="label">Action</div><div class="val" id="m_action">--</div></div>
+        <div class="metric"><div class="label">Target Pos</div><div class="val" id="m_pos">--</div></div>
+        <div class="metric"><div class="label">PnL H1 Net</div><div class="val" id="m_pnl">--</div></div>
+        <div class="metric"><div class="label">Chartist</div><div class="val" id="m_chartist">--</div></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card">
+    <div id="chart"></div>
+  </div>
+
+  <div class="card" id="tradeLogCard">
+    <h3>Recent Trades</h3>
+    <div id="tradeLog">(No trades yet)</div>
+  </div>
+
+  <div class="card hidden" id="traceCard">
+    <h3>Trace</h3>
+    <pre id="trace">(No data loaded)</pre>
+  </div>
+
+  <script>
+    function qs(key) {
+      try { return new URLSearchParams(window.location.search || '').get(key); } catch (e) { return null; }
+    }
+
+    const API = qs('api') || 'http://127.0.0.1:8000/api/v1';
+    let currentTab = 'live';
+    let autoRefreshInterval = null;
+    let liveTradesCache = [];
+
+    function switchTab(tab) {
+      currentTab = tab;
+      document.getElementById('tabLive').classList.toggle('active', tab === 'live');
+      document.getElementById('tabBacktest').classList.toggle('active', tab === 'backtest');
+      document.getElementById('liveControls').classList.toggle('hidden', tab !== 'live');
+      document.getElementById('backtestControls').classList.toggle('hidden', tab !== 'backtest');
+      document.getElementById('tradeLogCard').classList.toggle('hidden', tab !== 'live');
+      document.getElementById('traceCard').classList.toggle('hidden', tab !== 'backtest');
+      
+      if (tab === 'live') {
+        loadLiveData();
+        startAutoRefresh();
+      } else {
+        stopAutoRefresh();
+        loadSnapshot();
+      }
+    }
+
+    function startAutoRefresh() {
+      stopAutoRefresh();
+      autoRefreshInterval = setInterval(() => {
+        if (document.getElementById('autoRefresh').checked && currentTab === 'live') {
+          loadLiveData();
+        }
+      }, 5000);
+    }
+
+    function stopAutoRefresh() {
+      if (autoRefreshInterval) {
+        clearInterval(autoRefreshInterval);
+        autoRefreshInterval = null;
+      }
+    }
+
+    function setLiveStatus(s) {
+      const el = document.getElementById('liveStatus');
+      if (el) el.textContent = String(s || '');
+    }
+
+    function setStatus(s) {
+      const el = document.getElementById('statusText');
+      if (el) el.textContent = String(s || '');
+    }
+
+    function loadScript(url) {
+      return new Promise((resolve, reject) => {
+        const s = document.createElement('script');
+        s.src = url;
+        s.async = true;
+        s.onload = () => resolve(url);
+        s.onerror = () => reject(new Error('failed:' + url));
+        document.head.appendChild(s);
+      });
+    }
+
+    async function ensurePlotly() {
+      if (typeof Plotly !== 'undefined') return;
+      const urls = [
+        './vendor/plotly.min.js',
+        'https://cdn.plot.ly/plotly-2.27.0.min.js'
+      ];
+      for (const u of urls) {
+        try { await loadScript(u); break; } catch (e) { continue; }
+      }
+    }
+
+    async function apiGet(path) {
+      const url = API.replace(/\/$/, '') + '/' + String(path).replace(/^\//, '');
+      const res = await fetch(url);
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return await res.json();
+    }
+
+    function fillSelect(el, values, placeholder) {
+      el.innerHTML = '';
+      if (placeholder) el.add(new Option(String(placeholder), ''));
+      for (const v of values) {
+        el.add(new Option(String(v), String(v)));
+      }
+    }
+
+    async function loadRuns() {
+      setStatus('Loading runs...');
+      const payload = await apiGet('/runs');
+      const runs = (payload && payload.runs && Array.isArray(payload.runs)) ? payload.runs : [];
+      const runIds = runs.map(r => r.run_id).filter(Boolean);
+      fillSelect(document.getElementById('runSelect'), runIds, null);
+      setStatus('');
+    }
+
+    async function loadDates() {
+      const run = document.getElementById('runSelect').value;
+      if (!run) return;
+      setStatus('Loading dates...');
+      const payload = await apiGet(`/runs/${encodeURIComponent(run)}/dates`);
+      const dates = (payload && Array.isArray(payload.dates)) ? payload.dates : [];
+      fillSelect(document.getElementById('dateSelect'), dates, null);
+      setStatus('');
+    }
+
+    async function loadTickersAndSystems() {
+      const run = document.getElementById('runSelect').value;
+      const date = document.getElementById('dateSelect').value;
+      if (!run || !date) return;
+      setStatus('Loading tickers...');
+      const payload = await apiGet(`/runs/${encodeURIComponent(run)}/tickers/${encodeURIComponent(date)}`);
+      const systems = (payload && payload.systems && typeof payload.systems === 'object') ? payload.systems : {};
+      const systemNames = Object.keys(systems).sort();
+      fillSelect(document.getElementById('systemSelect'), systemNames, null);
+
+      const preferred = (systems['golden_strict'] && Array.isArray(systems['golden_strict'])) ? 'golden_strict' : (systemNames[0] || '');
+      document.getElementById('systemSelect').value = preferred;
+
+      const ticks = (preferred && Array.isArray(systems[preferred])) ? systems[preferred] : (payload.tickers || []);
+      fillSelect(document.getElementById('tickerSelect'), ticks, null);
+      setStatus('');
+    }
+
+    async function loadTickersForSystem() {
+      const run = document.getElementById('runSelect').value;
+      const date = document.getElementById('dateSelect').value;
+      const sys = document.getElementById('systemSelect').value;
+      if (!run || !date || !sys) return;
+      const payload = await apiGet(`/runs/${encodeURIComponent(run)}/tickers/${encodeURIComponent(date)}`);
+      const systems = (payload && payload.systems && typeof payload.systems === 'object') ? payload.systems : {};
+      const ticks = (sys && Array.isArray(systems[sys])) ? systems[sys] : (payload.tickers || []);
+      fillSelect(document.getElementById('tickerSelect'), ticks, null);
+    }
+
+    async function loadSnapshot() {
+      const run = document.getElementById('runSelect').value;
+      const sys = document.getElementById('systemSelect').value;
+      const date = document.getElementById('dateSelect').value;
+      const ticker = document.getElementById('tickerSelect').value;
+      if (!run || !sys || !date || !ticker) return;
+
+      setStatus('Loading snapshot...');
+      const payload = await apiGet(`/snapshot/${encodeURIComponent(run)}/${encodeURIComponent(sys)}/${encodeURIComponent(date)}/${encodeURIComponent(ticker)}?lookback_days=60`);
+
+      const decision = (payload && payload.decision) ? payload.decision : {};
+      const finalObj = (decision && decision.final && typeof decision.final === 'object') ? decision.final : {};
+      const action = finalObj.action || '--';
+      const pos = (finalObj.target_position !== undefined && finalObj.target_position !== null) ? String(finalObj.target_position) : '--';
+
+      const daily = (payload && payload.daily) ? payload.daily : {};
+      const pnl = (daily && daily.pnl_h1_net !== undefined && daily.pnl_h1_net !== null) ? Number(daily.pnl_h1_net) : null;
+
+      const chartist = (decision && decision.chartist && typeof decision.chartist === 'object') ? decision.chartist : {};
+      const chartSig = chartist.signal ? String(chartist.signal) : '--';
+      const chartConf = (chartist.confidence !== undefined && chartist.confidence !== null) ? String(chartist.confidence) : '';
+
+      document.getElementById('m_action').textContent = action;
+      document.getElementById('m_pos').textContent = pos;
+      document.getElementById('m_pnl').textContent = (pnl === null || isNaN(pnl)) ? '--' : pnl.toFixed(6);
+      document.getElementById('m_chartist').textContent = chartSig + (chartConf ? (' @' + chartConf) : '');
+
+      const trace = (finalObj.trace && Array.isArray(finalObj.trace)) ? finalObj.trace : [];
+      document.getElementById('trace').textContent = trace.length ? trace.join('\n') : '(No trace)';
+
+      await ensurePlotly();
+      if (typeof Plotly === 'undefined') {
+        setStatus('Plotly not available');
+        return;
+      }
+
+      const ow = (payload && payload.ohlc_window && payload.ohlc_window.rows && Array.isArray(payload.ohlc_window.rows)) ? payload.ohlc_window.rows : [];
+      if (!ow.length) {
+        Plotly.purge('chart');
+        setStatus('No OHLC window');
+        return;
+      }
+
+      const x = ow.map(r => r.date);
+      const traceCandles = {
+        x,
+        open: ow.map(r => r.open),
+        high: ow.map(r => r.high),
+        low: ow.map(r => r.low),
+        close: ow.map(r => r.close),
+        type: 'candlestick',
+        name: ticker
+      };
+
+      const layout = {
+        title: { text: `${ticker} - ${date}`, font: { color: '#e5e7eb' } },
+        plot_bgcolor: 'rgba(17,24,39,0.96)',
+        paper_bgcolor: 'rgba(17,24,39,0.96)',
+        font: { color: '#e5e7eb' },
+        margin: { l: 48, r: 18, t: 46, b: 32 },
+        xaxis: { type: 'category', categoryorder: 'category ascending', rangeslider: { visible: false }, gridcolor: 'rgba(255,255,255,0.08)' },
+        yaxis: { gridcolor: 'rgba(255,255,255,0.08)' }
+      };
+
+      Plotly.newPlot('chart', [traceCandles], layout, { displayModeBar: false, responsive: true });
+      setStatus('');
+    }
+
+    // ===== LIVE TRADING FUNCTIONS =====
+    async function loadLiveStatus() {
+      try {
+        const data = await apiGet('/live/status');
+        if (!data.active) {
+          setLiveStatus('Engine not running');
+          document.getElementById('l_status').textContent = 'Offline';
+          return null;
+        }
+        document.getElementById('l_cash').textContent = '$' + Number(data.cash || 0).toLocaleString();
+        document.getElementById('l_positions').textContent = Object.keys(data.positions || {}).length;
+        document.getElementById('l_trades').textContent = data.trade_count || 0;
+        document.getElementById('l_status').textContent = 'Active';
+        
+        // Populate ticker select
+        const sel = document.getElementById('liveTickerSelect');
+        const current = sel.value;
+        const tickers = data.tickers || [];
+        if (tickers.length && !sel.options.length) {
+          fillSelect(sel, tickers, null);
+        }
+        if (current) sel.value = current;
+        
+        return data;
+      } catch (e) {
+        setLiveStatus('Error: ' + e.message);
+        document.getElementById('l_status').textContent = 'Error';
+        return null;
+      }
+    }
+
+    async function loadLiveChart() {
+      const ticker = document.getElementById('liveTickerSelect').value;
+      if (!ticker) return;
+      
+      try {
+        const [chartData, tradesData] = await Promise.all([
+          apiGet(`/live/chart/${encodeURIComponent(ticker)}?limit=100`),
+          apiGet('/live/trades')
+        ]);
+        
+        const prices = chartData.prices || [];
+        liveTradesCache = tradesData.trades || [];
+        
+        await ensurePlotly();
+        if (typeof Plotly === 'undefined') return;
+        
+        if (!prices.length) {
+          Plotly.purge('chart');
+          return;
+        }
+        
+        const x = prices.map(p => p.time);
+        const traceCandles = {
+          x,
+          open: prices.map(p => p.open),
+          high: prices.map(p => p.high),
+          low: prices.map(p => p.low),
+          close: prices.map(p => p.close),
+          type: 'candlestick',
+          name: ticker,
+          increasing: { line: { color: '#10b981' } },
+          decreasing: { line: { color: '#ef4444' } }
+        };
+        
+        const traces = [traceCandles];
+        
+        // Add buy markers
+        const buys = liveTradesCache.filter(t => t.ticker === ticker && t.action === 'BUY');
+        if (buys.length) {
+          traces.push({
+            x: buys.map(t => t.time),
+            y: buys.map(t => t.price),
+            mode: 'markers',
+            marker: { symbol: 'triangle-up', size: 14, color: '#10b981', line: { width: 1, color: '#fff' } },
+            name: 'BUY',
+            hovertemplate: 'BUY @ $%{y:.2f}<extra></extra>'
+          });
+        }
+        
+        // Add sell markers
+        const sells = liveTradesCache.filter(t => t.ticker === ticker && t.action === 'SELL');
+        if (sells.length) {
+          traces.push({
+            x: sells.map(t => t.time),
+            y: sells.map(t => t.price),
+            mode: 'markers',
+            marker: { symbol: 'triangle-down', size: 14, color: '#ef4444', line: { width: 1, color: '#fff' } },
+            name: 'SELL',
+            hovertemplate: 'SELL @ $%{y:.2f}<extra></extra>'
+          });
+        }
+        
+        const layout = {
+          title: { text: `${ticker} - Live`, font: { color: '#e5e7eb' } },
+          plot_bgcolor: 'rgba(17,24,39,0.96)',
+          paper_bgcolor: 'rgba(17,24,39,0.96)',
+          font: { color: '#e5e7eb' },
+          margin: { l: 48, r: 18, t: 46, b: 32 },
+          xaxis: { rangeslider: { visible: false }, gridcolor: 'rgba(255,255,255,0.08)' },
+          yaxis: { gridcolor: 'rgba(255,255,255,0.08)' },
+          showlegend: true,
+          legend: { orientation: 'h', y: 1.1 }
+        };
+        
+        Plotly.newPlot('chart', traces, layout, { displayModeBar: false, responsive: true });
+      } catch (e) {
+        setLiveStatus('Chart error: ' + e.message);
+      }
+    }
+
+    function renderTradeLog() {
+      const el = document.getElementById('tradeLog');
+      if (!liveTradesCache.length) {
+        el.innerHTML = '(No trades yet)';
+        return;
+      }
+      const recent = liveTradesCache.slice(-15).reverse();
+      el.innerHTML = recent.map(t => {
+        const cls = t.action === 'BUY' ? 'trade-buy' : 'trade-sell';
+        const time = (t.time || '').slice(11, 19);
+        return `<div class="trade-row"><span class="${cls}">${t.action}</span> ${t.ticker} x${t.shares} @ $${Number(t.price).toFixed(2)} <span class="small">${time}</span></div>`;
+      }).join('');
+    }
+
+    async function loadLiveData() {
+      setLiveStatus('Refreshing...');
+      await loadLiveStatus();
+      await loadLiveChart();
+      renderTradeLog();
+      setLiveStatus('Updated ' + new Date().toLocaleTimeString());
+    }
+
+    // ===== INIT =====
+    async function init() {
+      // Try live first
+      try {
+        await loadLiveData();
+        startAutoRefresh();
+      } catch (e) {
+        setLiveStatus('Live not available');
+      }
+      
+      // Setup backtest controls
+      document.getElementById('btnLoad').addEventListener('click', loadSnapshot);
+      document.getElementById('liveTickerSelect').addEventListener('change', loadLiveChart);
+
+      document.getElementById('runSelect').addEventListener('change', async () => {
+        await loadDates();
+        await loadTickersAndSystems();
+      });
+      document.getElementById('dateSelect').addEventListener('change', async () => {
+        await loadTickersAndSystems();
+      });
+      document.getElementById('systemSelect').addEventListener('change', async () => {
+        await loadTickersForSystem();
+      });
+      
+      // Load backtest data in background
+      try {
+        await loadRuns();
+        await loadDates();
+        await loadTickersAndSystems();
+      } catch (e) {}
+    }
+
+    init().catch(e => {
+      setLiveStatus('Init failed: ' + (e && e.message ? e.message : String(e)));
+    });
+  </script>
+</body>
+</html>

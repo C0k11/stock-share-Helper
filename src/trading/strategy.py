@@ -171,6 +171,7 @@ class MultiAgentStrategy:
             return None
         
         self._log(f"[{expert}] {ticker}: {action} - {analysis[:50]}", priority=1)
+        confidence = 0.75
         
         # --- 5. System 2 Debate (if enabled) ---
         if self.system2_enabled:
@@ -196,8 +197,7 @@ class MultiAgentStrategy:
                     return None
                 
                 self._log(f"System 2 (Judge): APPROVED (conf={confidence:.2f})", priority=2)
-        else:
-            confidence = 0.75
+        
         
         # --- 6. Generate Signal ---
         signal = {
