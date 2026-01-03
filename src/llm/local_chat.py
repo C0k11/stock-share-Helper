@@ -17,8 +17,8 @@ DEFAULT_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 MODEL_CACHE_DIR = Path("D:/Project/ml_cache/models")
 
 
-def _load_model(model_name: str = DEFAULT_MODEL, use_4bit: bool = True):
-    """Load model with optional 4-bit quantization"""
+def _load_model(model_name: str = DEFAULT_MODEL, use_4bit: bool = False, use_8bit: bool = True):
+    """Load model with optional 4-bit or 8-bit quantization"""
     global _model, _tokenizer
     
     if _model is not None:
@@ -28,7 +28,8 @@ def _load_model(model_name: str = DEFAULT_MODEL, use_4bit: bool = True):
         if _model is not None:
             return _model, _tokenizer
         
-        print(f"[LocalLLM] Loading {model_name}...")
+        quant_mode = "8-bit" if use_8bit else ("4-bit" if use_4bit else "fp16")
+        print(f"[LocalLLM] Loading {model_name} ({quant_mode})...")
         
         try:
             from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
@@ -47,8 +48,19 @@ def _load_model(model_name: str = DEFAULT_MODEL, use_4bit: bool = True):
             trust_remote_code=True,
         )
         
-        # Model with optional 4-bit quantization
-        if use_4bit:
+        # Model with quantization options
+        if use_8bit:
+            # 8-bit quantization - good balance of speed and quality
+            bnb_config = BitsAndBytesConfig(load_in_8bit=True)
+            _model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                cache_dir=str(MODEL_CACHE_DIR),
+                quantization_config=bnb_config,
+                device_map="auto",
+                trust_remote_code=True,
+            )
+        elif use_4bit:
+            # 4-bit quantization - saves more VRAM
             bnb_config = BitsAndBytesConfig(
                 load_in_4bit=True,
                 bnb_4bit_compute_dtype=torch.float16,
@@ -63,6 +75,7 @@ def _load_model(model_name: str = DEFAULT_MODEL, use_4bit: bool = True):
                 trust_remote_code=True,
             )
         else:
+            # FP16 - full quality
             _model = AutoModelForCausalLM.from_pretrained(
                 model_name,
                 cache_dir=str(MODEL_CACHE_DIR),
@@ -71,7 +84,7 @@ def _load_model(model_name: str = DEFAULT_MODEL, use_4bit: bool = True):
                 trust_remote_code=True,
             )
         
-        print(f"[LocalLLM] Model loaded: {model_name}")
+        print(f"[LocalLLM] Model loaded: {model_name} ({quant_mode})")
         return _model, _tokenizer
 
 
@@ -80,7 +93,8 @@ def chat(
     model_name: str = DEFAULT_MODEL,
     temperature: float = 0.7,
     max_new_tokens: int = 256,
-    use_4bit: bool = True,
+    use_4bit: bool = False,
+    use_8bit: bool = True,
 ) -> str:
     """
     Generate chat response using local model
@@ -91,13 +105,15 @@ def chat(
         temperature: Sampling temperature
         max_new_tokens: Max tokens to generate
         use_4bit: Use 4-bit quantization (saves VRAM)
+        use_8bit: Use 8-bit quantization (balance speed/quality)
     
     Returns:
         Generated response text
     """
     import torch
+    import re
     
-    model, tokenizer = _load_model(model_name, use_4bit)
+    model, tokenizer = _load_model(model_name, use_4bit=use_4bit, use_8bit=use_8bit)
     
     # Format messages for Qwen chat template
     text = tokenizer.apply_chat_template(
@@ -126,7 +142,10 @@ def chat(
         skip_special_tokens=True,
     )
     
-    return response.strip()
+    # Strip Qwen3 thinking tags if present
+    response = re.sub(r'<think>.*?</think>', '', response, flags=re.DOTALL).strip()
+    
+    return response
 
 
 def simple_chat(

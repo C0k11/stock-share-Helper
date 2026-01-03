@@ -564,10 +564,12 @@ def _call_llm(*, text: str, ctx: Dict[str, Any]) -> Optional[str]:
     if mode == "local":
         try:
             from src.llm.local_chat import chat as local_chat
-            local_model = str((llm_cfg or {}).get("local_model") or "Qwen/Qwen2.5-7B-Instruct")
-            use_4bit = bool((llm_cfg or {}).get("use_4bit", True))
+            local_model = str((llm_cfg or {}).get("local_model") or "Qwen/Qwen3-8B")
+            use_4bit = bool((llm_cfg or {}).get("use_4bit", False))
+            use_8bit = bool((llm_cfg or {}).get("use_8bit", True))
             
-            logger.info(f"[LLM] Local mode: {local_model} (4bit={use_4bit})")
+            quant = "8bit" if use_8bit else ("4bit" if use_4bit else "fp16")
+            logger.info(f"[LLM] Local mode: {local_model} ({quant})")
             messages = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": str(text)},
@@ -578,6 +580,7 @@ def _call_llm(*, text: str, ctx: Dict[str, Any]) -> Optional[str]:
                 temperature=temperature,
                 max_new_tokens=max_tokens,
                 use_4bit=use_4bit,
+                use_8bit=use_8bit,
             )
             if response:
                 return response.strip()
