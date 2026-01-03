@@ -261,6 +261,7 @@ class LivePaperTradingRunner:
         self.trade_log: List[Dict] = []
         self.pnl_history: List[Dict] = []
         self.price_history: Dict[str, List[Dict]] = {}  # For UI charts
+        self.agent_logs: List[Dict] = []  # For dashboard terminal
         self.initial_cash = initial_cash
         self.last_nav = initial_cash
         
@@ -269,21 +270,36 @@ class LivePaperTradingRunner:
         self.profit_threshold = 1000  # $1000 gain triggers celebration
         self.loss_threshold = -500  # $500 loss triggers concern
         
+        # Control terminal verbosity
+        self.verbose_terminal = False  # Set to True for debug
+        
         # Hook into event handling
         self._original_handle = self.engine._handle_event
         self.engine._handle_event = self._wrapped_handle_event
 
     def _wrapped_handle_event(self, event: Event) -> None:
-        """Wrapped event handler with Mari commentary"""
+        """Wrapped event handler - logs to agent_logs for dashboard, minimal terminal output"""
         self._original_handle(event)
+        t_str = event.timestamp.strftime("%H:%M:%S")
 
         if event.type == EventType.LOG:
             msg = str(event.payload)
             priority = event.priority
-            t_str = event.timestamp.strftime("%H:%M:%S")
-            print(f"[{t_str}] [Agent] {msg}")
-            # Only speak on significant decisions (priority >= 2)
-            # Mari doesn't need to narrate every little thing
+            
+            # Store in agent_logs for dashboard terminal
+            self.agent_logs.append({
+                "time": t_str,
+                "type": "agent",
+                "priority": priority,
+                "message": msg,
+            })
+            # Keep logs bounded
+            if len(self.agent_logs) > 500:
+                self.agent_logs = self.agent_logs[-300:]
+            
+            # Only print high priority to terminal (reduces spam)
+            if self.verbose_terminal or priority >= 2:
+                print(f"[{t_str}] [Agent] {msg}")
 
         elif event.type == EventType.FILL:
             fill = event.payload
@@ -301,16 +317,29 @@ class LivePaperTradingRunner:
                 "shares": shares,
             }
             self.trade_log.append(trade_record)
-            print(f"[FILL] {action} {ticker} x{shares} @ ${price:.2f}")
             
-            # Mari only announces trades (significant events)
-            self.mari.speak(f"{action} {ticker}，成交价 {price:.2f}")
+            # Log to agent_logs
+            self.agent_logs.append({
+                "time": t_str,
+                "type": "fill",
+                "priority": 3,
+                "message": f"[FILL] {action} {ticker} x{shares} @ ${price:.2f}",
+            })
+            
+            # Always print fills to terminal (important)
+            print(f"[{t_str}] [FILL] {action} {ticker} x{shares} @ ${price:.2f}")
 
         elif event.type == EventType.ERROR:
-            print(f"[ERROR] {event.payload}")
+            self.agent_logs.append({
+                "time": t_str,
+                "type": "error",
+                "priority": 3,
+                "message": str(event.payload),
+            })
+            print(f"[{t_str}] [ERROR] {event.payload}")
     
     def _check_significant_events(self, nav: float) -> None:
-        """Check for significant events that Mari should announce"""
+        """Check for significant events - log only, Mari speaks when user asks"""
         pnl = nav - self.last_nav
         pnl_pct = pnl / self.last_nav if self.last_nav > 0 else 0
         
@@ -322,18 +351,27 @@ class LivePaperTradingRunner:
             "pnl_pct": pnl_pct,
         })
         
-        # Significant profit
+        t_str = datetime.now().strftime("%H:%M:%S")
+        
+        # Log significant events (no auto-speak, Mari only talks when asked)
         if pnl >= self.profit_threshold:
-            self.mari.speak(f"赚了 ${pnl:.0f}，这是 Sensei 平日积累的福报。")
+            self.agent_logs.append({
+                "time": t_str, "type": "pnl", "priority": 2,
+                "message": f"[PnL] 盈利 ${pnl:.0f} ({pnl_pct*100:.2f}%)",
+            })
             self.last_nav = nav
-        # Significant loss
         elif pnl <= self.loss_threshold:
-            self.mari.speak(f"亏损 ${abs(pnl):.0f}，这也是一种试炼呢。")
+            self.agent_logs.append({
+                "time": t_str, "type": "pnl", "priority": 2,
+                "message": f"[PnL] 亏损 ${abs(pnl):.0f} ({pnl_pct*100:.2f}%)",
+            })
             self.last_nav = nav
-        # High volatility
         elif abs(pnl_pct) >= self.volatility_threshold:
             direction = "上涨" if pnl > 0 else "下跌"
-            self.mari.speak(f"市场波动剧烈，{direction} {abs(pnl_pct)*100:.1f}%。")
+            self.agent_logs.append({
+                "time": t_str, "type": "volatility", "priority": 2,
+                "message": f"[波动] 市场{direction} {abs(pnl_pct)*100:.1f}%",
+            })
 
     def _on_market_data(self, data: Dict) -> None:
         """Handle incoming market data from data feed"""

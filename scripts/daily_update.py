@@ -178,18 +178,18 @@ def daily_update(
     
     # 打印摘要
     print("\n" + "=" * 50)
-    print(f"📊 每日投资建议 - {today}")
+    print(f"Daily Recommendations - {today}")
     print("=" * 50)
-    print(f"\n🎯 市场状态: {regime_result['regime'].upper()}")
-    print(f"📈 VIX: {regime_result.get('vix', 'N/A')}")
-    print(f"\n💼 投资建议 ({risk_profile}档位):")
+    print(f"\nMarket Regime: {regime_result['regime'].upper()}")
+    print(f"VIX: {regime_result.get('vix', 'N/A')}")
+    print(f"\nRecommendations ({risk_profile} profile):")
     print("-" * 40)
     
     for rec in recommendations:
         print(f"  {rec['symbol']:6s} | {rec['action']:8s} | 目标: {rec['target_position']:5.1f}% | 价格: ${rec['current_price']}")
     
     if alerts_summary["alerts"]:
-        print(f"\n⚠️ 风险预警:")
+        print("\nRisk Alerts:")
         for alert in alerts_summary["alerts"]:
             print(f"  [{alert['severity'].upper()}] {alert['message']}")
     

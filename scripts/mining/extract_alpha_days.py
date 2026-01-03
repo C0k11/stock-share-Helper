@@ -47,10 +47,10 @@ def main():
     daily_file = run_dir / "daily.csv"
 
     if not daily_file.exists():
-        print(f"❌ Error: daily.csv not found in {run_dir}")
+        print(f"Error: daily.csv not found in {run_dir}")
         return
 
-    print(f"📂 Loading {daily_file}...")
+    print(f"Loading {daily_file}...")
     df = pd.read_csv(daily_file)
 
     # 确保日期格式
@@ -106,18 +106,18 @@ def main():
     output_df = daily_stats.reset_index().sort_values("date")
 
     # 打印统计
-    print("\n📊 Rich Alpha Days Distribution:")
+    print("\nRich Alpha Days Distribution:")
     print(output_df["day_type"].value_counts())
 
     defensive_days = output_df[output_df["day_type"].str.contains("DEFENSIVE")]
     if not defensive_days.empty:
-        print("\n🛡️ Defensive Wins (Market Crash but we survived):")
+        print("\nDefensive Wins (Market Crash but we survived):")
         print(defensive_days[["date", "market_return_h1", "strategy_return_h1", "day_type"]])
 
     # 保存
     out_path = run_dir / args.output
     output_df.to_csv(out_path, index=False)
-    print(f"\n✅ Saved Alpha Days to: {out_path}")
+    print(f"\nSaved Alpha Days to: {out_path}")
     print(f"Sample:\n{output_df[['date', 'strategy_return_h1', 'market_return_h1', 'day_type']].head()}")
 
 
