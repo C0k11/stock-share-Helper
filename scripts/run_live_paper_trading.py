@@ -479,8 +479,8 @@ class LivePaperTradingRunner:
         print(f"Data Source: {self.data_source}")
         print("=" * 60)
         
-        # Mari announces startup (through LLM)
-        self.mari.speak("实盘模拟系统已启动，Mari 开始监视 Agent 活动。")
+        # Mari startup announcement disabled
+        # self.mari.speak("实盘模拟系统已启动，Mari 开始监视 Agent 活动。")
 
     def stop(self) -> None:
         """Stop the engine and save trading data"""
