@@ -4,6 +4,11 @@ FastAPI主入口
 
 import json
 import time
+import threading
+import uuid
+import urllib.request
+import urllib.parse
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -12,7 +17,6 @@ import yaml
 from openai import OpenAI
 
 import pandas as pd
-from datetime import date
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
@@ -33,8 +37,15 @@ RESULTS_DIR = REPO_ROOT / "results"
 DATA_DIR = REPO_ROOT / "data"
 SECRETARY_CONFIG_PATH = REPO_ROOT / "configs" / "secretary.yaml"
 
+AGENT_HUB_DIR = DATA_DIR / "agent_hub"
+AGENT_HUB_DIR.mkdir(parents=True, exist_ok=True)
+AGENT_AUDIT_PATH = AGENT_HUB_DIR / "audit.jsonl"
+
 _SECRETARY_CFG: Optional[Dict[str, Any]] = None
 _SECRETARY_CFG_MTIME: Optional[float] = None
+
+_AGENT_LOCK = threading.Lock()
+_NEWS_JOBS: Dict[str, Dict[str, Any]] = {}
 
 # CORS配置
 app.add_middleware(
@@ -96,6 +107,27 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
+
+
+class NewsSubmitRequest(BaseModel):
+    text: str
+    url: Optional[str] = None
+    source: Optional[str] = None
+
+
+class NewsSubmitResponse(BaseModel):
+    news_id: str
+    status: str
+
+
+class NewsJobStatusResponse(BaseModel):
+    news_id: str
+    status: str
+    created_at: str
+    finished_at: Optional[str] = None
+    input: Dict[str, Any]
+    results: Optional[Dict[str, Any]] = None
+    summary: Optional[str] = None
 
 
 # ========== 路由 ==========
@@ -198,6 +230,295 @@ async def get_news_summary():
         "events": [],
         "sentiment": "neutral"
     }
+
+
+def _append_audit(evt: Dict[str, Any]) -> None:
+    try:
+        line = json.dumps(evt, ensure_ascii=False)
+        with _AGENT_LOCK:
+            AGENT_AUDIT_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with AGENT_AUDIT_PATH.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
+    except Exception as e:
+        logger.debug(f"audit append failed: {e}")
+
+
+def _load_recent_audit(limit: int = 200) -> List[Dict[str, Any]]:
+    if limit <= 0:
+        return []
+    if not AGENT_AUDIT_PATH.exists():
+        return []
+    try:
+        lines = AGENT_AUDIT_PATH.read_text(encoding="utf-8").splitlines()
+        out: List[Dict[str, Any]] = []
+        for ln in lines[-limit:]:
+            try:
+                obj = json.loads(ln)
+                if isinstance(obj, dict):
+                    out.append(obj)
+            except Exception:
+                continue
+        return out
+    except Exception:
+        return []
+
+
+def _call_llm_direct(*, system_prompt: str, user_text: str, temperature: Optional[float] = None, max_tokens: Optional[int] = None) -> Optional[str]:
+    cfg = _get_secretary_config()
+    llm_cfg = cfg.get("llm") if isinstance(cfg.get("llm"), dict) else {}
+
+    mode = str((llm_cfg or {}).get("mode") or "api").strip().lower()
+    try:
+        t = float((llm_cfg or {}).get("temperature", 0.7)) if temperature is None else float(temperature)
+    except Exception:
+        t = 0.7
+    try:
+        mt = int((llm_cfg or {}).get("max_tokens", 256)) if max_tokens is None else int(max_tokens)
+    except Exception:
+        mt = 256
+
+    if mode == "local":
+        try:
+            from src.llm.local_chat import chat as local_chat
+            local_model = str((llm_cfg or {}).get("local_model") or "Qwen/Qwen3-8B")
+            use_4bit = bool((llm_cfg or {}).get("use_4bit", False))
+            use_8bit = bool((llm_cfg or {}).get("use_8bit", True))
+            messages = [
+                {"role": "system", "content": str(system_prompt)},
+                {"role": "user", "content": str(user_text)},
+            ]
+            resp = local_chat(
+                messages,
+                model_name=local_model,
+                temperature=t,
+                max_new_tokens=mt,
+                use_4bit=use_4bit,
+                use_8bit=use_8bit,
+            )
+            return resp.strip() if isinstance(resp, str) and resp.strip() else None
+        except Exception as e:
+            logger.error(f"[LLM] local direct error: {e}")
+            return None
+
+    api_base = str((llm_cfg or {}).get("api_base") or "").strip()
+    api_key = str((llm_cfg or {}).get("api_key") or "").strip() or "local"
+    model = str((llm_cfg or {}).get("model") or "").strip()
+    if not api_base or not model:
+        return None
+
+    try:
+        client = OpenAI(base_url=api_base, api_key=api_key)
+        out = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": str(system_prompt)},
+                {"role": "user", "content": str(user_text)},
+            ],
+            temperature=t,
+            max_tokens=mt,
+        )
+        content = None
+        try:
+            content = out.choices[0].message.content
+        except Exception:
+            content = None
+        if isinstance(content, str) and content.strip():
+            return content.strip()
+        return None
+    except Exception as e:
+        logger.error(f"[LLM] api direct error: {e}")
+        return None
+
+
+def _run_news_analysis_job(news_id: str) -> None:
+    with _AGENT_LOCK:
+        job = _NEWS_JOBS.get(news_id)
+        if not isinstance(job, dict):
+            return
+        job["status"] = "running"
+
+    try:
+        payload = job.get("input") if isinstance(job.get("input"), dict) else {}
+        text = str(payload.get("text") or "").strip()
+        url = str(payload.get("url") or "").strip()
+        source = str(payload.get("source") or "").strip()
+
+        _append_audit({
+            "time": datetime.now().isoformat(),
+            "type": "news.submit",
+            "news_id": news_id,
+            "source": source,
+            "url": url,
+        })
+
+        base_news = text
+        if url:
+            base_news = base_news + "\n\n[URL] " + url
+        if source:
+            base_news = base_news + "\n[Source] " + source
+
+        roles: Dict[str, str] = {
+            "macro": "你是宏观分析员。任务：判断该新闻对宏观/行业/风险偏好的影响。输出JSON：{verdict: ok|risky|uncertain, impact: string, reasons: [string], tickers: [string], actions: [string]}。只输出JSON。",
+            "risk": "你是风控分析员。任务：找出潜在风险、误读点、黑天鹅、确认信息缺口。输出JSON：{verdict: ok|risky|uncertain, risk_level: 1-5, reasons: [string], missing_info: [string], actions: [string]}。只输出JSON。",
+            "factcheck": "你是事实核查分析员。任务：识别可疑点、需要验证的事实、可能的谣言/误传。输出JSON：{verdict: ok|risky|uncertain, suspicious: [string], verification_steps: [string], confidence: 0-1}。只输出JSON。",
+            "sentiment": "你是情绪/舆情分析员。任务：判断市场情绪与可能的短期交易反应。输出JSON：{verdict: ok|risky|uncertain, sentiment: positive|neutral|negative, reasons: [string], actions: [string]}。只输出JSON。",
+        }
+
+        results: Dict[str, Any] = {}
+        for role, sp in roles.items():
+            raw = _call_llm_direct(system_prompt=sp, user_text=base_news, temperature=0.2, max_tokens=512)
+            parsed: Any = None
+            if isinstance(raw, str) and raw.strip():
+                try:
+                    parsed = json.loads(raw)
+                except Exception:
+                    parsed = {"raw": raw}
+            else:
+                parsed = {"error": "no_response"}
+            results[role] = parsed
+            _append_audit({
+                "time": datetime.now().isoformat(),
+                "type": "agent.result",
+                "news_id": news_id,
+                "agent": role,
+                "result": parsed,
+            })
+
+        merge_prompt = (
+            "你是交易秘书的总结官。请基于4个分析员的JSON输出，给Sensei一段总结：\n"
+            "1) 结论(是否采纳/是否需要更多核查)\n"
+            "2) 关键理由(3-6条)\n"
+            "3) 对交易的可执行建议(0-5条)\n"
+            "要求：明确、可核查、不要编造。"
+        )
+        merge_input = json.dumps(results, ensure_ascii=False)
+        summary = _call_llm_direct(system_prompt=merge_prompt, user_text=merge_input, temperature=0.2, max_tokens=512) or ""
+
+        try:
+            mem = get_mari_memory()
+            mem.remember(
+                content=f"[News:{news_id}] {text}\n\n[Agents]\n{json.dumps(results, ensure_ascii=False)}\n\n[Summary]\n{summary}",
+                category="fact",
+                importance=3,
+            )
+        except Exception as e:
+            logger.debug(f"news memory save failed: {e}")
+
+        with _AGENT_LOCK:
+            job = _NEWS_JOBS.get(news_id)
+            if isinstance(job, dict):
+                job["status"] = "done"
+                job["finished_at"] = datetime.now().isoformat()
+                job["results"] = results
+                job["summary"] = summary
+
+        _append_audit({
+            "time": datetime.now().isoformat(),
+            "type": "news.done",
+            "news_id": news_id,
+        })
+    except Exception as e:
+        with _AGENT_LOCK:
+            job = _NEWS_JOBS.get(news_id)
+            if isinstance(job, dict):
+                job["status"] = "error"
+                job["finished_at"] = datetime.now().isoformat()
+                job["error"] = str(e)
+        _append_audit({
+            "time": datetime.now().isoformat(),
+            "type": "news.error",
+            "news_id": news_id,
+            "error": str(e),
+        })
+
+
+@app.post("/api/v1/news/submit", response_model=NewsSubmitResponse)
+async def submit_news(req: NewsSubmitRequest):
+    text = str(req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+
+    news_id = "news_" + uuid.uuid4().hex[:12]
+    job = {
+        "news_id": news_id,
+        "status": "queued",
+        "created_at": datetime.now().isoformat(),
+        "finished_at": None,
+        "input": {
+            "text": text,
+            "url": str(req.url or "").strip() or None,
+            "source": str(req.source or "").strip() or None,
+        },
+        "results": None,
+        "summary": None,
+    }
+
+    with _AGENT_LOCK:
+        _NEWS_JOBS[news_id] = job
+
+    t = threading.Thread(target=_run_news_analysis_job, args=(news_id,), daemon=True)
+    t.start()
+    return NewsSubmitResponse(news_id=news_id, status="queued")
+
+
+@app.get("/api/v1/news/{news_id}", response_model=NewsJobStatusResponse)
+async def get_news_job(news_id: str):
+    with _AGENT_LOCK:
+        job = _NEWS_JOBS.get(str(news_id))
+        if not isinstance(job, dict):
+            raise HTTPException(status_code=404, detail="news_id not found")
+        return NewsJobStatusResponse(
+            news_id=str(job.get("news_id")),
+            status=str(job.get("status")),
+            created_at=str(job.get("created_at")),
+            finished_at=job.get("finished_at"),
+            input=job.get("input") if isinstance(job.get("input"), dict) else {},
+            results=job.get("results"),
+            summary=job.get("summary"),
+        )
+
+
+@app.get("/api/v1/agents/audit")
+async def get_agents_audit(limit: int = 200):
+    return {"events": _load_recent_audit(limit=int(limit)), "count": int(limit)}
+
+
+@app.get("/api/v1/tools/fetch_url")
+async def fetch_url(url: str, timeout_sec: int = 12):
+    cfg = _get_secretary_config()
+    net_cfg = cfg.get("network") if isinstance(cfg.get("network"), dict) else {}
+    allowed = net_cfg.get("allowed_domains") if isinstance(net_cfg.get("allowed_domains"), list) else []
+
+    u = str(url or "").strip()
+    if not u:
+        raise HTTPException(status_code=400, detail="url is required")
+    if not (u.startswith("https://") or u.startswith("http://")):
+        raise HTTPException(status_code=400, detail="url must start with http(s)://")
+
+    try:
+        parts = urllib.parse.urlparse(u)
+        host = (parts.hostname or "").lower().strip()
+        if allowed:
+            ok = any(host == str(d).lower().strip() or host.endswith("." + str(d).lower().strip()) for d in allowed)
+            if not ok:
+                raise HTTPException(status_code=403, detail="domain not allowed")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=400, detail="invalid url")
+
+    try:
+        req0 = urllib.request.Request(u, headers={"User-Agent": "MariSecretary/0.1"})
+        with urllib.request.urlopen(req0, timeout=int(timeout_sec)) as resp:
+            raw = resp.read(500_000)
+            ct = resp.headers.get("Content-Type", "")
+        try:
+            text = raw.decode("utf-8", errors="ignore")
+        except Exception:
+            text = str(raw)
+        return {"url": u, "content_type": ct, "text": text}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"fetch failed: {e}")
 
 
 @app.post("/api/v1/chat", response_model=ChatResponse)
