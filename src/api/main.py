@@ -577,8 +577,14 @@ def _call_llm(*, text: str, ctx: Dict[str, Any]) -> Optional[str]:
         return None
     msg = resp.choices[0].message
     content = getattr(msg, "content", None)
-    if isinstance(content, str) and content.strip():
-        return content.strip()
+    
+    # Qwen3 may return content with <think>...</think> tags, strip them
+    if isinstance(content, str):
+        import re
+        # Remove thinking tags if present
+        content = re.sub(r'<think>.*?</think>', '', content, flags=re.DOTALL).strip()
+        if content:
+            return content
     return None
 
 
