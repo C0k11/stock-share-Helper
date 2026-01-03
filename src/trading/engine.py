@@ -25,13 +25,13 @@ class TradingEngine:
         self.is_running = True
         self._thread = threading.Thread(target=self._run_loop, daemon=True)
         self._thread.start()
-        print("✅ Trading Engine Started (Event Loop)")
+        print("Trading Engine Started (Event Loop)")
 
     def stop(self) -> None:
         self.is_running = False
         if self._thread is not None:
             self._thread.join(timeout=3.0)
-        print("🛑 Trading Engine Stopped")
+        print("Trading Engine Stopped")
 
     def push_event(self, event: Event) -> None:
         self.events.put(event)

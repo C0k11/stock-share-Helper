@@ -31,7 +31,7 @@ class MultiAgentStrategy:
         # self.system2 = load_system2(...)
         # self.gatekeeper = load_gatekeeper(...)
 
-        print("🧠 Multi-Agent Strategy Initialized.")
+        print("Multi-Agent Strategy Initialized.")
 
     def on_bar(self, market_data: dict) -> Optional[dict]:
         """
