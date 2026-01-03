@@ -356,6 +356,7 @@ class MainWindow(QMainWindow):
         self._tts_backend = "edge"
         self._gpt_sovits_cfg: dict = {}
         self._auto_execute_actions = False
+        self._show_action_notes = False
 
         try:
             cfg_path = Path(self._repo_root()) / "configs" / "secretary.yaml"
@@ -374,6 +375,7 @@ class MainWindow(QMainWindow):
                         self._gpt_sovits_cfg = dict(g)
                     actions_cfg = cfg.get("actions") if isinstance(cfg.get("actions"), dict) else {}
                     self._auto_execute_actions = bool(actions_cfg.get("auto_execute", False))
+                    self._show_action_notes = bool(actions_cfg.get("show_notes", False))
                     print(f"[TTS Config] backend={self._tts_backend}, voice={self._tts_voice}")
                     print(f"[TTS Config] gpt_sovits fallback_to_edge={self._gpt_sovits_cfg.get('fallback_to_edge')}")
         except Exception as e:
@@ -548,6 +550,41 @@ class MainWindow(QMainWindow):
             raw = resp.read().decode("utf-8", errors="replace")
         obj: Any = json.loads(raw)
         return obj if isinstance(obj, dict) else {"ok": False, "error": "bad response"}
+
+    def _execute_ui_action(self, action_obj: dict) -> dict:
+        a = str((action_obj or {}).get("action") or "").strip().lower()
+        params = (action_obj or {}).get("params") if isinstance((action_obj or {}).get("params"), dict) else {}
+        if not hasattr(self, "dashboard_view") or self.dashboard_view is None:
+            return {"ok": False, "error": "dashboard_view not ready"}
+
+        if a == "ui.refresh":
+            self.dashboard_view.page().runJavaScript("if (window.loadLiveData) window.loadLiveData();")
+            return {"ok": True}
+
+        if a == "ui.set_live_ticker":
+            tk = str(params.get("ticker") or params.get("symbol") or "").strip().upper()
+            if not tk:
+                return {"ok": False, "error": "ticker required"}
+            js = (
+                "(function(){try{"
+                "var sel=document.getElementById('liveTickerSelect');"
+                f"if(sel){{sel.value={json.dumps(tk)};}}"
+                "if (window.loadLiveChart) window.loadLiveChart();"
+                "}catch(e){}})();"
+            )
+            self.dashboard_view.page().runJavaScript(js)
+            return {"ok": True, "ticker": tk}
+
+        if a == "ui.set_mode":
+            mode = str(params.get("mode") or "").strip().lower()
+            if mode not in {"online", "offline"}:
+                return {"ok": False, "error": "mode must be online/offline"}
+            self.dashboard_view.page().runJavaScript(
+                f"if (window.setTradingMode) window.setTradingMode('{mode}');"
+            )
+            return {"ok": True, "mode": mode}
+
+        return {"ok": False, "error": f"unknown ui action: {a}"}
 
     def _apply_initial_splitter_sizes(self) -> None:
         try:
@@ -949,11 +986,20 @@ class MainWindow(QMainWindow):
             if self._auto_execute_actions and actions:
                 for a in actions:
                     try:
-                        res = self._post_action(a)
-                        ok = bool(res.get("ok"))
-                        action_notes.append(f"[Action] {a.get('action')} -> {'OK' if ok else 'FAIL'}")
+                        act_name = str(a.get("action") or "")
+                        if str(act_name).lower().startswith("ui."):
+                            res = self._execute_ui_action(a)
+                            ok = bool(res.get("ok"))
+                        else:
+                            res = self._post_action(a)
+                            ok = bool(res.get("ok"))
+
+                        # Only show notes when enabled, or when failed.
+                        if self._show_action_notes or (not ok):
+                            action_notes.append(f"[Action] {act_name} -> {'OK' if ok else 'FAIL'}")
                     except Exception as e:
-                        action_notes.append(f"[Action] {a.get('action')} -> ERROR: {e}")
+                        if self._show_action_notes:
+                            action_notes.append(f"[Action] {a.get('action')} -> ERROR: {e}")
             if action_notes:
                 cleaned = (cleaned + "\n\n" + "\n".join(action_notes)).strip()
 

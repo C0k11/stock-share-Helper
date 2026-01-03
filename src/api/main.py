@@ -156,12 +156,17 @@ def _tool_instructions() -> str:
         "- set_mode (params: {mode: online|offline})\n"
         "- submit_news (params: {text, url?, source?})\n"
         "- fetch_url (params: {url, timeout_sec?})\n"
+        "- ui.set_live_ticker (params: {ticker})  # switch dashboard chart ticker\n"
+        "- ui.refresh (params: {})  # refresh dashboard live data\n"
+        "- ui.set_mode (params: {mode: online|offline})  # switch dashboard mode button\n"
         "- remember (params: {content, category?, importance?})\n"
         "If you don't have enough data, say you don't know. Never fabricate portfolio/trade numbers.\n"
         "\n[UI Buttons]\n"
         "- Online/Offline: switch trading mode\n"
         "- Refresh: refresh live status/chart/logs\n"
         "- Start RL: toggle online reinforcement learning\n"
+        "\n[Rule]\n"
+        "If Sensei asks to open/view a ticker chart in the desktop dashboard, use ui.set_live_ticker + ui.refresh. Do NOT use fetch_url for that.\n"
     )
 
 
