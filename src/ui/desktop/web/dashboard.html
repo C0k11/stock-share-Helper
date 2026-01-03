@@ -414,6 +414,19 @@
           setLiveStatus('Engine not running');
           return null;
         }
+
+        // Show data source and freshness
+        try {
+          const src = data.data_source || 'unknown';
+          const stale = !!data.stale;
+          const age = (data.age_sec !== undefined && data.age_sec !== null) ? (Number(data.age_sec) / 60.0) : null;
+          const lastBar = data.last_bar_time ? String(data.last_bar_time) : '';
+          let s = `Source=${src}`;
+          if (age !== null && !isNaN(age)) s += ` | Age=${age.toFixed(1)}m`;
+          if (lastBar) s += ` | LastBar=${lastBar.slice(0,19).replace('T',' ')}`;
+          if (stale) s += ' | STALE (market closed / delayed)';
+          setLiveStatus(s);
+        } catch (e) {}
         
         // Update cash with animation
         const cashEl = document.getElementById('l_cash');

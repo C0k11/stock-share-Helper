@@ -192,13 +192,137 @@ def _is_portfolio_question(text: str) -> bool:
     keys = [
         "持仓", "仓位", "现金", "资金", "余额", "多少钱", "总资产", "净值", "pnl", "盈亏",
         "赚", "亏", "交易", "成交", "买了", "卖了", "多少股", "持有",
-        "我们现在", "目前",
     ]
     tl = t.lower()
     for k in keys:
         if k in t or k.lower() in tl:
             return True
     return False
+
+
+def _is_datasource_question(text: str) -> bool:
+    t = str(text or "")
+    tl = t.lower()
+    keys = [
+        "数据源", "虚拟", "模拟", "真实", "实盘", "实时", "开盘", "休市", "停盘", "延迟",
+        "yfinance", "simulated", "feed", "source",
+    ]
+    for k in keys:
+        if k in t or k.lower() in tl:
+            return True
+    return False
+
+
+def _parse_iso_time(s: Any) -> Optional[datetime]:
+    if s is None:
+        return None
+    try:
+        if isinstance(s, datetime):
+            return s
+        return datetime.fromisoformat(str(s).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+
+def _live_feed_status() -> Dict[str, Any]:
+    if _live_runner is None:
+        return {"active": False}
+
+    data_source = str(getattr(_live_runner, "data_source", "unknown") or "unknown")
+    mode = str(getattr(_live_runner, "trading_mode", "online") or "online")
+
+    latest_time: Optional[datetime] = None
+    latest_source: Optional[str] = None
+    latest_ticker: Optional[str] = None
+    latest_bars: Dict[str, Any] = {}
+
+    try:
+        ph = getattr(_live_runner, "price_history", {})
+        if isinstance(ph, dict):
+            for tk, rows in ph.items():
+                if not rows:
+                    continue
+                last = rows[-1]
+                if not isinstance(last, dict):
+                    continue
+                t0 = _parse_iso_time(last.get("time"))
+                src0 = str(last.get("source") or "").strip() or None
+                latest_bars[str(tk).upper()] = {
+                    "time": last.get("time"),
+                    "source": src0,
+                }
+                if t0 is not None and (latest_time is None or t0 > latest_time):
+                    latest_time = t0
+                    latest_source = src0
+                    latest_ticker = str(tk).upper()
+    except Exception:
+        pass
+
+    # Prefer last bar's declared source if present
+    src = latest_source or data_source
+
+    now = datetime.now(tz=latest_time.tzinfo) if latest_time and latest_time.tzinfo else datetime.now()
+    age_sec: Optional[float] = None
+    if latest_time is not None:
+        try:
+            age_sec = float((now - latest_time).total_seconds())
+        except Exception:
+            age_sec = None
+
+    # Stale heuristic: if no bars or last bar older than 15 minutes
+    stale = False
+    stale_reason = ""
+    if latest_time is None:
+        stale = True
+        stale_reason = "no_bar"
+    elif age_sec is not None and age_sec > 15 * 60:
+        stale = True
+        stale_reason = "last_bar_too_old"
+
+    return {
+        "active": True,
+        "trading_mode": mode,
+        "data_source": src,
+        "latest_ticker": latest_ticker,
+        "last_bar_time": latest_time.isoformat() if latest_time else None,
+        "age_sec": age_sec,
+        "stale": stale,
+        "stale_reason": stale_reason,
+        "latest_bars": latest_bars,
+    }
+
+
+def _live_datasource_answer() -> str:
+    st = _live_feed_status()
+    if not st.get("active"):
+        return "Sensei, 当前没有正在运行的行情会话（live runner 未绑定），我无法判断数据源呢…"
+
+    src = str(st.get("data_source") or "unknown")
+    mode = str(st.get("trading_mode") or "online")
+    last_bar_time = str(st.get("last_bar_time") or "")
+    age_sec = st.get("age_sec")
+    stale = bool(st.get("stale"))
+
+    src_label = "REAL" if "yfinance" in src.lower() else ("SIMULATED" if "sim" in src.lower() else "UNKNOWN")
+    age_min = None
+    try:
+        if isinstance(age_sec, (int, float)):
+            age_min = float(age_sec) / 60.0
+    except Exception:
+        age_min = None
+
+    lines: List[str] = []
+    lines.append(f"Sensei, 我按实时引擎状态回答您的‘数据源/开盘’问题（mode={mode}）…")
+    lines.append(f"Data Source: {src} ({src_label})")
+    if last_bar_time:
+        lines.append(f"Last Bar: {last_bar_time}")
+    if age_min is not None:
+        lines.append(f"Age: {age_min:.1f} min")
+    if stale:
+        lines.append("状态：行情数据已停更（可能休市/接口延迟/网络问题）。")
+    else:
+        lines.append("状态：行情数据在更新中。")
+    return "\n".join(lines).strip()
 
 
 def _format_money(x: Any) -> str:
@@ -1312,6 +1436,10 @@ def _secretary_reply(text: str, ctx: Dict[str, Any]) -> str:
         news_id = _enqueue_news_job(text=t, url=url, source="chat")
         return f"Sensei, 我收到新闻了，已分发给分析员。编号：{news_id}（你可以直接把这个编号发给我获取总结）"
 
+    # Data source / market open questions must be answered from feed status (no LLM guessing)
+    if _is_datasource_question(t):
+        return _live_datasource_answer()
+
     # Portfolio state questions must be answered from live engine state (no LLM guessing)
     if _is_portfolio_question(t):
         return _live_portfolio_answer(t)
@@ -1872,6 +2000,8 @@ async def get_live_status():
     
     initial_cash = getattr(_live_runner, "initial_cash", 500000.0)
     total_pnl = total_value - initial_cash
+
+    feed = _live_feed_status()
     
     return {
         "active": True,
@@ -1882,6 +2012,13 @@ async def get_live_status():
         "positions": positions,
         "trade_count": len(_live_runner.trade_log),
         "mode": getattr(_live_runner, "trading_mode", "online"),
+
+        # Feed/source diagnostics
+        "data_source": feed.get("data_source"),
+        "last_bar_time": feed.get("last_bar_time"),
+        "age_sec": feed.get("age_sec"),
+        "stale": feed.get("stale"),
+        "stale_reason": feed.get("stale_reason"),
     }
 
 
