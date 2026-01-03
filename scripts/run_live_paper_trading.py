@@ -278,6 +278,11 @@ class LivePaperTradingRunner:
         self.rl_manager = get_online_learning_manager()
         self._pending_trades: Dict[str, Dict] = {}  # track open positions for RL
         
+        # Trading mode (online = real-time, offline = backtest playback)
+        self.trading_mode = "online"
+        self._offline_thread: Optional[threading.Thread] = None
+        self._offline_running = False
+        
         # Hook into event handling
         self._original_handle = self.engine._handle_event
         self.engine._handle_event = self._wrapped_handle_event
@@ -484,6 +489,7 @@ class LivePaperTradingRunner:
 
     def stop(self) -> None:
         """Stop the engine and save trading data"""
+        self.stop_offline_playback()
         if self.data_feed:
             self.data_feed.stop()
         self.engine.stop()
@@ -492,6 +498,97 @@ class LivePaperTradingRunner:
         # Save paper trading data for system upgrade
         self._save_trading_data()
         print("System Shutdown.")
+    
+    def start_offline_playback(self) -> None:
+        """Start offline backtest playback mode"""
+        if self._offline_running:
+            return
+        
+        self._offline_running = True
+        self.trading_mode = "offline"
+        
+        # Reset for fresh backtest
+        self.broker.cash = self.initial_cash
+        self.broker.positions = {}
+        self.trade_log.clear()
+        self.pnl_history.clear()
+        self.price_history.clear()
+        self.agent_logs.clear()
+        
+        self.agent_logs.append({
+            "time": datetime.now().strftime("%H:%M:%S"),
+            "type": "system",
+            "priority": 2,
+            "message": "[System] Offline mode started - replaying historical data",
+        })
+        
+        def _playback_thread():
+            # Load historical data from results
+            data_file = project_root / "data" / "historical" / "sample_ohlc.csv"
+            if not data_file.exists():
+                # Try to find any CSV in data folder
+                for f in (project_root / "data").rglob("*.csv"):
+                    if "ohlc" in f.name.lower() or "price" in f.name.lower():
+                        data_file = f
+                        break
+            
+            if not data_file.exists():
+                self.agent_logs.append({
+                    "time": datetime.now().strftime("%H:%M:%S"),
+                    "type": "error",
+                    "priority": 3,
+                    "message": "[System] No historical data found for offline mode",
+                })
+                self._offline_running = False
+                return
+            
+            try:
+                import pandas as pd
+                df = pd.read_csv(data_file)
+                
+                for _, row in df.iterrows():
+                    if not self._offline_running:
+                        break
+                    
+                    ticker = row.get("ticker", row.get("symbol", "NVDA"))
+                    data = {
+                        "ticker": str(ticker).upper(),
+                        "open": float(row.get("open", row.get("Open", 0))),
+                        "high": float(row.get("high", row.get("High", 0))),
+                        "low": float(row.get("low", row.get("Low", 0))),
+                        "close": float(row.get("close", row.get("Close", 0))),
+                        "volume": float(row.get("volume", row.get("Volume", 0))),
+                        "time": datetime.now(),
+                    }
+                    
+                    self._on_market_data(data)
+                    time.sleep(0.5)  # Simulate real-time pace
+                
+                self.agent_logs.append({
+                    "time": datetime.now().strftime("%H:%M:%S"),
+                    "type": "system",
+                    "priority": 2,
+                    "message": "[System] Offline playback completed",
+                })
+            except Exception as e:
+                self.agent_logs.append({
+                    "time": datetime.now().strftime("%H:%M:%S"),
+                    "type": "error",
+                    "priority": 3,
+                    "message": f"[System] Offline playback error: {e}",
+                })
+            finally:
+                self._offline_running = False
+        
+        self._offline_thread = threading.Thread(target=_playback_thread, daemon=True)
+        self._offline_thread.start()
+    
+    def stop_offline_playback(self) -> None:
+        """Stop offline backtest playback"""
+        self._offline_running = False
+        self.trading_mode = "online"
+        if self._offline_thread and self._offline_thread.is_alive():
+            self._offline_thread.join(timeout=1.0)
     
     def _save_trading_data(self) -> None:
         """Save trading data for future system improvements"""
