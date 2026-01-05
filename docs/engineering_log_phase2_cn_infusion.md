@@ -51,6 +51,7 @@
 - [Phase 14: 评测平台](#phase-14-评测平台protocol-freeze--walk-forward--stratified-report)
 - [Phase 15: Q4 Walk-forward Report + Alpha Mining + Surgical DPO](#phase-15-q4-walk-forward-report--alpha-mining--surgical-dpoanalyst-alpha-hunter)
 - [Phase 21: 多模态视觉之眼（Visual Alpha / Chartist）](#phase-21-多模态视觉之眼visual-alpha--chartist)
+- [2026-01：Secretary / Mari（桌面助手）专注度兜底 + 派单闭环](#2026-01secretary--mari桌面助手专注度兜底--派单闭环)
 
 ---
 
@@ -97,6 +98,43 @@
 Prompt 模板：
 
 - `configs/prompts/chartist_prompt.yaml`
+
+---
+
+## 2026-01：Secretary / Mari（桌面助手）专注度兜底 + 派单闭环
+
+目标：解决“抓关键词答非所问/多意图漏处理/口头承诺不落地”的问题，让 Mari 更专注、更可执行，并为后续在线对齐（SFT/DPO/online RL）建立可追踪的数据底座。
+
+落地内容：
+
+- **确定性优先（Focus Guard）**：对“谁赚钱最多/谁亏最多/最大仓位”类问句，优先从 live runner 状态计算并回答，避免 LLM 发散成持仓大表。
+- **多意图顺序**：同一句出现“结论 + 同时派单”，保证先给结论，再派单（返回 `task_id`，可回查）。
+- **可执行派单闭环**：新增任务状态机与异步执行（Analyst/Trader），并把生命周期写入轨迹日志（为后续偏好学习提供样本）。
+- **训练数据飞轮**：从 chat 日志/合成多意图样本生成 SFT + DPO pairs；DPO 的 rejected 样本专门覆盖“答非所问/只贴报表/漏掉第二意图”。
+
+关键脚本：
+
+- `scripts/generate_secretary_teacher_dataset.py`：生成秘书模型 SFT 数据与 DPO pairs（解释型 Mari 风格）
+- `scripts/finetune_llm.py`：SFT/QLoRA 微调
+- `scripts/train_dpo.py`：TRL DPO 训练
+
+Quickstart（3k SFT + DPO 数据）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\generate_secretary_teacher_dataset.py --mode synth --target 3000 --resume --out data\finetune\teacher_secretary\teacher_secretary_dispatch_v3.jsonl --out-train data\finetune\teacher_secretary\train_secretary_dispatch_v3.json --out-val data\finetune\teacher_secretary\val_secretary_dispatch_v3.json --val-ratio 0.05 --out-dpo data\dpo\secretary_dispatch_pairs_v3.jsonl --teacher-model deepseek-reasoner --timeout 90 --temperature 0.2 --max-output-tokens 520 --sleep 0.15
+```
+
+SFT warm-start（示例）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\finetune_llm.py --model Qwen/Qwen3-8B --data data\finetune\teacher_secretary\train_secretary_dispatch_v3.json --eval-data data\finetune\teacher_secretary\val_secretary_dispatch_v3.json --outdir models\llm_secretary_qwen3_8b_dispatch_sft_v3 --epochs 1 --batch-size 1 --grad-acc 8 --lr 2e-4 --max-seq-len 1024 --qlora
+```
+
+DPO（示例）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\train_dpo.py --base-model Qwen/Qwen3-8B --sft-adapter models\llm_secretary_qwen3_8b_dispatch_sft_v3\lora_weights --data-path data\dpo\secretary_dispatch_pairs_v3.jsonl --output-dir models\llm_secretary_qwen3_8b_dispatch_dpo_v3 --epochs 1 --batch-size 1 --grad-accum 8 --lr 5e-6 --beta 0.1 --reference-free
+```
 
 环境变量（密钥不入库）：
 

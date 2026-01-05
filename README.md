@@ -170,6 +170,69 @@
 
 ---
 
+## Secretary / Mari（桌面助手：专注度兜底 + 可执行派单）
+
+目标：让 Mari 更“专注”（整句理解、多意图不漏），并且把“说了就要做”落到可追踪的执行闭环。
+
+核心改动：
+
+- **专注度兜底（确定性回答）**：对“谁赚钱最多/谁亏最多/最大仓位”这类问题，优先使用 live runner 的实时仓位数据给结论，避免 LLM 抓关键词发散。
+- **多意图顺序**：同一句里如果既问结论又要求“交给分析员/交易员”，会先给结论，再自动创建任务并返回 `task_id`（可回查）。
+- **任务闭环（Task Dispatch）**：生成并异步执行 Analyst/Trader 任务，状态写入轨迹日志，提供查询接口。
+
+相关 API：
+
+- `POST /api/v1/tasks/create`：创建任务（返回 `task_id`）
+- `GET /api/v1/tasks/{task_id}`：查询任务状态与结果
+
+### 3k 训练数据（解释型 Mari 风格）Quickstart
+
+环境变量（密钥不入库）：
+
+```bash
+TEACHER_API_KEY=sk-...
+TEACHER_BASE_URL=https://api.deepseek.com
+TEACHER_MODEL=deepseek-reasoner
+```
+
+生成 SFT + DPO 数据（合成多意图样本，解释型 Mari 风格）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\generate_secretary_teacher_dataset.py --mode synth --target 3000 --resume --out data\finetune\teacher_secretary\teacher_secretary_dispatch_v3.jsonl --out-train data\finetune\teacher_secretary\train_secretary_dispatch_v3.json --out-val data\finetune\teacher_secretary\val_secretary_dispatch_v3.json --val-ratio 0.05 --out-dpo data\dpo\secretary_dispatch_pairs_v3.jsonl --teacher-model deepseek-reasoner --timeout 90 --temperature 0.2 --max-output-tokens 520 --sleep 0.15
+```
+
+实时监控生成进度（每 10 秒打印 jsonl 行数）：
+
+```powershell
+.\venv311\Scripts\python.exe -c "import time,datetime,pathlib; p=pathlib.Path(r'data/finetune/teacher_secretary/teacher_secretary_dispatch_v3.jsonl');\
+\
+while True:\
+ ts=datetime.datetime.now().strftime('%H:%M:%S');\
+ if p.exists():\
+  n=0\
+  with p.open('rb') as f:\
+   for chunk in iter(lambda: f.read(1024*1024), b''):\
+    n += chunk.count(b'\\n')\
+  print(f'{ts}  lines={n}  size={p.stat().st_size}', flush=True)\
+ else:\
+  print(f'{ts}  waiting for {p}', flush=True)\
+ time.sleep(10)"
+```
+
+SFT warm-start（以现有 secretary LoRA 为起点）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\finetune_llm.py --model Qwen/Qwen3-8B --data data\finetune\teacher_secretary\train_secretary_dispatch_v3.json --eval-data data\finetune\teacher_secretary\val_secretary_dispatch_v3.json --outdir models\llm_secretary_qwen3_8b_dispatch_sft_v3 --epochs 1 --batch-size 1 --grad-acc 8 --lr 2e-4 --max-seq-len 1024 --qlora
+```
+
+DPO（用偏好对抑制“关键词抓取/答非所问”）：
+
+```powershell
+.\venv311\Scripts\python.exe scripts\train_dpo.py --base-model Qwen/Qwen3-8B --sft-adapter models\llm_secretary_qwen3_8b_dispatch_sft_v3\lora_weights --data-path data\dpo\secretary_dispatch_pairs_v3.jsonl --output-dir models\llm_secretary_qwen3_8b_dispatch_dpo_v3 --epochs 1 --batch-size 1 --grad-accum 8 --lr 5e-6 --beta 0.1 --reference-free
+```
+
+---
+
 ## MVP 定义（v1）
 
 | 维度 | 决定 |
