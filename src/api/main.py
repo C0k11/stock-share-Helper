@@ -21,11 +21,13 @@ from openai import OpenAI
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from loguru import logger
 from pydantic import BaseModel
 
 from src.analysis.narrator import narrate_trade_context
 from src.memory.mari_memory import get_mari_memory, parse_memory_command
+from src.learning.recorder import recorder as evolution_recorder
 
 app = FastAPI(
     title="QuantAI API",
@@ -42,12 +44,161 @@ SECRETARY_CONFIG_PATH = REPO_ROOT / "configs" / "secretary.yaml"
 AGENT_HUB_DIR = DATA_DIR / "agent_hub"
 AGENT_HUB_DIR.mkdir(parents=True, exist_ok=True)
 AGENT_AUDIT_PATH = AGENT_HUB_DIR / "audit.jsonl"
+CHAT_LOG_PATH = AGENT_HUB_DIR / "chat.jsonl"
+TRAJECTORY_LOG_PATH = AGENT_HUB_DIR / "trajectory.jsonl"
 
 _SECRETARY_CFG: Optional[Dict[str, Any]] = None
 _SECRETARY_CFG_MTIME: Optional[float] = None
 
 _AGENT_LOCK = threading.Lock()
 _NEWS_JOBS: Dict[str, Dict[str, Any]] = {}
+_TASKS: Dict[str, Dict[str, Any]] = {}
+
+# Short-lived per-session state for better conversational continuity (desktop only).
+_SESSION_STATE: Dict[str, Dict[str, Any]] = {}
+
+
+def _get_session_id(ctx: Dict[str, Any]) -> Optional[str]:
+    try:
+        if str((ctx or {}).get("client") or "").lower() != "desktop":
+            return None
+        sid = str((ctx or {}).get("session_id") or "").strip()
+        return sid or None
+    except Exception:
+        return None
+
+
+def _get_session_state(ctx: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    sid = _get_session_id(ctx)
+    if not sid:
+        return None
+    with _AGENT_LOCK:
+        st = _SESSION_STATE.get(sid)
+        if not isinstance(st, dict):
+            st = {"last_task_id": None, "awaiting_detail": False, "last_detail_task_id": None}
+            _SESSION_STATE[sid] = st
+        return st
+
+
+def _remember_last_task(ctx: Dict[str, Any], task_id: str) -> None:
+    st = _get_session_state(ctx)
+    if st is None:
+        return
+    try:
+        st["last_task_id"] = str(task_id)
+    except Exception:
+        return
+
+
+def _mark_awaiting_detail(ctx: Dict[str, Any], task_id: Optional[str]) -> None:
+    st = _get_session_state(ctx)
+    if st is None:
+        return
+    try:
+        st["awaiting_detail"] = True
+        st["last_detail_task_id"] = str(task_id) if task_id else None
+    except Exception:
+        return
+
+
+def _clear_awaiting_detail(ctx: Dict[str, Any]) -> None:
+    st = _get_session_state(ctx)
+    if st is None:
+        return
+    try:
+        st["awaiting_detail"] = False
+    except Exception:
+        return
+
+
+def _is_followup_status_query(text: str) -> bool:
+    t = str(text or "").strip()
+    if not t:
+        return False
+    # If user already supplied an id, let existing logic handle it.
+    if _extract_task_id(t) or _extract_news_id(t):
+        return False
+    # Typical short follow-ups.
+    keys = [
+        "现在怎么样", "现在咋样", "怎么样了", "咋样了", "进展", "进度", "好了没", "好了吗", "结果呢", "有结果了吗", "有没有结果",
+        "running", "done", "status",
+    ]
+    tl = t.lower()
+    return any((k in t) or (k in tl) for k in keys)
+
+
+def _is_affirmative_short(text: str) -> bool:
+    t = str(text or "").strip()
+    if not t:
+        return False
+    # Keep it strict: only short acknowledgements.
+    if len(t) > 8:
+        return False
+    keys = ["好的", "好", "行", "可以", "是", "嗯", "嗯嗯", "请", "麻烦", "好哒", "ok", "okay", "yes"]
+    tl = t.lower()
+    return any((t == k) or (tl == k) for k in keys)
+
+
+def _task_status_text(task_id: str) -> str:
+    with _AGENT_LOCK:
+        job = _TASKS.get(str(task_id))
+    if not isinstance(job, dict):
+        return f"Sensei, 我没有找到这个 task_id：{task_id}"
+    st = str(job.get("status") or "")
+    if st == "done":
+        res = job.get("result") if isinstance(job.get("result"), dict) else {}
+        final = str((res or {}).get("final") or "").strip()
+        if final:
+            return (final + f"\n\n(task_id={task_id})").strip()
+        return ("Sensei, 任务已完成，但没有生成总结文本。我把原始结果贴给您：\n\n" + json.dumps(res, ensure_ascii=False)).strip()
+    if st == "error":
+        return f"Sensei, 这个任务执行失败了：{job.get('error')} (task_id={task_id})"
+    return f"Sensei, 这个任务还在处理中：status={st} (task_id={task_id})"
+
+
+def _elaborate_task(task_id: str) -> str:
+    with _AGENT_LOCK:
+        job = _TASKS.get(str(task_id))
+    if not isinstance(job, dict):
+        return f"Sensei, 我没有找到这个 task_id：{task_id}"
+    if str(job.get("status") or "") != "done":
+        return _task_status_text(task_id)
+
+    res = job.get("result") if isinstance(job.get("result"), dict) else {}
+    final = str((res or {}).get("final") or "").strip()
+    analyst = str((res or {}).get("analyst") or "").strip()
+    trader = str((res or {}).get("trader") or "").strip()
+
+    # Prefer deterministic expansion: show analyst+trader sections.
+    parts: list[str] = []
+    if final:
+        parts.append(final)
+    if analyst:
+        parts.append("\n[分析员要点（原文）]\n" + analyst)
+    if trader:
+        parts.append("\n[交易员执行清单（原文）]\n" + trader)
+
+    base = "\n\n".join([p.strip() for p in parts if p.strip()]).strip()
+    if not base:
+        return _task_status_text(task_id)
+
+    # If we can call LLM, constrain it to only elaborate the given checklist.
+    try:
+        expand_prompt = (
+            "你是 Mari（交易秘书）。用户说‘好的’，表示要你把上一条清单继续细化。\n"
+            "只允许基于【输入材料】进行展开，不要引入新的事实/价格/事件。\n"
+            "输出结构：\n"
+            "1) 先给一个一句话总览\n"
+            "2) 然后逐条细化（每条 2-4 句：为什么、怎么做、注意什么）\n"
+            "要求：用中文，明确、可执行。"
+        )
+        expanded = _call_llm_direct(system_prompt=expand_prompt, user_text=base, temperature=0.2, max_tokens=650)
+        if isinstance(expanded, str) and expanded.strip():
+            return (expanded.strip() + f"\n\n(task_id={task_id})").strip()
+    except Exception:
+        pass
+
+    return (base + f"\n\n(task_id={task_id})").strip()
 
 # CORS配置
 app.add_middleware(
@@ -115,6 +266,20 @@ class NewsSubmitRequest(BaseModel):
     text: str
     url: Optional[str] = None
     source: Optional[str] = None
+
+
+class TaskCreateRequest(BaseModel):
+    text: str
+    ticker: Optional[str] = None
+
+
+class TaskStatusResponse(BaseModel):
+    task_id: str
+    status: str
+    created_at: str
+    finished_at: Optional[str] = None
+    input: Dict[str, Any] = {}
+    result: Optional[Dict[str, Any]] = None
 
 
 class NewsSubmitResponse(BaseModel):
@@ -187,6 +352,62 @@ def _extract_news_id(text: str) -> Optional[str]:
     return str(m.group(1))
 
 
+def _extract_task_id(text: str) -> Optional[str]:
+    t = str(text or "")
+    m = re.search(r"\b(task_[0-9a-f]{12})\b", t, flags=re.IGNORECASE)
+    if not m:
+        return None
+    return str(m.group(1))
+
+
+def _extract_ticker_hint(text: str) -> Optional[str]:
+    t = str(text or "").upper()
+    # Chinese company name aliases.
+    try:
+        t0 = str(text or "")
+        zh_alias = {
+            "苹果": "AAPL",
+            "苹果公司": "AAPL",
+            "特斯拉": "TSLA",
+            "英伟达": "NVDA",
+            "英伟达公司": "NVDA",
+            "谷歌": "GOOGL",
+            "谷歌公司": "GOOGL",
+            "google": "GOOGL",
+            "meta": "META",
+            "脸书": "META",
+            "微软": "MSFT",
+            "亚马逊": "AMZN",
+            "奈飞": "NFLX",
+            "网飞": "NFLX",
+            "amd": "AMD",
+            "英特尔": "INTC",
+        }
+        for k, v in zh_alias.items():
+            if k.lower() in t0.lower():
+                return v
+    except Exception:
+        pass
+    m = re.search(r"\b[A-Z]{1,5}\b", t)
+    if not m:
+        return None
+    cand = str(m.group(0)).strip().upper()
+    # Avoid common English words that match the pattern.
+    if cand in {"A", "I", "AM", "AN", "AND", "OR", "ON", "OFF", "TO", "FOR", "WITH"}:
+        return None
+    return cand
+
+
+def _is_chart_switch_request(text: str) -> bool:
+    t = str(text or "")
+    tl = t.lower()
+    keys = [
+        "打开", "切换", "切到", "切去", "看看", "看下", "查看", "打开一下",
+        "chart", "k线", "k 线", "图", "走势",
+    ]
+    return any((k in t) or (k in tl) for k in keys)
+
+
 def _is_portfolio_question(text: str) -> bool:
     t = str(text or "")
     keys = [
@@ -198,6 +419,178 @@ def _is_portfolio_question(text: str) -> bool:
         if k in t or k.lower() in tl:
             return True
     return False
+
+
+def _is_profit_rank_question(text: str) -> bool:
+    t = str(text or "")
+    tl = t.lower()
+    keys = [
+        "谁赚钱最多",
+        "谁赚得最多",
+        "谁盈利最多",
+        "最大盈利",
+        "profit most",
+    ]
+    return any((k in t) or (k in tl) for k in keys)
+
+
+def _is_loss_rank_question(text: str) -> bool:
+    t = str(text or "")
+    tl = t.lower()
+    keys = [
+        "谁亏最多",
+        "谁亏得最多",
+        "谁亏损最多",
+        "最大亏损",
+        "loss most",
+    ]
+    return any((k in t) or (k in tl) for k in keys)
+
+
+def _is_biggest_position_question(text: str) -> bool:
+    t = str(text or "")
+    keys = [
+        "最大仓位",
+        "仓位最大",
+        "最大持仓",
+        "持仓最大",
+    ]
+    tl = t.lower()
+    return any((k in t) or (k in tl) for k in keys)
+
+
+def _live_rank_answer(user_text: str, ctx: Dict[str, Any]) -> str:
+    if _live_runner is None:
+        return "Sensei, 当前没有正在运行的实盘/模拟盘会话，我拿不到实时仓位数据呢…"
+
+    st = _live_feed_status()
+    lt = st.get("live_trading") if isinstance(st.get("live_trading"), dict) else {}
+    positions = lt.get("positions") if isinstance(lt.get("positions"), list) else []
+    if not positions:
+        return "Sensei, 现在没有持仓，所以谈不上谁赚得最多/亏得最多。"
+
+    def _to_f(x: Any) -> float:
+        try:
+            return float(x)
+        except Exception:
+            return 0.0
+
+    best = max(positions, key=lambda p: _to_f(p.get("unrealized_pnl")))
+    worst = min(positions, key=lambda p: _to_f(p.get("unrealized_pnl")))
+    biggest = max(positions, key=lambda p: _to_f(p.get("shares")))
+
+    b_tk = str(best.get("ticker") or "")
+    w_tk = str(worst.get("ticker") or "")
+    g_tk = str(biggest.get("ticker") or "")
+
+    b_pnl = _to_f(best.get("unrealized_pnl"))
+    w_pnl = _to_f(worst.get("unrealized_pnl"))
+    g_sh = int(_to_f(biggest.get("shares")))
+
+    wants_best = _is_profit_rank_question(user_text)
+    wants_worst = _is_loss_rank_question(user_text)
+    wants_big = _is_biggest_position_question(user_text)
+
+    if wants_best:
+        primary = f"现在赚得最多的是 {b_tk}（浮动盈亏 {b_pnl:+.2f}）。"
+        focus_ticker = b_tk
+    elif wants_worst:
+        primary = f"现在亏得最多的是 {w_tk}（浮动盈亏 {w_pnl:+.2f}）。"
+        focus_ticker = w_tk
+    elif wants_big:
+        primary = f"当前最大仓位是 {g_tk}（持股 {g_sh}）。"
+        focus_ticker = g_tk
+    else:
+        primary = f"现在赚得最多的是 {b_tk}（{b_pnl:+.2f}），亏得最多的是 {w_tk}（{w_pnl:+.2f}），最大仓位是 {g_tk}（{g_sh} 股）。"
+        focus_ticker = b_tk
+
+    extra = ""
+    if _is_task_dispatch_request(user_text):
+        task_text = (
+            f"针对 {focus_ticker}：基于‘当前{('盈利领先' if focus_ticker==b_tk else '亏损较大')}'这一事实，"
+            "给出今天的特别措施/风控清单（解释型，简短但有理由），目标是亏损更少、赚钱更稳。"
+        )
+        try:
+            task_id = _enqueue_task(text=task_text, ticker=str(focus_ticker).strip() or None, ctx=ctx)
+            _remember_last_task(ctx, task_id)
+            extra = f"我已经把这件事交给分析员和交易员去跑了，任务编号是 {task_id}（把编号发我就能追结果）。"
+        except Exception:
+            extra = "我已经把这件事交给分析员和交易员去跑了（如果需要追踪编号我再补给您）。"
+
+    return (f"Sensei，我理解您是想先要一个明确结论，然后顺手把它变成今天的执行措施。{primary}{extra}").strip()
+
+
+def _is_task_dispatch_request(text: str) -> bool:
+    t = str(text or "")
+    tl = t.lower()
+    # Avoid false positives: merely mentioning roles (分析员/交易员) should NOT create a task.
+    strong = [
+        "下达", "派单", "派发", "分派", "分配", "安排", "布置", "交给", "委派", "指派",
+        "task", "任务", "指令", "command", "dispatch",
+        "特别措施", "风控清单", "风控措施", "交易计划", "交易预案", "执行方案",
+    ]
+    if any((k in t) or (k in tl) for k in strong):
+        return True
+
+    # Phrases that imply dispatching work to a role.
+    role_words = r"(分析员|分析师|研究员|交易员|交易手|操盘|交易组)"
+    verb_words = r"(让|请|麻烦|帮我|交给|安排|分配|派给|委派|指派)"
+    action_words = r"(去|来)?(分析|判断|生成|整理|输出|写|制定|给出|跑|处理|执行|跟进)"
+    try:
+        if re.search(verb_words + r".*" + role_words + r".*" + action_words, t, flags=re.IGNORECASE):
+            return True
+        if re.search(role_words + r".*" + verb_words + r".*" + action_words, t, flags=re.IGNORECASE):
+            return True
+    except Exception:
+        pass
+
+    # Catch colloquial phrasing / typos.
+    patterns = [
+        r"让.*(分析员|分析师|研究员).*(交易员|交易手|操盘|交易组)",
+        r"(分析员|分析师|研究员).*(交易员|交易手|操盘|交易组).*(任务|指令|安排|措施)",
+        r"给.*(分析员|分析师|研究员).*(任务|指令|安排)",
+        r"给.*(交易员|交易手|操盘|交易组).*(任务|指令|安排)",
+        r"(下达|派单|分配|安排|交给|委派|指派).*(任务|指令|安排)",
+    ]
+    for pat in patterns:
+        try:
+            if re.search(pat, t, flags=re.IGNORECASE):
+                return True
+        except Exception:
+            continue
+    return False
+
+
+def _dispatch_task_answer(user_text: str, ctx: Dict[str, Any]) -> str:
+    tk = _extract_ticker_from_text(user_text) or _extract_ticker_hint(user_text) or ""
+    ticker = str(tk).strip() or None
+    try:
+        task_id = _enqueue_task(text=str(user_text or "").strip(), ticker=ticker, ctx=ctx)
+        _remember_last_task(ctx, task_id)
+    except Exception as e:
+        return f"Sensei，我收到‘派单’指令了，但创建任务时失败：{e}"
+
+    done = _wait_task_done(task_id, timeout_sec=8)
+    if isinstance(done, dict) and done.get("status") == "done":
+        result = done.get("result") if isinstance(done.get("result"), dict) else {}
+        final = str((result or {}).get("final") or "").strip()
+        if final:
+            if ("细化" in final) or ("展开" in final):
+                _mark_awaiting_detail(ctx, task_id)
+            return (final + f"\n\n(task_id={task_id})").strip()
+        # Fallback if merge text is missing.
+        trader_out = str((result or {}).get("trader") or "").strip()
+        if trader_out:
+            return ("Sensei，我已经把任务交给分析员和交易员了。\n\n" + trader_out + f"\n\n(task_id={task_id})").strip()
+
+    if isinstance(done, dict) and done.get("status") == "error":
+        err = str(done.get("error") or "")
+        return f"Sensei，我收到派单了，但执行失败：{err} (task_id={task_id})"
+
+    return (
+        f"Sensei，收到。我已经把任务交给分析员和交易员在跑了。"
+        f"编号：{task_id}。你随时把这个编号发我，我就给你回最新结果。"
+    ).strip()
 
 
 def _is_datasource_question(text: str) -> bool:
@@ -304,25 +697,42 @@ def _live_datasource_answer() -> str:
     stale = bool(st.get("stale"))
 
     src_label = "REAL" if "yfinance" in src.lower() else ("SIMULATED" if "sim" in src.lower() else "UNKNOWN")
-    age_min = None
+    src_human = "真实行情" if src_label == "REAL" else ("模拟盘" if src_label == "SIMULATED" else "未知来源")
+    mode_human = "在线模式" if str(mode).lower() == "online" else ("离线回放" if str(mode).lower() == "offline" else str(mode))
+
+    age_desc = ""
     try:
         if isinstance(age_sec, (int, float)):
-            age_min = float(age_sec) / 60.0
+            s = float(age_sec)
+            if s < 90:
+                age_desc = f"大约 {int(round(max(0.0, s)))} 秒前"
+            else:
+                age_desc = f"大约 {s / 60.0:.1f} 分钟前"
     except Exception:
-        age_min = None
+        age_desc = ""
 
-    lines: List[str] = []
-    lines.append(f"Sensei, 我按实时引擎状态回答您的‘数据源/开盘’问题（mode={mode}）…")
-    lines.append(f"Data Source: {src} ({src_label})")
-    if last_bar_time:
-        lines.append(f"Last Bar: {last_bar_time}")
-    if age_min is not None:
-        lines.append(f"Age: {age_min:.1f} min")
+    bt_human = ""
+    try:
+        dt = _parse_iso_time(last_bar_time) if last_bar_time else None
+        if dt is not None:
+            bt_human = f"{dt.year}年{dt.month}月{dt.day}日 {dt.hour:02d}:{dt.minute:02d}:{dt.second:02d}"
+    except Exception:
+        bt_human = ""
+
+    parts: List[str] = []
+    parts.append(f"Sensei，现在我这边是 {mode_human}（{mode}）。")
+    parts.append(f"数据源是 {src}（{src_human} / {src_label}）。")
+    if bt_human:
+        parts.append(f"最新一根 bar 的时间是 {bt_human}。")
+    elif last_bar_time:
+        parts.append(f"最新一根 bar 的时间戳是 {last_bar_time}。")
+    if age_desc:
+        parts.append(f"离现在 {age_desc}。")
     if stale:
-        lines.append("状态：行情数据已停更（可能休市/接口延迟/网络问题）。")
+        parts.append("状态：行情可能停更了（休市/延迟/网络抖动都可能）。")
     else:
-        lines.append("状态：行情数据在更新中。")
-    return "\n".join(lines).strip()
+        parts.append("状态：行情数据还在更新中。")
+    return "".join(parts).strip()
 
 
 def _format_money(x: Any) -> str:
@@ -416,6 +826,17 @@ def _wait_news_done(news_id: str, timeout_sec: int = 25) -> Optional[Dict[str, A
             if isinstance(job, dict) and job.get("status") in {"done", "error"}:
                 return dict(job)
         time.sleep(0.8)
+    return None
+
+
+def _wait_task_done(task_id: str, timeout_sec: int = 8) -> Optional[Dict[str, Any]]:
+    t0 = time.time()
+    while time.time() - t0 < float(timeout_sec):
+        with _AGENT_LOCK:
+            job = _TASKS.get(str(task_id))
+            if isinstance(job, dict) and job.get("status") in {"done", "error"}:
+                return dict(job)
+        time.sleep(0.5)
     return None
 
 
@@ -532,6 +953,28 @@ def _append_audit(evt: Dict[str, Any]) -> None:
         logger.debug(f"audit append failed: {e}")
 
 
+def _append_chat_log(evt: Dict[str, Any]) -> None:
+    try:
+        line = json.dumps(evt, ensure_ascii=False)
+        with _AGENT_LOCK:
+            CHAT_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with CHAT_LOG_PATH.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
+    except Exception as e:
+        logger.debug(f"chat log append failed: {e}")
+
+
+def _append_trajectory_log(evt: Dict[str, Any]) -> None:
+    try:
+        line = json.dumps(evt, ensure_ascii=False)
+        with _AGENT_LOCK:
+            TRAJECTORY_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+            with TRAJECTORY_LOG_PATH.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
+    except Exception as e:
+        logger.debug(f"trajectory log append failed: {e}")
+
+
 def _load_recent_audit(limit: int = 200) -> List[Dict[str, Any]]:
     if limit <= 0:
         return []
@@ -570,6 +1013,7 @@ def _call_llm_direct(*, system_prompt: str, user_text: str, temperature: Optiona
         try:
             from src.llm.local_chat import chat as local_chat
             local_model = str((llm_cfg or {}).get("local_model") or "Qwen/Qwen3-8B")
+            local_adapter = str((llm_cfg or {}).get("local_adapter") or "").strip() or None
             use_4bit = bool((llm_cfg or {}).get("use_4bit", False))
             use_8bit = bool((llm_cfg or {}).get("use_8bit", True))
             messages = [
@@ -583,6 +1027,7 @@ def _call_llm_direct(*, system_prompt: str, user_text: str, temperature: Optiona
                 max_new_tokens=mt,
                 use_4bit=use_4bit,
                 use_8bit=use_8bit,
+                adapter_path=local_adapter,
             )
             return resp.strip() if isinstance(resp, str) and resp.strip() else None
         except Exception as e:
@@ -710,6 +1155,140 @@ def _enqueue_news_job(*, text: str, url: Optional[str] = None, source: Optional[
     t = threading.Thread(target=_run_news_analysis_job, args=(news_id,), daemon=True)
     t.start()
     return news_id
+
+
+def _enqueue_task(*, text: str, ticker: Optional[str], ctx: Dict[str, Any]) -> str:
+    task_id = "task_" + uuid.uuid4().hex[:12]
+    job = {
+        "task_id": task_id,
+        "status": "queued",
+        "created_at": datetime.now().isoformat(),
+        "finished_at": None,
+        "input": {
+            "text": str(text or "").strip(),
+            "ticker": str(ticker or "").strip() or None,
+            "client": (ctx or {}).get("client"),
+            "session_id": (ctx or {}).get("session_id"),
+        },
+        "result": None,
+        "error": None,
+    }
+    with _AGENT_LOCK:
+        _TASKS[task_id] = job
+
+    try:
+        _append_trajectory_log(
+            {
+                "time": datetime.now().isoformat(),
+                "type": "contract.task.create",
+                "task_id": task_id,
+                "client": (ctx or {}).get("client"),
+                "session_id": (ctx or {}).get("session_id"),
+                "input": {"ticker": str(ticker or "").strip() or None, "text_len": len(str(text or ""))},
+            }
+        )
+    except Exception:
+        pass
+
+    th = threading.Thread(target=_run_task_job, args=(task_id,), daemon=True)
+    th.start()
+    return task_id
+
+
+def _run_task_job(task_id: str) -> None:
+    with _AGENT_LOCK:
+        job = _TASKS.get(task_id)
+        if not isinstance(job, dict):
+            return
+        job["status"] = "running"
+
+    try:
+        payload = job.get("input") if isinstance(job.get("input"), dict) else {}
+        text = str(payload.get("text") or "").strip()
+        ticker = str(payload.get("ticker") or "").strip() or None
+        tk_s = str(ticker) if ticker else "该标的"
+
+        try:
+            _append_trajectory_log(
+                {
+                    "time": datetime.now().isoformat(),
+                    "type": "contract.task.accept",
+                    "task_id": task_id,
+                    "ticker": ticker,
+                }
+            )
+        except Exception:
+            pass
+
+        analyst_prompt = (
+            "你是资深股票分析员（Analyst）。\n"
+            "任务：根据用户的指令，为交易员生成‘特别措施/关注点’的要点清单。\n"
+            "要求：不要编造价格/持仓/已发生事件；不确定的地方用条件式；输出 4-7 条 bullet。"
+        )
+        trader_prompt = (
+            "你是严谨的交易员（Trader）。\n"
+            "任务：把分析员的要点转成可执行的交易/风控措施（仓位上限、止损/止盈、事件窗口、禁开仓条件、对冲建议等）。\n"
+            "要求：不要编造当前价格/仓位；用条件式表达；输出 4-7 条 bullet。"
+        )
+
+        analyst_in = f"标的：{tk_s}\n用户指令：{text}".strip()
+        analyst_out = _call_llm_direct(system_prompt=analyst_prompt, user_text=analyst_in, temperature=0.2, max_tokens=420) or ""
+        trader_in = f"标的：{tk_s}\n用户指令：{text}\n\n[分析员输出]\n{analyst_out}".strip()
+        trader_out = _call_llm_direct(system_prompt=trader_prompt, user_text=trader_in, temperature=0.2, max_tokens=420) or ""
+
+        merge_prompt = (
+            "你是 Mari（交易秘书）。请用自然口吻对 Sensei 输出派单结果：\n"
+            "1) 先确认：我已经把任务交给分析员和交易员（必须有）。\n"
+            "2) 然后给一个‘特别措施’清单（精炼、可执行）。\n"
+            "要求：不要编造价格/持仓；若信息不足，用条件式。"
+        )
+        merge_in = json.dumps({"task_id": task_id, "ticker": ticker, "analyst": analyst_out, "trader": trader_out}, ensure_ascii=False)
+        merged = _call_llm_direct(system_prompt=merge_prompt, user_text=merge_in, temperature=0.2, max_tokens=520) or ""
+
+        result = {
+            "ticker": ticker,
+            "analyst": analyst_out,
+            "trader": trader_out,
+            "final": merged.strip() or None,
+        }
+
+        with _AGENT_LOCK:
+            job = _TASKS.get(task_id)
+            if isinstance(job, dict):
+                job["status"] = "done"
+                job["finished_at"] = datetime.now().isoformat()
+                job["result"] = result
+
+        try:
+            _append_trajectory_log(
+                {
+                    "time": datetime.now().isoformat(),
+                    "type": "contract.task.done",
+                    "task_id": task_id,
+                    "ticker": ticker,
+                    "output": {"analyst_len": len(analyst_out), "trader_len": len(trader_out), "final_len": len(merged or "")},
+                }
+            )
+        except Exception:
+            pass
+    except Exception as e:
+        with _AGENT_LOCK:
+            job = _TASKS.get(task_id)
+            if isinstance(job, dict):
+                job["status"] = "error"
+                job["finished_at"] = datetime.now().isoformat()
+                job["error"] = str(e)
+        try:
+            _append_trajectory_log(
+                {
+                    "time": datetime.now().isoformat(),
+                    "type": "contract.task.error",
+                    "task_id": task_id,
+                    "error": str(e),
+                }
+            )
+        except Exception:
+            pass
 
 
 def _run_news_analysis_job(news_id: str) -> None:
@@ -860,6 +1439,43 @@ async def get_agents_audit(limit: int = 200):
     return {"events": _load_recent_audit(limit=int(limit)), "count": int(limit)}
 
 
+@app.post("/api/v1/tasks/create", response_model=TaskStatusResponse)
+async def create_task(req: TaskCreateRequest):
+    text = str(req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+    ticker = str(req.ticker or "").strip() or None
+    task_id = _enqueue_task(text=text, ticker=ticker, ctx={})
+    with _AGENT_LOCK:
+        job = _TASKS.get(task_id)
+        if not isinstance(job, dict):
+            raise HTTPException(status_code=500, detail="task create failed")
+        return TaskStatusResponse(
+            task_id=str(job.get("task_id")),
+            status=str(job.get("status")),
+            created_at=str(job.get("created_at")),
+            finished_at=job.get("finished_at"),
+            input=job.get("input") if isinstance(job.get("input"), dict) else {},
+            result=job.get("result"),
+        )
+
+
+@app.get("/api/v1/tasks/{task_id}", response_model=TaskStatusResponse)
+async def get_task(task_id: str):
+    with _AGENT_LOCK:
+        job = _TASKS.get(str(task_id))
+    if not isinstance(job, dict):
+        raise HTTPException(status_code=404, detail="task_id not found")
+    return TaskStatusResponse(
+        task_id=str(job.get("task_id")),
+        status=str(job.get("status")),
+        created_at=str(job.get("created_at")),
+        finished_at=job.get("finished_at"),
+        input=job.get("input") if isinstance(job.get("input"), dict) else {},
+        result=job.get("result"),
+    )
+
+
 @app.get("/api/v1/tools/fetch_url")
 async def fetch_url(url: str, timeout_sec: int = 12):
     try:
@@ -956,7 +1572,136 @@ async def chat(req: ChatRequest):
     if not text:
         raise HTTPException(status_code=400, detail="message is required")
     ctx = req.context if isinstance(req.context, dict) else {}
-    return ChatResponse(reply=_secretary_reply(text, ctx))
+
+    t0 = time.perf_counter()
+    reply = _secretary_reply(text, ctx)
+    dt_ms = int((time.perf_counter() - t0) * 1000.0)
+
+    # Deterministic UI chart switching: do not rely on LLM to emit actions.
+    try:
+        if str(ctx.get("client") or "").lower() == "desktop" and _is_chart_switch_request(text):
+            tk = _extract_ticker_hint(text)
+            if tk:
+                # Common typos / aliases.
+                alias = {
+                    "APPL": "AAPL",
+                }
+                tk = alias.get(tk, tk)
+
+                # If live runner is available, correct to the closest known ticker.
+                try:
+                    st0 = _live_feed_status()
+                    tickers0 = st0.get("tickers") if isinstance(st0.get("tickers"), list) else []
+                    tickers = [str(x).strip().upper() for x in tickers0 if str(x).strip()]
+                except Exception:
+                    tickers = []
+
+                if tickers and (tk not in tickers):
+                    def _dist(a: str, b: str) -> int:
+                        # Small edit-distance for short tickers.
+                        la, lb = len(a), len(b)
+                        if abs(la - lb) > 2:
+                            return 999
+                        dp = list(range(lb + 1))
+                        for i, ca in enumerate(a, start=1):
+                            prev = dp[0]
+                            dp[0] = i
+                            for j, cb in enumerate(b, start=1):
+                                cur = dp[j]
+                                cost = 0 if ca == cb else 1
+                                dp[j] = min(
+                                    dp[j] + 1,
+                                    dp[j - 1] + 1,
+                                    prev + cost,
+                                )
+                                prev = cur
+                        return dp[-1]
+
+                    best = min(tickers, key=lambda x: _dist(tk, x))
+                    if _dist(tk, best) <= 1:
+                        tk = best
+            if tk:
+                action_blocks = (
+                    "```action\n" + json.dumps({"action": "ui.set_live_ticker", "params": {"ticker": tk}}, ensure_ascii=False) + "\n```\n"
+                    "```action\n" + json.dumps({"action": "ui.refresh", "params": {}}, ensure_ascii=False) + "\n```"
+                )
+                reply = (str(reply or "").rstrip() + "\n\n" + action_blocks).strip()
+    except Exception:
+        pass
+    try:
+        snap = _build_secretary_context(ctx)
+        keep: Dict[str, Any] = {}
+        if isinstance(snap.get("live_trading"), dict):
+            lt = snap.get("live_trading")
+            keep["live_trading"] = {
+                "mode": lt.get("mode"),
+                "trading_mode": lt.get("trading_mode"),
+                "data_source": lt.get("data_source"),
+                "cash": lt.get("cash"),
+                "total_value": lt.get("total_value"),
+                "total_pnl": lt.get("total_pnl"),
+                "positions": lt.get("positions"),
+                "latest_bars": lt.get("latest_bars"),
+            }
+        if isinstance(snap.get("status"), dict):
+            st = snap.get("status")
+            keep["status"] = {
+                "trading": st.get("trading"),
+                "voice_training": st.get("voice_training"),
+            }
+
+        try:
+            prof = _classify_secretary_profile(text)
+        except Exception:
+            prof = "work"
+
+        _append_trajectory_log(
+            {
+                "time": datetime.now().isoformat(),
+                "type": "trajectory.chat.turn",
+                "client": ctx.get("client"),
+                "session_id": ctx.get("session_id"),
+                "profile": prof,
+                "latency_ms": dt_ms,
+                "message": text,
+                "reply_len": len(str(reply or "")),
+            }
+        )
+
+        _append_chat_log(
+            {
+                "time": datetime.now().isoformat(),
+                "type": "chat.turn",
+                "client": ctx.get("client"),
+                "session_id": ctx.get("session_id"),
+                "message": text,
+                "reply": reply,
+                "context": ctx,
+                "server_context": keep,
+            }
+        )
+    except Exception:
+        pass
+
+    # Evolution loop: record trajectories for nightly training (best-effort, non-blocking).
+    try:
+        evolution_recorder.record(
+            agent_id="mari",
+            context=json.dumps(
+                {
+                    "client": str(ctx.get("client") or ""),
+                    "session_id": str(ctx.get("session_id") or ""),
+                    "message": text,
+                },
+                ensure_ascii=False,
+            ),
+            action=str(reply or ""),
+            outcome=None,
+            feedback="wait_for_user",
+        )
+    except Exception:
+        pass
+    return JSONResponse(content={"reply": reply}, media_type="application/json; charset=utf-8")
 
 
 @app.get("/api/v1/status")
@@ -1289,7 +2034,65 @@ def _maybe_build_trade_rag(*, user_text: str, ctx: Dict[str, Any]) -> str:
     return "\n\n[交易档案检索结果（事实依据，请以此回答）]\n" + res.narrative.strip() + "\n"
 
 
-def _call_llm(*, text: str, ctx: Dict[str, Any]) -> Optional[str]:
+def _classify_secretary_profile(text: str) -> str:
+    t = str(text or "").strip()
+    if not t:
+        return "chat"
+
+    tl = t.lower()
+    if tl.startswith("/"):
+        return "work"
+    if tl.startswith("news:") or tl.startswith("新闻:"):
+        return "work"
+
+    if _extract_ticker_from_text(t):
+        return "work"
+
+    if len(t) >= 180:
+        return "work"
+
+    heavy = [
+        "监控",
+        "状态",
+        "复盘",
+        "策略",
+        "回测",
+        "实盘",
+        "模拟盘",
+        "执行",
+        "信号",
+        "订单",
+        "成交",
+        "风控",
+        "波动",
+        "波动率",
+        "仓位",
+        "持仓",
+        "现金",
+        "盈亏",
+        "pnl",
+        "portfolio",
+        "gatekeeper",
+        "planner",
+        "router",
+        "moe",
+        "system 2",
+        "debate",
+        "macro",
+        "chart",
+        "news",
+        "训练",
+        "online rl",
+        "rl",
+    ]
+    for k in heavy:
+        if k in t or k in tl:
+            return "work"
+
+    return "chat"
+
+
+def _call_llm(*, text: str, ctx: Dict[str, Any], profile: str = "work") -> Optional[str]:
     cfg = _get_secretary_config()
     llm_cfg = cfg.get("llm") if isinstance(cfg.get("llm"), dict) else {}
     sec_cfg = cfg.get("secretary") if isinstance(cfg.get("secretary"), dict) else {}
@@ -1306,42 +2109,63 @@ def _call_llm(*, text: str, ctx: Dict[str, Any]) -> Optional[str]:
     except Exception:
         max_tokens = 256
 
+    prof = str(profile or "work").strip().lower()
     system_prompt = str((sec_cfg or {}).get("system_prompt") or "You are a helpful assistant.").strip()
-    merged_ctx = _build_secretary_context(ctx)
-    rag = _maybe_build_trade_rag(user_text=str(text), ctx=ctx)
 
-    # Add Mari's long-term memory context
-    try:
-        memory = get_mari_memory()
-        memory_ctx = memory.get_context_for_llm(limit=20)
-        if memory_ctx:
-            system_prompt = system_prompt + "\n\n" + memory_ctx
-    except Exception as e:
-        logger.debug(f"Memory context error: {e}")
-
-    if merged_ctx:
+    if prof == "chat":
         try:
-            ctx_yaml = yaml.safe_dump(merged_ctx, allow_unicode=True, sort_keys=False)
+            temperature = max(float(temperature), 0.85)
         except Exception:
-            ctx_yaml = ""
-        if ctx_yaml:
-            system_prompt = system_prompt + "\n\n[Context]\n" + ctx_yaml
+            temperature = 0.85
+        try:
+            max_tokens = min(int(max_tokens), 160)
+        except Exception:
+            max_tokens = 160
 
-    if rag:
-        system_prompt = system_prompt + rag
+        try:
+            memory = get_mari_memory()
+            memory_ctx = memory.get_context_for_llm(limit=6)
+            if memory_ctx:
+                system_prompt = system_prompt + "\n\n" + memory_ctx
+        except Exception as e:
+            logger.debug(f"Memory context error: {e}")
 
-    system_prompt = system_prompt + _tool_instructions()
+    else:
+        merged_ctx = _build_secretary_context(ctx)
+        rag = _maybe_build_trade_rag(user_text=str(text), ctx=ctx)
+
+        try:
+            memory = get_mari_memory()
+            memory_ctx = memory.get_context_for_llm(limit=20)
+            if memory_ctx:
+                system_prompt = system_prompt + "\n\n" + memory_ctx
+        except Exception as e:
+            logger.debug(f"Memory context error: {e}")
+
+        if merged_ctx:
+            try:
+                ctx_yaml = yaml.safe_dump(merged_ctx, allow_unicode=True, sort_keys=False)
+            except Exception:
+                ctx_yaml = ""
+            if ctx_yaml:
+                system_prompt = system_prompt + "\n\n[Context]\n" + ctx_yaml
+
+        if rag:
+            system_prompt = system_prompt + rag
+
+        system_prompt = system_prompt + _tool_instructions()
 
     # === LOCAL MODE: Direct model inference ===
     if mode == "local":
         try:
             from src.llm.local_chat import chat as local_chat
             local_model = str((llm_cfg or {}).get("local_model") or "Qwen/Qwen3-8B")
+            local_adapter = str((llm_cfg or {}).get("local_adapter") or "").strip() or None
             use_4bit = bool((llm_cfg or {}).get("use_4bit", False))
             use_8bit = bool((llm_cfg or {}).get("use_8bit", True))
             
             quant = "8bit" if use_8bit else ("4bit" if use_4bit else "fp16")
-            logger.info(f"[LLM] Local mode: {local_model} ({quant})")
+            logger.info(f"[LLM] Local mode: {local_model} ({quant}) profile={prof}")
             messages = [
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": str(text)},
@@ -1353,6 +2177,7 @@ def _call_llm(*, text: str, ctx: Dict[str, Any]) -> Optional[str]:
                 max_new_tokens=max_tokens,
                 use_4bit=use_4bit,
                 use_8bit=use_8bit,
+                adapter_path=local_adapter,
             )
             if response:
                 return response.strip()
@@ -1369,7 +2194,7 @@ def _call_llm(*, text: str, ctx: Dict[str, Any]) -> Optional[str]:
         return None
 
     client = OpenAI(base_url=api_base, api_key=api_key)
-    logger.info(f"[LLM] API mode: {api_base} model={model}")
+    logger.info(f"[LLM] API mode: {api_base} model={model} profile={prof}")
     resp = client.chat.completions.create(
         model=model,
         messages=[
@@ -1401,6 +2226,26 @@ def _secretary_reply(text: str, ctx: Dict[str, Any]) -> str:
     t = str(text or "").strip()
     tl = t.lower()
 
+    # 0) Follow-up handling for desktop sessions (no explicit id).
+    try:
+        st = _get_session_state(ctx)
+        if st is not None:
+            last_tid = str(st.get("last_task_id") or "").strip() or None
+            if bool(st.get("awaiting_detail")) and _is_affirmative_short(t):
+                _clear_awaiting_detail(ctx)
+                if last_tid:
+                    return _elaborate_task(last_tid)
+            if last_tid and _is_followup_status_query(t):
+                return _task_status_text(last_tid)
+    except Exception:
+        pass
+
+    tid = _extract_task_id(t)
+    if tid:
+        # Remember for future follow-ups.
+        _remember_last_task(ctx, tid)
+        return _task_status_text(tid)
+
     # News job status query by id
     nid = _extract_news_id(t)
     if nid:
@@ -1424,6 +2269,19 @@ def _secretary_reply(text: str, ctx: Dict[str, Any]) -> str:
             return "Sensei, 请把新闻正文或链接贴给我。"
         url = _extract_first_url(body)
         news_id = _enqueue_news_job(text=body, url=url, source="chat")
+        try:
+            _append_trajectory_log(
+                {
+                    "time": datetime.now().isoformat(),
+                    "type": "contract.news.submit",
+                    "news_id": news_id,
+                    "client": (ctx or {}).get("client"),
+                    "session_id": (ctx or {}).get("session_id"),
+                    "input": {"url": url, "text_len": len(body)},
+                }
+            )
+        except Exception:
+            pass
         done = _wait_news_done(news_id, timeout_sec=25)
         if isinstance(done, dict) and done.get("status") == "done":
             summary = str(done.get("summary") or "").strip()
@@ -1434,7 +2292,27 @@ def _secretary_reply(text: str, ctx: Dict[str, Any]) -> str:
     if len(t) >= 350 and ("\n" in t or _extract_first_url(t)):
         url = _extract_first_url(t)
         news_id = _enqueue_news_job(text=t, url=url, source="chat")
+        try:
+            _append_trajectory_log(
+                {
+                    "time": datetime.now().isoformat(),
+                    "type": "contract.news.submit",
+                    "news_id": news_id,
+                    "client": (ctx or {}).get("client"),
+                    "session_id": (ctx or {}).get("session_id"),
+                    "input": {"url": url, "text_len": len(t)},
+                }
+            )
+        except Exception:
+            pass
         return f"Sensei, 我收到新闻了，已分发给分析员。编号：{news_id}（你可以直接把这个编号发给我获取总结）"
+
+    # Deterministic rank queries to avoid keyword-grab / verbosity.
+    if _is_profit_rank_question(t) or _is_loss_rank_question(t) or _is_biggest_position_question(t):
+        return _live_rank_answer(t, ctx)
+
+    if _is_task_dispatch_request(t):
+        return _dispatch_task_answer(t, ctx)
 
     # Data source / market open questions must be answered from feed status (no LLM guessing)
     if _is_datasource_question(t):
@@ -1519,7 +2397,8 @@ def _secretary_reply(text: str, ctx: Dict[str, Any]) -> str:
         )
 
     try:
-        r = _call_llm(text=t, ctx=ctx)
+        prof = _classify_secretary_profile(t)
+        r = _call_llm(text=t, ctx=ctx, profile=prof)
         if isinstance(r, str) and r.strip():
             return r.strip()
     except Exception as e:
@@ -1530,6 +2409,21 @@ def _secretary_reply(text: str, ctx: Dict[str, Any]) -> str:
             "请检查：\n"
             "1) LM Studio / vLLM / Ollama 是否在运行（例如 http://localhost:1234/v1）\n"
             "2) configs/secretary.yaml 里的 llm.api_base 和 llm.model 是否和服务端一致"
+        )
+
+    try:
+        cfg0 = _get_secretary_config()
+        llm0 = cfg0.get("llm") if isinstance(cfg0.get("llm"), dict) else {}
+        mode0 = str((llm0 or {}).get("mode") or "api").strip().lower()
+    except Exception:
+        mode0 = "api"
+
+    if mode0 == "local":
+        return (
+            "本地 LLM 没有返回有效内容。\n"
+            "请检查：configs/secretary.yaml 的 llm.local_model / llm.local_adapter 是否存在且可读，\n"
+            "以及本机是否已安装 transformers / peft / bitsandbytes（本地模式需要）。\n"
+            "另外请查看 API 控制台日志中的 [LLM] Local mode error / [LocalLLM] LoRA load failed 具体原因。"
         )
 
     return (
