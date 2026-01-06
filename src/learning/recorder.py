@@ -1,5 +1,6 @@
 import json
 import threading
+import uuid
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from pathlib import Path
@@ -8,12 +9,23 @@ from typing import Optional
 
 @dataclass
 class Trajectory:
+    id: str
     timestamp: str
     agent_id: str
     context: str
     action: str
     outcome: Optional[float] = None
     feedback: str = ""
+    type: str = "trajectory"
+
+
+@dataclass
+class FeedbackRecord:
+    ref_id: str
+    timestamp: str
+    score: int
+    comment: str = ""
+    type: str = "feedback"
 
 
 class EvolutionRecorder:
@@ -27,6 +39,14 @@ class EvolutionRecorder:
         day = datetime.now().strftime("%Y%m%d")
         return self.trajectory_dir / f"{day}.jsonl"
 
+    def _write(self, data: dict) -> None:
+        fp = self._current_file()
+        fp.parent.mkdir(parents=True, exist_ok=True)
+        line = json.dumps(data, ensure_ascii=False)
+        with self._lock:
+            with fp.open("a", encoding="utf-8") as f:
+                f.write(line + "\n")
+
     def record(
         self,
         *,
@@ -35,8 +55,10 @@ class EvolutionRecorder:
         action: str,
         outcome: Optional[float] = None,
         feedback: str = "",
-    ) -> None:
+    ) -> str:
+        record_id = uuid.uuid4().hex
         rec = Trajectory(
+            id=record_id,
             timestamp=datetime.now().isoformat(),
             agent_id=str(agent_id),
             context=str(context),
@@ -44,12 +66,17 @@ class EvolutionRecorder:
             outcome=outcome,
             feedback=str(feedback or ""),
         )
-        fp = self._current_file()
-        fp.parent.mkdir(parents=True, exist_ok=True)
-        line = json.dumps(asdict(rec), ensure_ascii=False)
-        with self._lock:
-            with fp.open("a", encoding="utf-8") as f:
-                f.write(line + "\n")
+        self._write(asdict(rec))
+        return record_id
+
+    def log_feedback(self, *, ref_id: str, score: int, comment: str = "") -> None:
+        fb = FeedbackRecord(
+            ref_id=str(ref_id),
+            timestamp=datetime.now().isoformat(),
+            score=int(score),
+            comment=str(comment or ""),
+        )
+        self._write(asdict(fb))
 
     def update_reward(self, *, original_action: str, reward_score: float) -> None:
         _ = original_action

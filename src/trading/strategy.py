@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 from .event import Event, EventType
+from src.learning.recorder import recorder as evolution_recorder
 
 # Default model paths
 DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
@@ -194,6 +195,27 @@ class MultiAgentStrategy:
                 approved, confidence, reason = self._system2_judge(
                     action, chart_score, macro_gear, features
                 )
+
+                try:
+                    evolution_recorder.record(
+                        agent_id="system2",
+                        context=json.dumps(
+                            {
+                                "ticker": ticker,
+                                "proposed_action": action,
+                                "expert": expert,
+                                "chart_score": chart_score,
+                                "macro_gear": macro_gear,
+                                "features": features,
+                            },
+                            ensure_ascii=False,
+                        ),
+                        action="APPROVED" if approved else "REJECTED",
+                        outcome=0.0,
+                        feedback=str(reason or ""),
+                    )
+                except Exception:
+                    pass
                 
                 if not approved:
                     self._log(f"System 2 (Judge): REJECTED - {reason}", priority=2)

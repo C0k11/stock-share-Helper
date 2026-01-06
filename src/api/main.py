@@ -260,6 +260,13 @@ class ChatRequest(BaseModel):
 
 class ChatResponse(BaseModel):
     reply: str
+    message_id: Optional[str] = None
+
+
+class FeedbackRequest(BaseModel):
+    message_id: str
+    score: int
+    comment: str = ""
 
 
 class NewsSubmitRequest(BaseModel):
@@ -1683,15 +1690,17 @@ async def chat(req: ChatRequest):
     except Exception:
         pass
 
-    # Evolution loop: record trajectories for nightly training (best-effort, non-blocking).
+    msg_id: Optional[str] = None
     try:
-        evolution_recorder.record(
+        tid = _extract_task_id(text) or _extract_task_id(str(reply or ""))
+        msg_id = evolution_recorder.record(
             agent_id="mari",
             context=json.dumps(
                 {
                     "client": str(ctx.get("client") or ""),
                     "session_id": str(ctx.get("session_id") or ""),
                     "message": text,
+                    "task_id": tid,
                 },
                 ensure_ascii=False,
             ),
@@ -1701,7 +1710,19 @@ async def chat(req: ChatRequest):
         )
     except Exception:
         pass
-    return JSONResponse(content={"reply": reply}, media_type="application/json; charset=utf-8")
+    return JSONResponse(content={"reply": reply, "message_id": msg_id}, media_type="application/json; charset=utf-8")
+
+
+@app.post("/api/v1/feedback")
+async def feedback(req: FeedbackRequest):
+    score = int(req.score)
+    if score not in (1, -1):
+        raise HTTPException(status_code=400, detail="score must be 1 or -1")
+    try:
+        evolution_recorder.log_feedback(ref_id=str(req.message_id), score=score, comment=str(req.comment or ""))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to record feedback: {e}")
+    return {"ok": True}
 
 
 @app.get("/api/v1/status")
