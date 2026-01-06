@@ -37,6 +37,7 @@
 ## 目录
 
 - [里程碑总览](#里程碑总览)
+- [Phase 执行索引（从头到尾对齐）](#phase-执行索引从头到尾对齐)
 - [Phase 1-2: JSON Pipeline + Teacher 数据](#1-目标与范围)
 - [Phase 3: LLM 微调](#9-phase-3实战化-production-pipelinenight-ops-2025-12-14)
 - [Phase 4: 生产流水线](#10-phase-4对答案backtestingevaluation-2025-12-14)
@@ -54,6 +55,26 @@
 - [2026-01：Secretary / Mari（桌面助手）专注度兜底 + 派单闭环](#2026-01secretary--mari桌面助手专注度兜底--派单闭环)
 
 ---
+
+## Phase 执行索引（从头到尾对齐）
+
+目的：把“工程日志的叙事”变成“可执行 Playbook”。每个阶段至少包含：
+
+- 目标（Goal）
+- 入口命令（Entry Command）
+- 关键产物（Outputs）
+- 验收标准（Acceptance）
+- 关键文件（Key Files）
+
+| Phase | 目标 | 入口命令（最短） | 关键产物（最短） | 验收标准（最短） |
+|---|---|---|---|---|
+| 1-2 | JSON Pipeline 止血 + Teacher 数据 | `scripts/generate_phase2_teacher_dataset.py` | `data/finetune/...` | JSON 可解析率 / 训练集可用 |
+| 3-4 | 日更流水线：抓取→推理→日报 | `run_pipeline.bat` | `data/daily/*` | 日报可生成且无中断 |
+| 7/14 | 回测/评测：可复现指标 | `scripts/run_walkforward_eval.py` | `results/<run_id>/metrics.json` | Baseline vs Golden 可对齐 |
+| 11-13 | Multi-Agent + 风控门控 | `scripts/run_trading_inference.py --moe-mode ...` | `data/daily/*decisions*.json` | 风控链路可物理切断交易 |
+| 16 | 产品化：日报 + Paper Trading | `scripts/product/run_daily_job.py` | `reports/daily/*.md` | 一键产出日报与账本 |
+| 21 | Visual Alpha：Chartist overlay | `scripts/inference/run_chart_expert.py` | `results/phase21_chartist/*.jsonl` | overlay 触发可统计 |
+| 2026-01 | Mari Desktop + Secretary 闭环 + 自我进化 | `scripts/launch_desktop.ps1` | `data/evolution/trajectories/*.jsonl` | 启动稳定、切图、上下文不丢、能产出 SFT/DPO/Alpha 数据 |
 
 ## Phase 21: 多模态视觉之眼（Visual Alpha / Chartist）
 
@@ -196,6 +217,11 @@ Prompt 模板：
 - `src\ui\desktop\web\index.html`
 - `src\ui\desktop\main.py`
 - `src\api\main.py`
+- `src\learning\recorder.py`
+- `scripts\nightly_evolution.py`
+- `scripts\generate_alpha_dataset.py`
+- `src\trading\strategy.py`
+- `src\trading\broker.py`
 
 #### 验证清单
 
@@ -204,6 +230,41 @@ Prompt 模板：
 3) 在聊天输入“切换到 AAPL 图表”，观察 `logs\desktop_ui.out.log` 是否出现 `[UIAction] ui.set_live_ticker:AAPL -> ...`。
 4) 创建 task 后仅说“现在怎么样了”，应返回最近 task 的 status/结果。
 5) Mari 问“需要我细化吗？”后答“好的”，应输出对上一条清单的细化内容。
+
+#### Ouroboros（衔尾蛇）：RLHF + Alpha Loop（自我进化引擎）
+
+目标：把“聊天偏好”（soft reward）与“交易盈亏”（hard reward）都沉淀成可训练的数据；夜间只做 dry-run 输出（先不自动训练），确保可审计。
+
+数据燃料（append-only JSONL）：
+
+- `data/evolution/trajectories/YYYYMMDD.jsonl`
+  - `type=trajectory`：对话/分析员/系统2 的轨迹（带 `id`）
+  - `type=feedback`：用户 like/dislike/comment（引用 `ref_id`）
+  - `type=outcome`：PnL 回填（引用 `ref_id`）
+
+对话 RLHF（Mari / Soft Reward）：
+
+- `/api/v1/chat` 返回 `message_id`（对应 trajectory.id）
+- `/api/v1/feedback` 写入 feedback（1/-1 + comment）
+- `scripts/nightly_evolution.py --dry-run`
+  - 产出：
+    - `data/finetune/evolution/sft_nightly.json`（like 固化）
+    - `data/finetune/evolution/dpo_nightly.jsonl`（dislike+comment 纠错）
+  - 打印：SFT/DPO 训练命令（不执行）
+
+交易 RL（Alpha Loop / Hard Reward）：
+
+- `src/trading/strategy.py`：expert proposal 生成 `trace_id` 并写入 signal
+- `src/trading/broker.py`：SELL 平仓计算 realized PnL，并 `log_outcome(ref_id=trace_id, outcome=...)`
+- `scripts/generate_alpha_dataset.py --dry-run`
+  - 产出：`data/finetune/evolution/dpo_alpha_nightly.jsonl`（PnL 驱动 DPO pairs）
+  - 打印：Alpha DPO 训练命令（不执行）
+
+Nightly 一键审计（不训练，只打印）：
+
+- `python scripts/nightly_evolution.py --dry-run`
+  - 输出 Mari（SFT/DPO）统计 + 命令
+  - 输出 Alpha（PnL→DPO）统计 + 命令
 
 关键脚本：
 

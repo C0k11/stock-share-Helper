@@ -1,12 +1,12 @@
 # QuantAI - 智能量化投顾助手
 
-> 基于多模态 AI 的个人证券投资助手，提供 ETF 组合策略建议、风险预警与可解释决策。
+> 基于多模态 AI 的个人证券投资助手：回测/模拟实盘 + 桌面交易秘书 Mari + 夜间进化（RLHF + Alpha Loop）。
 
 [English Version](#quantai---intelligent-quantitative-investment-assistant) | [工程日志](docs/engineering_log_phase2_cn_infusion.md)
 
 ---
 
-## 里程碑总览
+## 里程碑总览（高层）
 
 | Phase | 名称 | 状态 | 完成时间 |
 | :--- | :--- | :--- | :--- |
@@ -34,6 +34,114 @@
 | 22 | 宏观指挥官（Macro-Agent Hierarchy） | 规划中 | - |
 | 23 | 深度思考与辩论（System-2 Debate） | 规划中 | - |
 | 24 | 精细化执行（Execution Algorithms） | 规划中 | - |
+
+完整阶段执行入口与验收标准：见工程日志的 **Phase 执行索引**（`docs/engineering_log_phase2_cn_infusion.md`）。
+
+---
+
+## 快速开始（桌面版 Mari 全栈）
+
+一键启动（Windows）：
+
+```powershell
+启动交易终端.bat
+```
+
+等价启动（PowerShell）：
+
+```powershell
+scripts\launch_desktop.ps1
+```
+
+它会启动：
+
+- API（FastAPI）
+- Paper Trading Engine（事件循环）
+- Desktop UI（PySide6 + QtWebEngine + Live2D）
+- GPT-SoVITS（可选）
+
+日志：
+
+- `logs/desktop_ui.out.log`
+- `logs/desktop_ui.err.log`
+
+---
+
+## API（Secretary / Mari）
+
+### Chat
+
+- `POST /api/v1/chat`
+  - 入参：`{ "message": "...", "context": { ... } }`
+  - 出参：`{ "reply": "...", "message_id": "..." }`
+
+其中 `message_id` 用于 RLHF 点赞/点踩反馈。
+
+### Feedback（RLHF）
+
+- `POST /api/v1/feedback`
+  - 入参：`{ "message_id": "...", "score": 1 | -1, "comment": "" }`
+  - 出参：`{ "ok": true }`
+
+---
+
+## Ouroboros（衔尾蛇计划）：夜间进化闭环
+
+目标：日间积累数据，夜间产出训练数据（先 dry-run 打印命令，不自动训练）。
+
+### 数据燃料（append-only）
+
+- `data/evolution/trajectories/YYYYMMDD.jsonl`
+  - `type=trajectory`：对话 / expert / system2 轨迹（带 `id`）
+  - `type=feedback`：用户 like/dislike/comment（引用 `ref_id`）
+  - `type=outcome`：PnL 回填（引用 `ref_id`）
+
+### 夜间工厂（dry-run）
+
+一键审计（只生成数据 + 打印训练命令）：
+
+```powershell
+python scripts/nightly_evolution.py --dry-run
+```
+
+会生成：
+
+- `data/finetune/evolution/sft_nightly.json`（点赞固化 → SFT）
+- `data/finetune/evolution/dpo_nightly.jsonl`（点踩+纠错 → DPO）
+- `data/finetune/evolution/dpo_alpha_nightly.jsonl`（PnL 驱动 → Alpha DPO）
+
+并打印：
+
+- Mari 的 SFT/DPO 命令（不执行）
+- Alpha Loop 的 DPO 命令（不执行）
+
+---
+
+## 项目结构（与当前代码一致）
+
+```
+.
+├── configs/                     # 配置（含 secretary.yaml）
+├── docs/                        # 工程日志与设计记录
+├── logs/                        # 运行日志
+├── models/                      # 训练产物（通常不进 git）
+├── scripts/                     # 可执行脚本（训练/推理/夜间进化/启动）
+├── src/                         # 代码
+│   ├── api/                     # FastAPI
+│   ├── learning/                # Ouroboros 数据记录器（trajectory/feedback/outcome）
+│   ├── trading/                 # Engine/Broker/Strategy（paper trading event loop）
+│   └── ui/                      # Desktop UI + Streamlit
+└── 启动交易终端.bat
+```
+
+---
+
+## 文档与对齐原则
+
+- **工程日志是唯一真相**：阶段历史、关键决策、可复现命令以 `docs/engineering_log_phase2_cn_infusion.md` 为准。
+- **README 只保留操作入口**：启动/验证/夜间进化/常见问题；细节全部下沉到工程日志。
+
+<!--
 
 ### Phase 15 最新进展（Alpha Mining / Alpha Days Compass）
 
@@ -1467,3 +1575,5 @@ Example:
 
 
 MIT License
+
+-->
