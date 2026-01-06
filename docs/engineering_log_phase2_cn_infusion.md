@@ -216,7 +216,9 @@ Prompt 模板：
 - `启动交易终端.bat`
 - `src\ui\desktop\web\index.html`
 - `src\ui\desktop\main.py`
+- `src\ui\streamlit_app.py`
 - `src\api\main.py`
+- `src\llm\local_chat.py`
 - `src\learning\recorder.py`
 - `scripts\nightly_evolution.py`
 - `scripts\generate_alpha_dataset.py`
@@ -230,6 +232,10 @@ Prompt 模板：
 3) 在聊天输入“切换到 AAPL 图表”，观察 `logs\desktop_ui.out.log` 是否出现 `[UIAction] ui.set_live_ticker:AAPL -> ...`。
 4) 创建 task 后仅说“现在怎么样了”，应返回最近 task 的 status/结果。
 5) Mari 问“需要我细化吗？”后答“好的”，应输出对上一条清单的细化内容。
+
+6) Desktop RLHF：Mari 回复气泡下方出现 Like/Dislike；点踩会弹出 comment 输入；提交后 `data/evolution/trajectories/YYYYMMDD.jsonl` 出现 `type=feedback`。
+7) 控制塔：展开“Ouroboros 素材与 Nightly Evolution”，能看到 trajectory/feedback/outcome 计数，并可一键运行 `nightly_evolution --dry-run` 查看输出。
+8) 新闻链接：贴 URL 后不再长期卡住前台对话；`news_id` 可立即返回；在 news 后台分析期间继续问 Mari 不应再出现 GPU OOM/闪退。
 
 #### Ouroboros（衔尾蛇）：RLHF + Alpha Loop（自我进化引擎）
 
@@ -246,11 +252,19 @@ Prompt 模板：
 
 - `/api/v1/chat` 返回 `message_id`（对应 trajectory.id）
 - `/api/v1/feedback` 写入 feedback（1/-1 + comment）
+- `src/ui/desktop/main.py`：桌面端渲染 Like/Dislike；点踩弹出 comment；调用 `/api/v1/feedback`，成功后按钮禁用（防重复提交）。
 - `scripts/nightly_evolution.py --dry-run`
   - 产出：
     - `data/finetune/evolution/sft_nightly.json`（like 固化）
     - `data/finetune/evolution/dpo_nightly.jsonl`（dislike+comment 纠错）
   - 打印：SFT/DPO 训练命令（不执行）
+
+控制塔 UI 集成（审计入口）：
+
+- `src/ui/streamlit_app.py`：新增“Ouroboros 素材与 Nightly Evolution”面板
+  - 读取 `data/evolution/trajectories/*.jsonl` 统计 `trajectory/feedback/outcome` 计数
+  - 展示 `data/finetune/evolution/` 下 `sft_nightly.json / dpo_nightly.jsonl / dpo_alpha_nightly.jsonl` 是否存在
+  - 增加按钮运行 `scripts/nightly_evolution.py --dry-run` 并在页面展示 stdout/stderr（优先使用 `venv311/Scripts/python.exe`）
 
 交易 RL（Alpha Loop / Hard Reward）：
 
@@ -265,6 +279,12 @@ Nightly 一键审计（不训练，只打印）：
 - `python scripts/nightly_evolution.py --dry-run`
   - 输出 Mari（SFT/DPO）统计 + 命令
   - 输出 Alpha（PnL→DPO）统计 + 命令
+
+补充：新闻分析与 GPU 稳定性（避免 OOM / 卡顿）：
+
+- `src/api/main.py`：news job 对 URL 网页内容先做清洗与截断，并先压缩为要点摘要再分发给 4 个分析员（降低 prompt token 与推理时长）。
+- `src/api/main.py`：chat 对 news 的同步等待缩短，优先返回 `news_id`，避免桌面端长时间阻塞。
+- `src/llm/local_chat.py`：为本地 `transformers.generate()` 增加全局互斥锁，避免 news job 与对话推理并发占满显存导致 OOM。
 
 关键脚本：
 
