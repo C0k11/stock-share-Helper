@@ -3,6 +3,9 @@ FastAPI主入口
 """
 
 import json
+import os
+import subprocess
+import sys
 import time
 import threading
 import uuid
@@ -16,14 +19,14 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import re
 import yaml
-from openai import OpenAI
-
 import pandas as pd
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from starlette.concurrency import run_in_threadpool
 from loguru import logger
 from pydantic import BaseModel
+from openai import OpenAI
 
 from src.analysis.narrator import narrate_trade_context
 from src.memory.mari_memory import get_mari_memory, parse_memory_command
@@ -368,10 +371,12 @@ def _extract_task_id(text: str) -> Optional[str]:
 
 
 def _extract_ticker_hint(text: str) -> Optional[str]:
-    t = str(text or "").upper()
+    t0 = str(text or "")
+    tl0 = t0.lower()
+    t = t0.upper()
+    candidates: list[tuple[int, str]] = []
     # Chinese company name aliases.
     try:
-        t0 = str(text or "")
         zh_alias = {
             "苹果": "AAPL",
             "苹果公司": "AAPL",
@@ -391,18 +396,24 @@ def _extract_ticker_hint(text: str) -> Optional[str]:
             "英特尔": "INTC",
         }
         for k, v in zh_alias.items():
-            if k.lower() in t0.lower():
-                return v
+            idx = tl0.rfind(str(k).lower())
+            if idx >= 0:
+                candidates.append((idx, v))
     except Exception:
         pass
-    m = re.search(r"\b[A-Z]{1,5}\b", t)
-    if not m:
+
+    # Uppercase tickers, pick the last mentioned one.
+    for m in re.finditer(r"\b[A-Z]{1,5}\b", t):
+        cand = str(m.group(0)).strip().upper()
+        # Avoid common English words that match the pattern.
+        if cand in {"A", "I", "AM", "AN", "AND", "OR", "ON", "OFF", "TO", "FOR", "WITH"}:
+            continue
+        candidates.append((int(m.start()), cand))
+
+    if not candidates:
         return None
-    cand = str(m.group(0)).strip().upper()
-    # Avoid common English words that match the pattern.
-    if cand in {"A", "I", "AM", "AN", "AND", "OR", "ON", "OFF", "TO", "FOR", "WITH"}:
-        return None
-    return cand
+    candidates.sort(key=lambda x: (x[0], len(x[1])))
+    return candidates[-1][1]
 
 
 def _is_chart_switch_request(text: str) -> bool:
@@ -1142,6 +1153,23 @@ def _fetch_url_text(*, url: str, timeout_sec: int = 12, max_bytes: int = 500_000
     return {"url": u, "content_type": ct, "text": text}
 
 
+def _sanitize_web_text(text: str, max_chars: int = 6_000) -> str:
+    t = str(text or "")
+    if not t:
+        return ""
+    try:
+        # Strip HTML tags (very rough) and compress whitespace.
+        t = re.sub(r"<script\b[^>]*>.*?</script>", " ", t, flags=re.IGNORECASE | re.DOTALL)
+        t = re.sub(r"<style\b[^>]*>.*?</style>", " ", t, flags=re.IGNORECASE | re.DOTALL)
+        t = re.sub(r"<[^>]+>", " ", t)
+        t = re.sub(r"\s+", " ", t).strip()
+    except Exception:
+        t = str(text or "").strip()
+    if len(t) > int(max_chars):
+        t = t[: int(max_chars)]
+    return t
+
+
 def _enqueue_news_job(*, text: str, url: Optional[str] = None, source: Optional[str] = None) -> str:
     news_id = "news_" + uuid.uuid4().hex[:12]
     job = {
@@ -1325,9 +1353,16 @@ def _run_news_analysis_job(news_id: str) -> None:
             try:
                 fetched = _fetch_url_text(url=url, timeout_sec=12)
                 page_txt = str(fetched.get("text") or "")
-                page_txt = page_txt.strip()
+                page_txt = _sanitize_web_text(page_txt, max_chars=6_000)
                 if page_txt:
-                    base_news = base_news + "\n\n[URL_CONTENT]\n" + page_txt[:20_000]
+                    brief = _call_llm_direct(
+                        system_prompt="你是新闻阅读助手。请把网页内容压缩成要点摘要（最多10条，每条不超过25字）。只输出要点列表文本。",
+                        user_text=page_txt,
+                        temperature=0.0,
+                        max_tokens=256,
+                    )
+                    brief = (brief or "").strip() or page_txt[:1200]
+                    base_news = base_news + "\n\n[URL_CONTENT]\n" + brief
             except Exception as e:
                 _append_audit({
                     "time": datetime.now().isoformat(),
@@ -1348,7 +1383,7 @@ def _run_news_analysis_job(news_id: str) -> None:
 
         results: Dict[str, Any] = {}
         for role, sp in roles.items():
-            raw = _call_llm_direct(system_prompt=sp, user_text=base_news, temperature=0.2, max_tokens=512)
+            raw = _call_llm_direct(system_prompt=sp, user_text=base_news, temperature=0.2, max_tokens=256)
             parsed: Any = None
             if isinstance(raw, str) and raw.strip():
                 try:
@@ -1374,7 +1409,7 @@ def _run_news_analysis_job(news_id: str) -> None:
             "要求：明确、可核查、不要编造。"
         )
         merge_input = json.dumps(results, ensure_ascii=False)
-        summary = _call_llm_direct(system_prompt=merge_prompt, user_text=merge_input, temperature=0.2, max_tokens=512) or ""
+        summary = _call_llm_direct(system_prompt=merge_prompt, user_text=merge_input, temperature=0.2, max_tokens=256) or ""
 
         try:
             mem = get_mari_memory()
@@ -1581,7 +1616,7 @@ async def chat(req: ChatRequest):
     ctx = req.context if isinstance(req.context, dict) else {}
 
     t0 = time.perf_counter()
-    reply = _secretary_reply(text, ctx)
+    reply = await run_in_threadpool(_secretary_reply, text, ctx)
     dt_ms = int((time.perf_counter() - t0) * 1000.0)
 
     # Deterministic UI chart switching: do not rely on LLM to emit actions.
@@ -1723,6 +1758,19 @@ async def feedback(req: FeedbackRequest):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"failed to record feedback: {e}")
     return {"ok": True}
+
+
+@app.post("/api/v1/llm/unload")
+async def unload_local_llm():
+    try:
+        from src.llm.local_chat import unload_model
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to import local llm: {e}")
+    try:
+        await run_in_threadpool(unload_model)
+        return {"ok": True}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"unload failed: {e}")
 
 
 @app.get("/api/v1/status")
@@ -2303,11 +2351,40 @@ def _secretary_reply(text: str, ctx: Dict[str, Any]) -> str:
             )
         except Exception:
             pass
-        done = _wait_news_done(news_id, timeout_sec=25)
+        done = _wait_news_done(news_id, timeout_sec=6)
         if isinstance(done, dict) and done.get("status") == "done":
             summary = str(done.get("summary") or "").strip()
             return (summary + f"\n\n(news_id={news_id})").strip()
         return f"Sensei, 我已经把新闻交给分析员们处理了。稍后你可以再问我这个编号：{news_id}"
+
+    # Auto-submit short URL messages as news (no need to prefix /news)
+    try:
+        url0 = _extract_first_url(t)
+    except Exception:
+        url0 = None
+    if url0:
+        s0 = t.strip()
+        is_bare_url = s0.startswith("http://") or s0.startswith("https://") or s0.startswith("/http://") or s0.startswith("/https://")
+        if is_bare_url or _is_news_question(t):
+            news_id = _enqueue_news_job(text=t, url=url0, source="chat_auto_url")
+            try:
+                _append_trajectory_log(
+                    {
+                        "time": datetime.now().isoformat(),
+                        "type": "contract.news.submit",
+                        "news_id": news_id,
+                        "client": (ctx or {}).get("client"),
+                        "session_id": (ctx or {}).get("session_id"),
+                        "input": {"url": url0, "text_len": len(t)},
+                    }
+                )
+            except Exception:
+                pass
+            done = _wait_news_done(news_id, timeout_sec=6)
+            if isinstance(done, dict) and done.get("status") == "done":
+                summary = str(done.get("summary") or "").strip()
+                return (summary + f"\n\n(news_id={news_id})").strip()
+            return f"Sensei, 我已经把新闻交给分析员们处理了。稍后你可以再问我这个编号：{news_id}"
 
     # Heuristic: long pasted text with URL -> treat as news
     if len(t) >= 350 and ("\n" in t or _extract_first_url(t)):
@@ -3022,6 +3099,46 @@ async def get_agent_logs(limit: int = 100):
     
     logs = getattr(_live_runner, "agent_logs", [])
     return {"logs": logs[-limit:] if logs else [], "count": len(logs)}
+
+
+@app.post("/api/v1/evolution/nightly/dry-run")
+async def run_nightly_evolution_dry_run():
+    """Run Ouroboros nightly_evolution in dry-run mode and return its output."""
+    py = REPO_ROOT / "venv311" / "Scripts" / "python.exe"
+    python_exe = str(py) if py.exists() else sys.executable
+
+    cmd = [
+        str(python_exe),
+        "scripts/nightly_evolution.py",
+        "--dry-run",
+    ]
+    env = dict(os.environ)
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    try:
+        out = subprocess.run(
+            cmd,
+            cwd=str(REPO_ROOT),
+            capture_output=True,
+            text=True,
+            check=False,
+            env=env,
+            timeout=120,
+        )
+        return {
+            "ok": int(out.returncode) == 0,
+            "cmd": " ".join(cmd),
+            "returncode": int(out.returncode),
+            "stdout": str(out.stdout or ""),
+            "stderr": str(out.stderr or ""),
+        }
+    except subprocess.TimeoutExpired:
+        return {
+            "ok": False,
+            "cmd": " ".join(cmd),
+            "returncode": -1,
+            "stdout": "",
+            "stderr": "timeout",
+        }
 
 
 # ========== Online RL API ==========
