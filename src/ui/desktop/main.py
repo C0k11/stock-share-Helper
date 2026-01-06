@@ -14,6 +14,7 @@ import time
 import urllib.parse
 import urllib.request
 import re
+import uuid
 from pathlib import Path
 from typing import Any, Optional
 
@@ -23,7 +24,7 @@ import requests
 import yaml
 from PySide6.QtCore import QObject, Qt, QEvent, QPoint, QThread, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QAction, QColor, QCursor
-from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QPushButton, QScrollArea, QSplitter, QStackedLayout, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QFrame, QHBoxLayout, QLabel, QLineEdit, QMainWindow, QPushButton, QScrollArea, QSplitter, QStackedLayout, QVBoxLayout, QWidget, QInputDialog, QPlainTextEdit
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineWidgets import QWebEngineView
 
@@ -46,11 +47,167 @@ class TTSThread(QThread):
         preset: str = "gentle",
     ):
         super().__init__()
-        self.text = str(text)
+        self.text = self._normalize_tts_text(str(text))
         self.voice = str(voice)
         self.backend = str(backend or "edge").strip() or "edge"
         self.gpt_sovits = dict(gpt_sovits) if isinstance(gpt_sovits, dict) else {}
         self.preset = str(preset or "gentle").strip() or "gentle"
+
+    @staticmethod
+    def _digits_to_zh(s: str) -> str:
+        digits = {
+            "0": "零",
+            "1": "一",
+            "2": "二",
+            "3": "三",
+            "4": "四",
+            "5": "五",
+            "6": "六",
+            "7": "七",
+            "8": "八",
+            "9": "九",
+        }
+
+        def int_to_zh(n: int) -> str:
+            if n == 0:
+                return "零"
+            units = ["", "十", "百", "千"]
+            out: list[str] = []
+            zero_pending = False
+            for i in range(3, -1, -1):
+                d = (n // (10 ** i)) % 10
+                if d == 0:
+                    if out:
+                        zero_pending = True
+                    continue
+                if zero_pending:
+                    out.append("零")
+                    zero_pending = False
+                if i == 1 and d == 1 and not out:
+                    out.append("十")
+                else:
+                    out.append(digits[str(d)] + units[i])
+            return "".join(out)
+
+        def big_int_to_zh(n: int) -> str:
+            if n == 0:
+                return "零"
+            big_units = ["", "万", "亿", "兆"]
+            parts: list[tuple[int, int]] = []
+            u = 0
+            x = n
+            while x > 0 and u < len(big_units):
+                parts.append((x % 10000, u))
+                x //= 10000
+                u += 1
+
+            res: list[str] = []
+            zero_pending = False
+            for grp, unit_idx in reversed(parts):
+                if grp == 0:
+                    zero_pending = True
+                    continue
+                if zero_pending and res:
+                    res.append("零")
+                zero_pending = False
+                chunk = int_to_zh(grp)
+                if chunk != "零":
+                    chunk = chunk + big_units[unit_idx]
+                res.append(chunk)
+
+            s0 = "".join(res).rstrip("零")
+            return s0 or "零"
+
+        def repl(m: re.Match) -> str:
+            raw = str(m.group(0) or "")
+            raw = raw.replace(",", "")
+
+            sign = ""
+            if raw.startswith("-"):
+                sign = "负"
+                raw = raw[1:]
+            elif raw.startswith("+"):
+                sign = "加"
+                raw = raw[1:]
+
+            is_percent = raw.endswith("%")
+            if is_percent:
+                raw = raw[:-1]
+
+            if not raw:
+                return m.group(0)
+
+            if "." in raw:
+                a, b = raw.split(".", 1)
+            else:
+                a, b = raw, ""
+
+            try:
+                n = int(a) if a else 0
+            except Exception:
+                n = None
+
+            if n is None:
+                int_part = "".join(digits.get(ch, ch) for ch in a)
+            else:
+                int_part = big_int_to_zh(abs(n))
+
+            frac_part = ""
+            if b:
+                frac_part = "点" + "".join(digits.get(ch, ch) for ch in b)
+
+            body = int_part + frac_part
+            if is_percent:
+                body = "百分之" + body
+            return sign + body
+
+        return re.sub(r"[+-]?[0-9][0-9,]*(?:\.[0-9]+)?%?", repl, str(s or ""))
+
+    @staticmethod
+    def _abbr_to_ja_letters(s: str) -> str:
+        letter_map = {
+            "A": "エー",
+            "B": "ビー",
+            "C": "シー",
+            "D": "ディー",
+            "E": "イー",
+            "F": "エフ",
+            "G": "ジー",
+            "H": "エイチ",
+            "I": "アイ",
+            "J": "ジェー",
+            "K": "ケー",
+            "L": "エル",
+            "M": "エム",
+            "N": "エヌ",
+            "O": "オー",
+            "P": "ピー",
+            "Q": "キュー",
+            "R": "アール",
+            "S": "エス",
+            "T": "ティー",
+            "U": "ユー",
+            "V": "ヴィー",
+            "W": "ダブリュー",
+            "X": "エックス",
+            "Y": "ワイ",
+            "Z": "ゼット",
+        }
+
+        def repl(m: re.Match) -> str:
+            w = str(m.group(0) or "").strip()
+            if not w:
+                return w
+            parts = [letter_map.get(ch, ch) for ch in w]
+            return "・".join(parts)
+
+        return re.sub(r"\\b[A-Z]{2,6}\\b", repl, str(s or ""))
+
+    @staticmethod
+    def _normalize_tts_text(s: str) -> str:
+        x = str(s or "")
+        x = TTSThread._digits_to_zh(x)
+        return x
 
     def _play_audio_file(self, path: str) -> Optional[str]:
         try:
@@ -349,6 +506,7 @@ class MainWindow(QMainWindow):
         self._web_server: http.server.ThreadingHTTPServer | None = None
         self._web_thread: threading.Thread | None = None
         self._web_port: int | None = None
+        self._session_id = "desktop_" + uuid.uuid4().hex[:12]
         self._api_base = f"http://{api_host}:{int(api_port)}"
         self._ui_base = f"http://{ui_host}:{int(ui_port)}"
         self._control_tower_url = str(control_tower_url)
@@ -357,6 +515,8 @@ class MainWindow(QMainWindow):
         self._gpt_sovits_cfg: dict = {}
         self._auto_execute_actions = False
         self._show_action_notes = False
+        self._dashboard_ready = False
+        self._pending_dashboard_actions: list[dict] = []
 
         try:
             cfg_path = Path(self._repo_root()) / "configs" / "secretary.yaml"
@@ -415,6 +575,7 @@ class MainWindow(QMainWindow):
 
         # Ensure dashboard theming is applied after the page is actually ready.
         self.dashboard_view.loadFinished.connect(lambda _ok: self._apply_theme(self._theme))
+        self.dashboard_view.loadFinished.connect(self._on_dashboard_loaded)
         QTimer.singleShot(1500, lambda: self._apply_theme(self._theme))
 
         # Right chat panel (ChatGPT style) - lives as a normal widget (no overlay).
@@ -451,7 +612,69 @@ class MainWindow(QMainWindow):
         input_layout.addWidget(self.input_box)
         input_layout.addWidget(btn)
 
+        # Nightly training panel (Ouroboros RLHF)
+        train_panel = QFrame()
+        train_panel.setObjectName("trainPanel")
+        train_panel.setStyleSheet(
+            """
+            QFrame#trainPanel {
+              background: rgba(0, 0, 0, 0.18);
+              border: 1px solid rgba(255,255,255,0.10);
+              border-radius: 10px;
+            }
+            """
+        )
+        train_layout = QVBoxLayout()
+        train_layout.setContentsMargins(10, 8, 10, 10)
+        train_layout.setSpacing(6)
+
+        train_top = QHBoxLayout()
+        train_top.setContentsMargins(0, 0, 0, 0)
+        lbl_train = QLabel("Nightly Training")
+        lbl_train.setStyleSheet("color: rgba(229,231,235,0.90); font-weight: 800;")
+        self._btn_train_start = QPushButton("Start Training")
+        self._btn_train_stop = QPushButton("Stop Training")
+        self._btn_train_start.setStyleSheet("background: rgba(16,185,129,0.28); border: 1px solid rgba(16,185,129,0.35);")
+        self._btn_train_stop.setStyleSheet("background: rgba(239,68,68,0.22); border: 1px solid rgba(239,68,68,0.30);")
+        self._lbl_train_status = QLabel("")
+        self._lbl_train_status.setStyleSheet("color: rgba(229,231,235,0.72);")
+        train_top.addWidget(lbl_train)
+        train_top.addStretch(1)
+        train_top.addWidget(self._btn_train_start)
+        train_top.addWidget(self._btn_train_stop)
+
+        train_layout.addLayout(train_top)
+        train_layout.addWidget(self._lbl_train_status)
+
+        self._train_log = QPlainTextEdit()
+        self._train_log.setReadOnly(True)
+        self._train_log.setStyleSheet(
+            """
+            QPlainTextEdit {
+              background: rgba(0, 0, 0, 0.25);
+              color: rgba(229,231,235,0.86);
+              border: 1px solid rgba(255,255,255,0.08);
+              border-radius: 8px;
+              font-family: Consolas, 'Monaco', monospace;
+              font-size: 11px;
+            }
+            """
+        )
+        self._train_log.setMaximumHeight(180)
+        self._train_log.setPlaceholderText("(No training yet)")
+        train_layout.addWidget(self._train_log)
+        train_panel.setLayout(train_layout)
+
+        self._btn_train_start.clicked.connect(self._start_nightly_training)
+        self._btn_train_stop.clicked.connect(self._stop_nightly_training)
+
+        self._train_poll_timer = QTimer()
+        self._train_poll_timer.setInterval(2000)
+        self._train_poll_timer.timeout.connect(self._poll_nightly_training)
+        self._train_poll_timer.start()
+
         chat_panel_layout.addWidget(self.chat_scroll, stretch=1)
+        chat_panel_layout.addWidget(train_panel, stretch=0)
         chat_panel_layout.addLayout(input_layout)
         chat_panel.setLayout(chat_panel_layout)
 
@@ -523,6 +746,165 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+        # Initial poll (after UI is fully constructed)
+        QTimer.singleShot(1200, self._poll_nightly_training)
+
+    def _post_nightly_train_start(self) -> dict:
+        url = f"{self._api_base}/api/v1/evolution/nightly/train/start"
+        resp = requests.post(url, timeout=30)
+        obj: Any = resp.json() if resp.status_code == 200 else {"ok": False, "error": resp.text}
+        return obj if isinstance(obj, dict) else {"ok": False, "error": "bad response"}
+
+    def _post_nightly_train_stop(self) -> dict:
+        url = f"{self._api_base}/api/v1/evolution/nightly/train/stop"
+        resp = requests.post(url, timeout=15)
+        obj: Any = resp.json() if resp.status_code == 200 else {"ok": False, "error": resp.text}
+        return obj if isinstance(obj, dict) else {"ok": False, "error": "bad response"}
+
+    def _get_nightly_train_status(self) -> dict:
+        url = f"{self._api_base}/api/v1/evolution/nightly/train/status?tail_bytes=16000"
+        resp = requests.get(url, timeout=6)
+        obj: Any = resp.json() if resp.status_code == 200 else {"ok": False, "error": resp.text}
+        return obj if isinstance(obj, dict) else {"ok": False, "error": "bad response"}
+
+    def _set_train_ui_state(self, *, running: bool, status_text: str, log_tail: str, next_adapter: str = "") -> None:
+        try:
+            self._btn_train_start.setEnabled(not running)
+            self._btn_train_stop.setEnabled(bool(running))
+        except Exception:
+            pass
+        try:
+            s = str(status_text or "").strip()
+            if next_adapter:
+                s = (s + f" | next adapter: {next_adapter}").strip()
+            self._lbl_train_status.setText(s)
+        except Exception:
+            pass
+        try:
+            txt = str(log_tail or "").strip()
+            if not txt:
+                txt = "(No training yet)"
+            self._train_log.setPlainText(txt)
+            sb = self._train_log.verticalScrollBar()
+            sb.setValue(sb.maximum())
+        except Exception:
+            pass
+
+    def _start_nightly_training(self) -> None:
+        try:
+            self._btn_train_start.setEnabled(False)
+        except Exception:
+            pass
+
+        class _TrainStartThread(QThread):
+            finished = Signal(object)
+
+            def __init__(self, outer: "MainWindow"):
+                super().__init__()
+                self.outer = outer
+
+            def run(self) -> None:
+                try:
+                    r = self.outer._post_nightly_train_start()
+                except Exception as e:
+                    r = {"ok": False, "error": str(e)}
+                self.finished.emit(r)
+
+        def _done(res: Any) -> None:
+            ok = bool(isinstance(res, dict) and res.get("ok"))
+            if not ok:
+                err = str(res.get("error") if isinstance(res, dict) else res)
+                self._set_train_ui_state(running=False, status_text=f"train start failed: {err}", log_tail="")
+            self._poll_nightly_training()
+
+        t = _TrainStartThread(self)
+        t.finished.connect(_done)
+        t.start()
+        self._train_start_thread = t
+
+    def _stop_nightly_training(self) -> None:
+        try:
+            self._btn_train_stop.setEnabled(False)
+        except Exception:
+            pass
+
+        class _TrainStopThread(QThread):
+            finished = Signal(object)
+
+            def __init__(self, outer: "MainWindow"):
+                super().__init__()
+                self.outer = outer
+
+            def run(self) -> None:
+                try:
+                    r = self.outer._post_nightly_train_stop()
+                except Exception as e:
+                    r = {"ok": False, "error": str(e)}
+                self.finished.emit(r)
+
+        def _done(_res: Any) -> None:
+            self._poll_nightly_training()
+
+        t = _TrainStopThread(self)
+        t.finished.connect(_done)
+        t.start()
+        self._train_stop_thread = t
+
+    def _poll_nightly_training(self) -> None:
+        # Avoid piling up threads if the API is slow.
+        try:
+            th = getattr(self, "_train_status_thread", None)
+            if isinstance(th, QThread) and th.isRunning():
+                return
+        except Exception:
+            pass
+
+        class _TrainStatusThread(QThread):
+            finished = Signal(object)
+
+            def __init__(self, outer: "MainWindow"):
+                super().__init__()
+                self.outer = outer
+
+            def run(self) -> None:
+                try:
+                    r = self.outer._get_nightly_train_status()
+                except Exception as e:
+                    r = {"ok": False, "error": str(e)}
+                self.finished.emit(r)
+
+        def _done(res: Any) -> None:
+            if not isinstance(res, dict) or not res.get("ok"):
+                err = str(res.get("error") if isinstance(res, dict) else res)
+                self._set_train_ui_state(running=False, status_text=f"train status error: {err}", log_tail="")
+                return
+
+            running = bool(res.get("running"))
+            pid = str(res.get("pid") or "").strip()
+            rc = res.get("returncode")
+            tail = str(res.get("log_tail") or "")
+
+            next_adapter = ""
+            try:
+                meta = res.get("meta") if isinstance(res.get("meta"), dict) else {}
+                outs = meta.get("outputs") if isinstance(meta.get("outputs"), dict) else {}
+                next_adapter = str(outs.get("next_dpo_adapter") or "").strip()
+            except Exception:
+                next_adapter = ""
+
+            if running:
+                st = "Training running" + (f" (pid={pid})" if pid else "")
+            else:
+                st = "Training idle"
+                if rc is not None:
+                    st = f"Training finished (rc={rc})"
+            self._set_train_ui_state(running=running, status_text=st, log_tail=tail, next_adapter=next_adapter)
+
+        t = _TrainStatusThread(self)
+        t.finished.connect(_done)
+        t.start()
+        self._train_status_thread = t
+
     def _extract_action_blocks(self, text: str) -> tuple[str, list[dict]]:
         t = str(text or "")
         actions: list[dict] = []
@@ -551,14 +933,54 @@ class MainWindow(QMainWindow):
         obj: Any = json.loads(raw)
         return obj if isinstance(obj, dict) else {"ok": False, "error": "bad response"}
 
+    def _on_dashboard_loaded(self, ok: bool) -> None:
+        self._dashboard_ready = bool(ok)
+        if not self._dashboard_ready:
+            return
+        if self._pending_dashboard_actions:
+            pending = list(self._pending_dashboard_actions)
+            self._pending_dashboard_actions.clear()
+            for a in pending:
+                try:
+                    self._execute_ui_action(a)
+                except Exception:
+                    pass
+
+    def _run_dashboard_js(self, js: str, *, label: str) -> None:
+        try:
+            page = self.dashboard_view.page()
+        except Exception:
+            return
+
+        def _cb(res: Any) -> None:
+            try:
+                print(f"[UIAction] {label} -> {res}")
+            except Exception:
+                return
+
+        try:
+            page.runJavaScript(js, _cb)
+        except Exception:
+            try:
+                page.runJavaScript(js)
+            except Exception:
+                pass
+
     def _execute_ui_action(self, action_obj: dict) -> dict:
         a = str((action_obj or {}).get("action") or "").strip().lower()
         params = (action_obj or {}).get("params") if isinstance((action_obj or {}).get("params"), dict) else {}
         if not hasattr(self, "dashboard_view") or self.dashboard_view is None:
             return {"ok": False, "error": "dashboard_view not ready"}
 
+        if not getattr(self, "_dashboard_ready", False):
+            self._pending_dashboard_actions.append(dict(action_obj or {}))
+            return {"ok": True, "queued": True}
+
         if a == "ui.refresh":
-            self.dashboard_view.page().runJavaScript("if (window.loadLiveData) window.loadLiveData();")
+            self._run_dashboard_js(
+                "(function(){try{if(window.loadLiveData){window.loadLiveData();return {ok:true,called:true};}return {ok:false,called:false};}catch(e){return {ok:false,error:String(e)};}})();",
+                label="ui.refresh",
+            )
             return {"ok": True}
 
         if a == "ui.set_live_ticker":
@@ -568,11 +990,12 @@ class MainWindow(QMainWindow):
             js = (
                 "(function(){try{"
                 "var sel=document.getElementById('liveTickerSelect');"
-                f"if(sel){{sel.value={json.dumps(tk)};}}"
-                "if (window.loadLiveChart) window.loadLiveChart();"
-                "}catch(e){}})();"
+                f"if(sel){{var v={json.dumps(tk)};var ok=false;for(var i=0;i<sel.options.length;i++){{if(sel.options[i].value===v){{ok=true;break;}}}}if(!ok){{sel.add(new Option(v,v));}}sel.value=v;}}"
+                "if (window.loadLiveChart){window.loadLiveChart();}"
+                "return {ok:true,ticker:(sel&&sel.value)||null,hasSel:!!sel,hasLoad:(typeof window.loadLiveChart==='function')};"
+                "}catch(e){return {ok:false,error:String(e)};}})();"
             )
-            self.dashboard_view.page().runJavaScript(js)
+            self._run_dashboard_js(js, label=f"ui.set_live_ticker:{tk}")
             return {"ok": True, "ticker": tk}
 
         if a == "ui.set_mode":
@@ -863,7 +1286,7 @@ class MainWindow(QMainWindow):
         self.tts_thread.finished_signal.connect(self._on_tts_finished)
         self.tts_thread.start()
 
-    def _append_chat(self, *, role: str, text: str) -> QLabel:
+    def _append_chat(self, *, role: str, text: str, message_id: str | None = None, enable_feedback: bool = False) -> QLabel:
         bubble = QFrame()
         bubble.setObjectName("chatBubble")
         bubble.setStyleSheet(
@@ -875,13 +1298,48 @@ class MainWindow(QMainWindow):
             """
         )
 
-        label = QLabel(str(text))
+        label = QLabel(str(text or ""))
         label.setWordWrap(True)
         label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+
+        try:
+            label.setProperty("message_id", str(message_id or "").strip())
+        except Exception:
+            pass
 
         bubble_layout = QVBoxLayout()
         bubble_layout.setContentsMargins(12, 10, 12, 10)
         bubble_layout.addWidget(label)
+
+        # RLHF feedback buttons (only for assistant bubbles with message_id)
+        if role != "user" and enable_feedback:
+            btn_row = QHBoxLayout()
+            btn_row.setContentsMargins(0, 4, 0, 0)
+            btn_row.addStretch(1)
+
+            btn_like = QPushButton("👍")
+            btn_like.setFixedSize(30, 28)
+            btn_like.setStyleSheet("background: rgba(16,185,129,0.15); border: 1px solid rgba(16,185,129,0.30);")
+
+            btn_dislike = QPushButton("👎")
+            btn_dislike.setFixedSize(30, 28)
+            btn_dislike.setStyleSheet("background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.28);")
+
+            # Disable until message_id is known.
+            mid0 = str(message_id or "").strip()
+            btn_like.setEnabled(bool(mid0))
+            btn_dislike.setEnabled(bool(mid0))
+
+            setattr(label, "_btn_like", btn_like)
+            setattr(label, "_btn_dislike", btn_dislike)
+            setattr(label, "_feedback_sent", False)
+
+            btn_like.clicked.connect(lambda: self._handle_feedback(label=label, score=1))
+            btn_dislike.clicked.connect(lambda: self._handle_feedback(label=label, score=-1))
+
+            btn_row.addWidget(btn_like)
+            btn_row.addWidget(btn_dislike)
+            bubble_layout.addLayout(btn_row)
         bubble.setLayout(bubble_layout)
 
         if role == "user":
@@ -943,12 +1401,128 @@ class MainWindow(QMainWindow):
 
         return label
 
-    def _post_chat(self, message: str) -> str:
+    def _post_feedback(self, *, message_id: str, score: int, comment: str = "") -> dict:
+        url = f"{self._api_base}/api/v1/feedback"
+        payload = {
+            "message_id": str(message_id),
+            "score": int(score),
+            "comment": str(comment or ""),
+        }
+        data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(req, timeout=25.0) as resp:
+            raw = resp.read().decode("utf-8", errors="replace")
+        obj: Any = json.loads(raw)
+        return obj if isinstance(obj, dict) else {"ok": False, "error": "bad response"}
+
+    def _handle_feedback(self, *, label: QLabel, score: int) -> None:
+        try:
+            if bool(getattr(label, "_feedback_sent", False)):
+                return
+        except Exception:
+            pass
+
+        try:
+            mid = str(label.property("message_id") or "").strip()
+        except Exception:
+            mid = ""
+        if not mid:
+            return
+
+        # Optimistic disable to avoid duplicate submits.
+        try:
+            setattr(label, "_feedback_sent", True)
+        except Exception:
+            pass
+
+        comment = ""
+        if int(score) == -1:
+            try:
+                text, ok = QInputDialog.getText(self, "纠错", "Sensei，我哪里说错了？请教教我：")
+                if ok:
+                    comment = str(text or "")
+            except Exception:
+                comment = ""
+
+        try:
+            btn_like = getattr(label, "_btn_like", None)
+            btn_dislike = getattr(label, "_btn_dislike", None)
+        except Exception:
+            btn_like = None
+            btn_dislike = None
+
+        try:
+            if btn_like is not None:
+                btn_like.setEnabled(False)
+            if btn_dislike is not None:
+                btn_dislike.setEnabled(False)
+        except Exception:
+            pass
+
+        class _FbThread(QThread):
+            finished = Signal(object)
+
+            def __init__(self, outer: "MainWindow", message_id: str, score: int, comment: str):
+                super().__init__()
+                self.outer = outer
+                self.message_id = message_id
+                self.score = score
+                self.comment = comment
+
+            def run(self) -> None:
+                try:
+                    r = self.outer._post_feedback(message_id=self.message_id, score=self.score, comment=self.comment)
+                except Exception as e:
+                    r = {"ok": False, "error": str(e)}
+                self.finished.emit(r)
+
+        def _done(res: Any) -> None:
+            ok = bool(isinstance(res, dict) and res.get("ok"))
+            if ok:
+                try:
+                    if btn_like is not None:
+                        btn_like.setEnabled(False)
+                    if btn_dislike is not None:
+                        btn_dislike.setEnabled(False)
+                except Exception:
+                    pass
+                try:
+                    if int(score) == 1 and btn_like is not None:
+                        btn_like.setStyleSheet("background: rgba(16,185,129,0.55); border: 1px solid rgba(16,185,129,0.65);")
+                    if int(score) == -1 and btn_dislike is not None:
+                        btn_dislike.setStyleSheet("background: rgba(239,68,68,0.45); border: 1px solid rgba(239,68,68,0.60);")
+                except Exception:
+                    pass
+            else:
+                try:
+                    setattr(label, "_feedback_sent", False)
+                except Exception:
+                    pass
+                try:
+                    if btn_like is not None:
+                        btn_like.setEnabled(True)
+                    if btn_dislike is not None:
+                        btn_dislike.setEnabled(True)
+                except Exception:
+                    pass
+                try:
+                    err = str(res.get("error") if isinstance(res, dict) else res)
+                    label.setToolTip(f"feedback failed: {err}")
+                except Exception:
+                    pass
+
+        t = _FbThread(self, mid, int(score), comment)
+        t.finished.connect(_done)
+        t.start()
+        self._fb_thread = t
+
+    def _post_chat(self, message: str) -> dict:
         url = f"{self._api_base}/api/v1/chat"
         payload = urllib.parse.quote("", safe="")
         del payload
         ctx = {
             "client": "desktop",
+            "session_id": str(getattr(self, "_session_id", "")),
             "theme": str(getattr(self, "_theme", "dark")),
             "user_role": "Sensei (Teacher)",
             "current_mood": "Gentle",
@@ -959,8 +1533,11 @@ class MainWindow(QMainWindow):
             raw = resp.read().decode("utf-8", errors="replace")
         obj: Any = json.loads(raw)
         if isinstance(obj, dict) and isinstance(obj.get("reply"), str):
-            return str(obj["reply"])
-        return "收到。"
+            return {
+                "reply": str(obj.get("reply") or ""),
+                "message_id": str(obj.get("message_id") or "").strip() or None,
+            }
+        return {"reply": "收到。", "message_id": None}
 
     def send_message(self) -> None:
         text = self.input_box.text().strip()
@@ -969,28 +1546,71 @@ class MainWindow(QMainWindow):
         self.input_box.clear()
 
         self._append_chat(role="user", text=text)
-        assistant_label = self._append_chat(role="assistant", text="...")
+        assistant_label = self._append_chat(role="assistant", text="", message_id=None, enable_feedback=True)
 
-        def _on_voice_started() -> None:
-            # Show text and start mouth animation only when voice starts
+        # Hide the assistant bubble row until voice actually starts.
+        _bubble = assistant_label.parentWidget()
+        _row = _bubble.parentWidget() if _bubble is not None else None
+        try:
+            if _row is not None:
+                _row.setVisible(False)
+            elif _bubble is not None:
+                _bubble.setVisible(False)
+        except Exception:
+            pass
+
+        state: dict[str, bool] = {"started": False, "revealed": False}
+
+        def _reveal(*, start_talking: bool) -> None:
+            if state.get("revealed"):
+                if start_talking and (not self.is_talking):
+                    self.is_talking = True
+                    self.mouth_timer.start(50)
+                return
+            state["revealed"] = True
+            try:
+                if _row is not None:
+                    _row.setVisible(True)
+                elif _bubble is not None:
+                    _bubble.setVisible(True)
+            except Exception:
+                pass
             assistant_label.setText(self._pending_reply)
             safe = self._pending_reply.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
             self.avatar_view.page().runJavaScript(f"window.showBubble('{safe}');")
-            self.is_talking = True
-            self.mouth_timer.start(50)
+            if start_talking:
+                self.is_talking = True
+                self.mouth_timer.start(50)
 
-        def _done(reply_text: str) -> None:
+        def _on_voice_started() -> None:
+            state["started"] = True
+            _reveal(start_talking=True)
+
+        def _done(resp: Any) -> None:
+            reply_text = ""
+            message_id: str | None = None
+            if isinstance(resp, dict):
+                reply_text = str(resp.get("reply") or "")
+                mid = str(resp.get("message_id") or "").strip()
+                message_id = mid or None
+            else:
+                reply_text = str(resp)
             display_text = str(reply_text)
             cleaned, actions = self._extract_action_blocks(display_text)
             action_notes: list[str] = []
-            if self._auto_execute_actions and actions:
+            if actions:
                 for a in actions:
                     try:
                         act_name = str(a.get("action") or "")
-                        if str(act_name).lower().startswith("ui."):
+                        is_ui = str(act_name).lower().startswith("ui.")
+                        if is_ui:
                             res = self._execute_ui_action(a)
                             ok = bool(res.get("ok"))
                         else:
+                            if not self._auto_execute_actions:
+                                if self._show_action_notes:
+                                    action_notes.append(f"[Action] {act_name} -> SKIP")
+                                continue
                             res = self._post_action(a)
                             ok = bool(res.get("ok"))
 
@@ -1004,6 +1624,20 @@ class MainWindow(QMainWindow):
                 cleaned = (cleaned + "\n\n" + "\n".join(action_notes)).strip()
 
             self._pending_reply = cleaned
+
+            # Enable feedback buttons when message_id is available.
+            try:
+                if message_id:
+                    assistant_label.setProperty("message_id", message_id)
+                    btn_like = getattr(assistant_label, "_btn_like", None)
+                    btn_dislike = getattr(assistant_label, "_btn_dislike", None)
+                    if btn_like is not None:
+                        btn_like.setEnabled(True)
+                    if btn_dislike is not None:
+                        btn_dislike.setEnabled(True)
+            except Exception:
+                pass
+
             preset = self._pick_tts_preset(reply_text)
             self.tts_thread = TTSThread(
                 cleaned,
@@ -1013,11 +1647,18 @@ class MainWindow(QMainWindow):
                 preset=str(preset),
             )
             self.tts_thread.started_signal.connect(_on_voice_started)
-            self.tts_thread.finished_signal.connect(self._on_tts_finished)
+
+            def _on_voice_finished(err: str) -> None:
+                # If TTS failed before audio actually started, reveal the text as an error fallback.
+                if (not state.get("started")) and (not state.get("revealed")):
+                    _reveal(start_talking=False)
+                self._on_tts_finished(err)
+
+            self.tts_thread.finished_signal.connect(_on_voice_finished)
             self.tts_thread.start()
 
         class _ChatThread(QThread):
-            finished = Signal(str)
+            finished = Signal(object)
 
             def __init__(self, outer: "MainWindow", msg: str):
                 super().__init__()
@@ -1028,8 +1669,8 @@ class MainWindow(QMainWindow):
                 try:
                     r = self.outer._post_chat(self.msg)
                 except Exception as e:
-                    r = f"请求失败: {e}"
-                self.finished.emit(str(r))
+                    r = {"reply": f"请求失败: {e}", "message_id": None}
+                self.finished.emit(r)
 
         t = _ChatThread(self, text)
         t.finished.connect(_done)
