@@ -28,6 +28,15 @@ class FeedbackRecord:
     type: str = "feedback"
 
 
+@dataclass
+class OutcomeRecord:
+    ref_id: str
+    timestamp: str
+    outcome: float
+    comment: str = ""
+    type: str = "outcome"
+
+
 class EvolutionRecorder:
     def __init__(self) -> None:
         repo_root = Path(__file__).resolve().parents[2]
@@ -77,6 +86,15 @@ class EvolutionRecorder:
             comment=str(comment or ""),
         )
         self._write(asdict(fb))
+
+    def log_outcome(self, *, ref_id: str, outcome: float, comment: str = "") -> None:
+        oc = OutcomeRecord(
+            ref_id=str(ref_id),
+            timestamp=datetime.now().isoformat(),
+            outcome=float(outcome),
+            comment=str(comment or ""),
+        )
+        self._write(asdict(oc))
 
     def update_reward(self, *, original_action: str, reward_score: float) -> None:
         _ = original_action

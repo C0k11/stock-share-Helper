@@ -166,10 +166,38 @@ class MultiAgentStrategy:
         decision = self._expert_infer(ticker, features, expert)
         action = decision.get("decision", "HOLD").upper()
         analysis = decision.get("analysis", "")
+
+        trace_id: Optional[str] = None
         
         if action == "HOLD":
             self._log(f"[{expert}] {ticker}: HOLD - {analysis[:50]}", priority=0)
             return None
+
+        try:
+            print(f"\n[{expert}] proposal: {action} {ticker} :: {str(analysis or '')[:160]}")
+        except Exception:
+            pass
+
+        try:
+            trace_id = evolution_recorder.record(
+                agent_id=str(expert),
+                context=json.dumps(
+                    {
+                        "ticker": ticker,
+                        "price": price,
+                        "regime": regime,
+                        "features": features,
+                        "router": router_meta,
+                        "proposed_action": action,
+                    },
+                    ensure_ascii=False,
+                ),
+                action=str(analysis or ""),
+                outcome=0.0,
+                feedback="pending_pnl",
+            )
+        except Exception:
+            trace_id = None
         
         if expert == "scalper":
             self._log(f"Scalper: {ticker} {action} - {analysis[:40]}", priority=1)
@@ -234,6 +262,7 @@ class MultiAgentStrategy:
             "confidence": confidence,
             "analysis": analysis,
             "timestamp": datetime.now().isoformat(),
+            "trace_id": trace_id,
         }
         
         self.engine.push_event(
