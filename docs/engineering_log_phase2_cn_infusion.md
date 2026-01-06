@@ -112,6 +112,99 @@ Prompt 模板：
 - **可执行派单闭环**：新增任务状态机与异步执行（Analyst/Trader），并把生命周期写入轨迹日志（为后续偏好学习提供样本）。
 - **训练数据飞轮**：从 chat 日志/合成多意图样本生成 SFT + DPO pairs；DPO 的 rejected 样本专门覆盖“答非所问/只贴报表/漏掉第二意图”。
 
+### 2026-01-06：Desktop Secretary 稳定性 + 可执行性 + 上下文兜底（启动/UI/图表/对话）
+
+本轮目标：优先把“能启动、能显示、能切图、能持续跟进同一任务”的闭环跑通；对于 LLM 不可靠的部分，用确定性规则兜底。
+
+#### 现象与根因
+
+1) 启动后立刻 shutdown
+
+- 现象：`scripts\launch_desktop.ps1` 显示已启动到 `[3/4] Starting Desktop UI...`，随后立即 `Shutting down all services...`。
+- 根因：Desktop UI 进程启动后立刻退出（`Wait-Process` 结束），触发脚本 finally 清理全部服务；UI 侧日志显示 QtWebEngine/Chromium flags 不兼容导致直接退出。
+
+2) “玛丽模型不见了” / Live2D 不显示
+
+- 现象：桌面 UI 中 Live2D 区域空白或 fallback。
+- 根因 A：`index.html` 引入阻塞式 CDN `qwebchannel.js`，弱网/离线时会卡住页面脚本执行，导致 Live2D 永远不初始化。
+- 根因 B：QtWebEngine WebGL 上下文不可用（`WebGL unsupported` / GPU context failure），PixiJS 初始化失败。
+
+3) `.bat` 启动卡在 `[1/4] Starting GPT-SoVITS...`
+
+- 现象：双击 bat 后在 SoVITS 启动阶段卡住。
+- 根因：bat 以前默认携带 `-ForceRestart`，会先执行端口清理（依赖 `Get-NetTCPConnection`），在部分环境下表现为卡顿/阻塞。
+
+4) “还是没办法切换图表”
+
+- 现象：用户说“切换到 AAPL/appl 图表”，界面没有切换。
+- 根因 A：ticker 输入常见拼写/别名（如 `APPL`）未纠正。
+- 根因 B：Desktop 端对 dashboard 的 `runJavaScript` 可能在页面未 ready 时静默失败，缺乏可观测日志，导致“看起来没反应”。
+
+5) 对话上下文不连贯（task 跟进、‘好的’细化、派单误判）
+
+- 现象 A：创建 task 后，用户再问“现在怎么样了”，Mari 没把它理解为追问刚刚的 task。
+- 现象 B：Mari 问“需要我细化吗？”，用户回“好的”，Mari 没细化而是跑题。
+- 现象 C：用户只是提到“分析员/交易员”在提问，也会被误判为“派单”，导致无故创建新 task。
+- 根因：API 侧缺少 per-session 的短期状态（last_task_id/awaiting_detail）；派单意图识别过宽（角色词本身被当作派单触发）。
+
+#### 修复方案与落地
+
+1) 启动脚本（可复现、可观测、尽量走底层图形 DLL）
+
+- `启动交易终端.bat`
+  - 改为直接调用 `scripts\launch_desktop.ps1`，且默认不强制 `-ForceRestart`，避免在端口清理阶段卡住。
+- `scripts\launch_desktop.ps1`
+  - 修复 SoVITS 启动参数使用 `$SovitsHost/$SovitsPort`（避免写死 127.0.0.1:9880）。
+  - 修复 PowerShell 保留变量 `$pid` 赋值导致的 PSScriptAnalyzer 错误（改用 `$procId`）。
+  - QtWebEngine 渲染策略：避免不兼容的 `--use-gl=...` 参数；默认启用 ANGLE D3D11 + WebGL/Canvas 开关（优先走系统 DirectX DLL）。
+
+2) Live2D / Avatar（离线可用 + 不被 CDN 阻塞）
+
+- `src/ui/desktop/web/index.html`
+  - 移除阻塞式 CDN `qwebchannel.js`，仅使用 `qrc:///qtwebchannel/qwebchannel.js`。
+  - 保持 PixiJS/Live2D 的本地 vendor 优先加载路径。
+
+3) 图表切换（确定性 action + 端到端可观测）
+
+- `src/api/main.py`
+  - `/api/v1/chat` 对 desktop client 的切图请求进行确定性注入：输出 `ui.set_live_ticker` + `ui.refresh` action blocks。
+  - ticker 纠错：`APPL -> AAPL`；并可基于 live runner 的 tickers 做近似匹配。
+  - ticker 提取增强：支持中文公司名别名到 ticker（如 苹果/特斯拉/英伟达/微软 等）。
+- `src/ui/desktop/main.py`
+  - dashboard 未 ready 时将 `ui.*` action 入队，`loadFinished` 后统一执行。
+  - 对 `ui.set_live_ticker` / `ui.refresh` 使用 `runJavaScript(..., callback)` 输出执行结果到日志，解决“静默失败不可观测”。
+
+4) TTS 金额读法（数字转中文数词）
+
+- `src/ui/desktop/main.py`
+  - 改进数字转中文（带 万/亿/小数/百分号/正负），避免逐位念。
+
+5) 对话上下文兜底（不靠 LLM 猜）
+
+- `src/ui/desktop/main.py`
+  - Desktop chat 请求携带稳定 `session_id`。
+- `src/api/main.py`
+  - 增加 per-session 短期状态：`last_task_id`、`awaiting_detail`。
+  - 追问 task：用户说“现在怎么样了/进展如何/好了没”等，若未显式给 `task_id`，自动查询 `last_task_id`。
+  - ‘好的’细化：在 `awaiting_detail=true` 时用户短肯定词触发对上一次任务输出的细化（优先拼接 analyst+trader 原文；可选用受限 prompt 做展开）。
+  - 派单误判修复：收紧 `_is_task_dispatch_request`，仅在出现明确派单动词/任务词或“让/请/麻烦 + 角色 + 动作”句式时才创建 task；仅提到“分析员/交易员”不再触发。
+
+#### 受影响文件（本轮）
+
+- `scripts\launch_desktop.ps1`
+- `启动交易终端.bat`
+- `src\ui\desktop\web\index.html`
+- `src\ui\desktop\main.py`
+- `src\api\main.py`
+
+#### 验证清单
+
+1) 双击 `启动交易终端.bat`，确认不再卡在 `[1/4]`。
+2) Desktop UI 常驻不秒退；Live2D 页面不因 CDN 阻塞。
+3) 在聊天输入“切换到 AAPL 图表”，观察 `logs\desktop_ui.out.log` 是否出现 `[UIAction] ui.set_live_ticker:AAPL -> ...`。
+4) 创建 task 后仅说“现在怎么样了”，应返回最近 task 的 status/结果。
+5) Mari 问“需要我细化吗？”后答“好的”，应输出对上一条清单的细化内容。
+
 关键脚本：
 
 - `scripts/generate_secretary_teacher_dataset.py`：生成秘书模型 SFT 数据与 DPO pairs（解释型 Mari 风格）
