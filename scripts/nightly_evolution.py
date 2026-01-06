@@ -2,6 +2,7 @@ import argparse
 import glob
 import json
 import re
+import subprocess
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
@@ -170,6 +171,20 @@ def main() -> None:
         print("\n[DRY-RUN] Would execute:")
         print(cmd_sft)
         print(cmd_dpo)
+
+        try:
+            print("\n[DRY-RUN] Alpha Loop:")
+            subprocess.run(
+                [
+                    "python",
+                    "scripts/generate_alpha_dataset.py",
+                    "--dry-run",
+                ],
+                cwd=str(repo_root),
+                check=False,
+            )
+        except Exception:
+            pass
     return
 
 
