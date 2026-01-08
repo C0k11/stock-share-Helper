@@ -12,6 +12,7 @@ import json
 import importlib
 import os
 import random
+import socket
 import sys
 import tempfile
 import threading
@@ -57,14 +58,34 @@ def _load_secretary_config() -> Dict[str, Any]:
         return {}
 
 
-class MariVoice:
-    """Mari TTS with GPT-SoVITS model loading"""
+def _port_available(host: str, port: int) -> bool:
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        try:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        except Exception:
+            pass
+        s.bind((str(host), int(port)))
+        return True
+    except Exception:
+        return False
+    finally:
+        try:
+            s.close()
+        except Exception:
+            pass
 
-    def __init__(self):
-        self.queue: list[str] = []
+
+class MariVoice:
+    """Mari TTS with GPT-SoVITS model loading + Shared LLM Inference (A2)"""
+
+    def __init__(self, strategy=None):
+        self.strategy = strategy
+        self.tts_queue: list[str] = []
+        self.llm_queue: list[tuple[str, bool]] = []
         self.lock = threading.Lock()
         self.running = True
-        self.max_queue_size = 2
+        self.max_queue_size = 3
         
         self.cfg = _load_secretary_config()
         voice_cfg = self.cfg.get("voice", {})
@@ -81,7 +102,7 @@ class MariVoice:
         self.refer_wav = gentle.get("refer_wav_path", "")
         self.prompt_text = gentle.get("prompt_text", "先生…")
         
-        # LLM config for generating Mari's speech
+        # LLM config for generating Mari's speech (fallback)
         self.llm_cfg = self.cfg.get("llm", {})
         self.llm_base = self.llm_cfg.get("api_base", "http://localhost:11434/v1")
         self.llm_model = self.llm_cfg.get("model", "qwen2.5:7b-instruct")
@@ -93,12 +114,19 @@ class MariVoice:
         if HAS_PYGAME:
             pygame.mixer.init()
         
-        # Load Mari's voice model
-        self._load_mari_model()
+        # Load Mari's voice model (async) to avoid blocking API startup.
+        try:
+            t = threading.Thread(target=self._load_mari_model, daemon=True)
+            t.start()
+        except Exception:
+            pass
         
-        # Start TTS worker thread
-        self.thread = threading.Thread(target=self._worker, daemon=True)
-        self.thread.start()
+        # Start workers
+        self.llm_thread = threading.Thread(target=self._llm_worker, daemon=True)
+        self.llm_thread.start()
+        
+        self.tts_thread = threading.Thread(target=self._tts_worker, daemon=True)
+        self.tts_thread.start()
 
     def _load_mari_model(self) -> None:
         """Load Mari's trained GPT-SoVITS weights"""
@@ -133,7 +161,25 @@ class MariVoice:
             print(f"[Mari] Model load error: {e}")
 
     def generate_commentary(self, event_context: str) -> str:
-        """Use LLM to generate Mari's commentary in character"""
+        """Use Shared Strategy LLM (preferred) or legacy API to generate commentary"""
+        # 1. Try Shared Strategy LLM (A2 Architecture)
+        if self.strategy and getattr(self.strategy, "models_loaded", False):
+            try:
+                # Use 'secretary' adapter for personality
+                prompt = self.system_prompt + "\n\n请用一句话简洁转述以下事件，保持角色。"
+                resp = self.strategy.generic_inference(
+                    user_msg=event_context,
+                    system_prompt=prompt,
+                    adapter="secretary",
+                    temperature=0.7,
+                    max_new_tokens=80
+                )
+                if resp:
+                    return resp.strip()
+            except Exception as e:
+                print(f"[Mari] Shared LLM error: {e}")
+
+        # 2. Fallback to API (if configured and valid)
         if not HAS_REQUESTS:
             return event_context
         
@@ -160,28 +206,44 @@ class MariVoice:
         return event_context
 
     def speak(self, text: str, use_llm: bool = True) -> None:
-        """Add text to TTS queue, optionally generating through LLM first"""
-        if use_llm:
-            text = self.generate_commentary(text)
-        
-        # Log to chat
-        self.chat_log.append({"time": datetime.now().isoformat(), "speaker": "Mari", "text": text})
-        print(f"\n[Chat] Mari: {text}")
-        
+        """Enqueue text for processing (LLM -> TTS)"""
         with self.lock:
-            while len(self.queue) >= self.max_queue_size:
-                self.queue.pop(0)
-            if len(text) > 60:
-                text = text[:57] + "..."
-            self.queue.append(text)
+            # Drop old if full to keep up with live events
+            if len(self.llm_queue) >= self.max_queue_size:
+                self.llm_queue.pop(0)
+            self.llm_queue.append((text, use_llm))
 
-    def _worker(self) -> None:
+    def _llm_worker(self) -> None:
+        """Background worker to process LLM generation queue"""
+        while self.running:
+            item = None
+            with self.lock:
+                if self.llm_queue:
+                    item = self.llm_queue.pop(0)
+            
+            if item:
+                text, use_llm = item
+                final_text = text
+                if use_llm:
+                    final_text = self.generate_commentary(text)
+                
+                # Log to chat
+                self.chat_log.append({"time": datetime.now().isoformat(), "speaker": "Mari", "text": final_text})
+                print(f"\n[Chat] Mari: {final_text}")
+                
+                with self.lock:
+                    if len(self.tts_queue) < self.max_queue_size:
+                        self.tts_queue.append(final_text)
+            else:
+                time.sleep(0.1)
+
+    def _tts_worker(self) -> None:
         """Background worker to process TTS queue"""
         while self.running:
             text = None
             with self.lock:
-                if self.queue:
-                    text = self.queue.pop(0)
+                if self.tts_queue:
+                    text = self.tts_queue.pop(0)
 
             if text:
                 self._speak_sync(text)
@@ -248,8 +310,96 @@ class LivePaperTradingRunner:
     ):
         self.engine = TradingEngine()
         self.broker = PaperBroker(self.engine, cash=initial_cash)
-        self.strategy = MultiAgentStrategy(self.engine, load_models=load_models)
-        self.mari = MariVoice()
+
+        base_model = None
+        moe_scalper = None
+        moe_analyst = None
+        moe_secretary = None
+        all_agents_mode = None
+        committee_policy = None
+        load_4bit = None
+        planner_policy = None
+        planner_sft_model = None
+        gatekeeper_model = None
+        gatekeeper_threshold = None
+        effective_scalper = None
+        effective_analyst = None
+        try:
+            cfg_path = project_root / "configs" / "secretary.yaml"
+            if cfg_path.exists():
+                import yaml
+                cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
+                trading_cfg = cfg.get("trading") if isinstance(cfg, dict) and isinstance(cfg.get("trading"), dict) else {}
+                base_model = str(trading_cfg.get("base_model") or "").strip() or None
+                moe_scalper = str(trading_cfg.get("moe_scalper") or "").strip() or None
+                moe_analyst = str(trading_cfg.get("moe_analyst") or "").strip() or None
+                moe_secretary = str(trading_cfg.get("moe_secretary") or "").strip() or None
+                all_agents_mode = trading_cfg.get("all_agents_mode")
+                committee_policy = str(trading_cfg.get("committee_policy") or "").strip() or None
+                load_4bit = trading_cfg.get("load_4bit")
+                planner_policy = str(trading_cfg.get("planner_policy") or "").strip() or None
+                planner_sft_model = str(trading_cfg.get("planner_sft_model") or "").strip() or None
+                gatekeeper_model = str(trading_cfg.get("gatekeeper_model") or "").strip() or None
+                gatekeeper_threshold = trading_cfg.get("gatekeeper_threshold")
+        except Exception:
+            pass
+
+        # Override trading adapters from active pointer file (if present)
+        try:
+            import json
+            p = project_root / "data" / "finetune" / "evolution" / "active_trading_models.json"
+            if p.exists():
+                obj = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(obj, dict):
+                    s = str(obj.get("active_moe_scalper") or "").strip()
+                    a = str(obj.get("active_moe_analyst") or "").strip()
+                    if s:
+                        moe_scalper = s
+                    if a:
+                        moe_analyst = a
+        except Exception:
+            pass
+
+        effective_scalper = moe_scalper
+        effective_analyst = moe_analyst
+
+        st_kwargs = {"load_models": load_models}
+        if isinstance(base_model, str) and base_model:
+            st_kwargs["base_model"] = base_model
+        if isinstance(moe_scalper, str) and moe_scalper:
+            st_kwargs["moe_scalper"] = moe_scalper
+        if isinstance(moe_analyst, str) and moe_analyst:
+            st_kwargs["moe_analyst"] = moe_analyst
+        if isinstance(moe_secretary, str) and moe_secretary:
+            st_kwargs["moe_secretary"] = moe_secretary
+        if isinstance(load_4bit, bool):
+            st_kwargs["load_4bit"] = load_4bit
+        if isinstance(planner_policy, str) and planner_policy:
+            st_kwargs["planner_policy"] = planner_policy
+        if isinstance(planner_sft_model, str) and planner_sft_model:
+            st_kwargs["planner_sft_model_path"] = planner_sft_model
+        if isinstance(gatekeeper_model, str) and gatekeeper_model:
+            st_kwargs["gatekeeper_model_path"] = gatekeeper_model
+        try:
+            if gatekeeper_threshold is not None:
+                st_kwargs["gatekeeper_threshold"] = float(gatekeeper_threshold)
+        except Exception:
+            pass
+
+        self.strategy = MultiAgentStrategy(self.engine, **st_kwargs)
+        try:
+            if isinstance(all_agents_mode, bool):
+                setattr(self.strategy, "all_agents_mode", bool(all_agents_mode))
+        except Exception:
+            pass
+        try:
+            if isinstance(committee_policy, str) and committee_policy:
+                setattr(self.strategy, "committee_policy", str(committee_policy))
+        except Exception:
+            pass
+        self.mari = MariVoice(strategy=self.strategy)
+
+        self.load_models = bool(load_models)
         
         self.engine.broker = self.broker
         self.engine.strategy = self.strategy
@@ -265,6 +415,7 @@ class LivePaperTradingRunner:
         self.agent_logs: List[Dict] = []  # For dashboard terminal
         self.initial_cash = initial_cash
         self.last_nav = initial_cash
+        self.currency = "CAD"
         
         # Significant event thresholds
         self.volatility_threshold = 0.02  # 2% move triggers alert
@@ -282,6 +433,26 @@ class LivePaperTradingRunner:
         self.trading_mode = "online"
         self._offline_thread: Optional[threading.Thread] = None
         self._offline_running = False
+
+        self._started = False
+
+        self._md_counter = 0
+
+        self._backfill_last_attempt_ts: float = 0.0
+        self._backfill_cooldown_sec: float = 180.0
+
+        try:
+            t_str = datetime.now().strftime("%H:%M:%S")
+            self.agent_logs.append(
+                {
+                    "time": t_str,
+                    "type": "agent",
+                    "priority": 2,
+                    "message": f"[Models] scalper={effective_scalper} | analyst={effective_analyst}",
+                }
+            )
+        except Exception:
+            pass
         
         # Hook into event handling
         self._original_handle = self.engine._handle_event
@@ -311,6 +482,34 @@ class LivePaperTradingRunner:
             if self.verbose_terminal or priority >= 2:
                 print(f"[{t_str}] [Agent] {msg}")
 
+        elif event.type == EventType.SIGNAL or event.type == EventType.ORDER:
+            p = event.payload if isinstance(event.payload, dict) else {}
+            ticker = str(p.get("ticker") or p.get("symbol") or "?").upper().strip()
+            action = str(p.get("action") or "?").upper().strip()
+            try:
+                price = float(p.get("price") or 0.0)
+            except Exception:
+                price = 0.0
+            try:
+                shares = float(p.get("shares") or 0.0)
+            except Exception:
+                shares = 0.0
+            expert = str(p.get("expert") or "").strip()
+            et = "SIGNAL" if event.type == EventType.SIGNAL else "ORDER"
+
+            try:
+                msg = f"[Execution] {et} {action} {ticker} x{shares:g} @ ${price:.2f}" + (f" (expert={expert})" if expert else "")
+                self.agent_logs.append({
+                    "time": t_str,
+                    "type": "fill",
+                    "priority": 2,
+                    "message": msg,
+                })
+                if len(self.agent_logs) > 500:
+                    self.agent_logs = self.agent_logs[-300:]
+            except Exception:
+                pass
+
         elif event.type == EventType.FILL:
             fill = event.payload
             ticker = fill.get("ticker", "?")
@@ -329,6 +528,18 @@ class LivePaperTradingRunner:
                 "shares": shares,
             }
             self.trade_log.append(trade_record)
+
+            try:
+                self.agent_logs.append({
+                    "time": t_str,
+                    "type": "fill",
+                    "priority": 2,
+                    "message": f"[Execution] FILL {action} {ticker} x{shares} @ ${float(price):.2f}",
+                })
+                if len(self.agent_logs) > 500:
+                    self.agent_logs = self.agent_logs[-300:]
+            except Exception:
+                pass
             
             # Online RL: Track trades for learning
             if action == "BUY":
@@ -435,29 +646,79 @@ class LivePaperTradingRunner:
     def _on_market_data(self, data: Dict) -> None:
         """Handle incoming market data from data feed"""
         ticker = data.get("ticker", "")
+        if not ticker:
+            ticker = data.get("symbol", "")
+        ticker = str(ticker or "").upper().strip()
         price = data.get("close", 0)
+        try:
+            price = float(price)
+        except Exception:
+            price = 0.0
+
+        def _f(x: Any, fallback: float) -> float:
+            try:
+                v = float(x)
+                if v != v or v in (float("inf"), float("-inf")):
+                    return float(fallback)
+                return v
+            except Exception:
+                return float(fallback)
         
         # Store for UI charts
         if ticker not in self.price_history:
             self.price_history[ticker] = []
         ts = data.get("time", datetime.now())
         time_str = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+
+        src = ""
+        try:
+            src = str(data.get("source") or "").strip().lower()
+        except Exception:
+            src = ""
+        try:
+            last_src = ""
+            if self.price_history[ticker]:
+                last_src = str(self.price_history[ticker][-1].get("source") or "").strip().lower()
+            if src and last_src and src != last_src:
+                if src == "yfinance":
+                    self.price_history[ticker] = []
+                if src == "simulated" and last_src == "yfinance":
+                    # Do not pollute real history with simulated fallback ticks
+                    return
+        except Exception:
+            pass
+
+        o = _f(data.get("open", price), price)
+        h = _f(data.get("high", price), price)
+        l = _f(data.get("low", price), price)
+        c = _f(data.get("close", price), price)
+        if c <= 0 and price > 0:
+            c = float(price)
+        if o <= 0:
+            o = c
+        if h <= 0:
+            h = max(o, c)
+        if l <= 0:
+            l = min(o, c)
+        hi = max(o, h, l, c)
+        lo = min(o, h, l, c)
+
         bar = {
+            "ticker": str(ticker or "").upper(),
             "time": time_str,
-            "open": data.get("open", price),
-            "high": data.get("high", price),
-            "low": data.get("low", price),
-            "close": price,
-            "volume": data.get("volume", 0),
+            "open": o,
+            "high": hi,
+            "low": lo,
+            "close": c,
+            "volume": _f(data.get("volume", 0), 0.0),
             "source": data.get("source", ""),
         }
         if self.price_history[ticker] and self.price_history[ticker][-1].get("time") == time_str:
             self.price_history[ticker][-1] = bar
         else:
             self.price_history[ticker].append(bar)
-        # Keep last 200 bars per ticker
-        if len(self.price_history[ticker]) > 200:
-            self.price_history[ticker] = self.price_history[ticker][-200:]
+        if len(self.price_history[ticker]) > 800:
+            self.price_history[ticker] = self.price_history[ticker][-800:]
         
         print(f">> {ticker} @ ${price:.2f}")
         
@@ -465,14 +726,263 @@ class LivePaperTradingRunner:
         event = Event(
             EventType.MARKET_DATA,
             datetime.now(),
-            data,
+            bar,
             priority=0,
         )
         self.engine.push_event(event)
 
+        try:
+            self._md_counter = int(getattr(self, "_md_counter", 0) or 0) + 1
+            if self._md_counter % 30 == 0:
+                t_str = datetime.now().strftime("%H:%M:%S")
+                qsz = None
+                eng_ok = None
+                try:
+                    eng_ok = bool(getattr(self.engine, "is_running", False))
+                except Exception:
+                    eng_ok = None
+                try:
+                    q = getattr(self.engine, "events", None)
+                    if q is not None and hasattr(q, "qsize"):
+                        qsz = int(q.qsize())
+                except Exception:
+                    qsz = None
+                self.agent_logs.append({
+                    "time": t_str,
+                    "type": "agent",
+                    "priority": 2,
+                    "message": f"[MarketData] feed tick {str(ticker or '').upper()} close={c:.4f} source={bar.get('source','')} engine={eng_ok} q={qsz}",
+                })
+                if len(self.agent_logs) > 500:
+                    self.agent_logs = self.agent_logs[-300:]
+        except Exception:
+            pass
+
+    def reset_price_history(self, ticker: str | None = None) -> None:
+        try:
+            if ticker is None:
+                self.price_history = {}
+                return
+            tk = str(ticker or "").upper()
+            if tk:
+                self.price_history[tk] = []
+        except Exception:
+            return
+
+    def backfill_intraday(self, *, max_bars: int = 600) -> bool:
+        try:
+            import yfinance as yf
+        except Exception:
+            return False
+
+        ok = False
+        tickers = [str(x or "").upper().strip() for x in list(getattr(self.strategy, "tickers", []) or [])]
+        tickers = [x for x in tickers if x]
+        if not tickers:
+            return False
+
+        def _try_download(*, period: str, interval: str):
+            try:
+                return yf.download(
+                    tickers=" ".join(tickers),
+                    period=period,
+                    interval=interval,
+                    group_by="ticker",
+                    auto_adjust=False,
+                    prepost=True,
+                    threads=True,
+                    progress=False,
+                )
+            except Exception:
+                return None
+
+        last_err: Dict[str, str] = {}
+
+        picked = ""
+        picked_hist = None
+        for period, interval in (("1d", "1m"), ("5d", "1m"), ("5d", "5m"), ("1mo", "15m"), ("1mo", "1h")):
+            h0 = _try_download(period=period, interval=interval)
+            if h0 is None or getattr(h0, "empty", True):
+                continue
+            picked = f"{period}/{interval}"
+            picked_hist = h0
+            break
+
+        def _build_bars_from_hist(*, hist: Any, tk: str, only_last_day: bool) -> list[dict]:
+            out: list[dict] = []
+            try:
+                if hist is None or getattr(hist, "empty", True):
+                    return out
+            except Exception:
+                return out
+
+            df = None
+            try:
+                cols = getattr(hist, "columns", None)
+                if cols is not None and ("Open" in cols and "Close" in cols):
+                    df = hist
+                else:
+                    df = hist.get(tk)
+            except Exception:
+                df = None
+
+            if df is None or getattr(df, "empty", True):
+                return out
+
+            idx = list(getattr(df, "index", []) or [])
+            if not idx:
+                return out
+
+            last_day = None
+            if only_last_day:
+                last_ts = idx[-1]
+                try:
+                    if hasattr(last_ts, "to_pydatetime"):
+                        last_ts = last_ts.to_pydatetime()
+                except Exception:
+                    pass
+                last_day = last_ts.date() if hasattr(last_ts, "date") else None
+
+            close_s = df.get("Close")
+            open_s = df.get("Open")
+            high_s = df.get("High")
+            low_s = df.get("Low")
+            vol_s = df.get("Volume")
+            n = len(idx)
+
+            def _f(x: Any, fallback: float) -> float:
+                try:
+                    v = float(x)
+                    if v != v or v in (float("inf"), float("-inf")):
+                        return float(fallback)
+                    return v
+                except Exception:
+                    return float(fallback)
+
+            for i in range(n):
+                ts = idx[i]
+                try:
+                    if hasattr(ts, "to_pydatetime"):
+                        ts = ts.to_pydatetime()
+                except Exception:
+                    pass
+                if only_last_day and last_day is not None:
+                    try:
+                        if hasattr(ts, "date") and ts.date() != last_day:
+                            continue
+                    except Exception:
+                        pass
+                time_str = ts.isoformat() if hasattr(ts, "isoformat") else str(ts)
+                c = _f(close_s.iloc[i], 0.0) if close_s is not None else 0.0
+                if c <= 0:
+                    continue
+                o = _f(open_s.iloc[i], c) if open_s is not None else c
+                h = _f(high_s.iloc[i], max(o, c)) if high_s is not None else max(o, c)
+                l = _f(low_s.iloc[i], min(o, c)) if low_s is not None else min(o, c)
+                hi = max(o, h, l, c)
+                lo = min(o, h, l, c)
+                v = _f(vol_s.iloc[i], 0.0) if vol_s is not None else 0.0
+                out.append({
+                    "time": time_str,
+                    "open": o,
+                    "high": hi,
+                    "low": lo,
+                    "close": c,
+                    "volume": v,
+                    "source": "yfinance",
+                })
+            return out
+
+        for tk in tickers:
+            try:
+                hist = None
+                if picked_hist is not None:
+                    hist = picked_hist
+                else:
+                    try:
+                        hist = yf.Ticker(tk).history(period="5d", interval="5m", auto_adjust=False, prepost=True)
+                        picked = "5d/5m"
+                    except Exception as e:
+                        last_err[tk] = str(e)
+                        hist = None
+
+                if hist is None or getattr(hist, "empty", True):
+                    continue
+
+                try:
+                    bars = _build_bars_from_hist(hist=hist, tk=tk, only_last_day=True)
+                    if len(bars) < 50:
+                        bars = _build_bars_from_hist(hist=hist, tk=tk, only_last_day=False)
+                except Exception:
+                    continue
+
+                if not bars:
+                    continue
+
+                if max_bars > 0 and len(bars) > int(max_bars):
+                    bars = bars[-int(max_bars):]
+
+                self.price_history[tk] = bars
+                if len(bars) >= 20:
+                    ok = True
+
+                try:
+                    t_str = datetime.now().strftime("%H:%M:%S")
+                    self.agent_logs.append(
+                        {
+                            "time": t_str,
+                            "type": "agent",
+                            "priority": 2,
+                            "message": f"[Backfill] {tk} source=yfinance picked={picked or '?'} bars={len(bars)}",
+                        }
+                    )
+                    if len(self.agent_logs) > 500:
+                        self.agent_logs = self.agent_logs[-300:]
+                except Exception:
+                    pass
+            except Exception:
+                try:
+                    last_err[tk] = "unknown error"
+                except Exception:
+                    pass
+                continue
+
+        if not ok:
+            try:
+                t_str = datetime.now().strftime("%H:%M:%S")
+                err_sample = None
+                try:
+                    if last_err:
+                        k0 = sorted(list(last_err.keys()))[0]
+                        err_sample = f"{k0}: {last_err.get(k0)}"
+                except Exception:
+                    err_sample = None
+                self.agent_logs.append(
+                    {
+                        "time": t_str,
+                        "type": "agent",
+                        "priority": 2,
+                        "message": f"[Backfill] yfinance intraday FAIL" + (f" | err={err_sample}" if err_sample else ""),
+                    }
+                )
+                if len(self.agent_logs) > 500:
+                    self.agent_logs = self.agent_logs[-300:]
+            except Exception:
+                pass
+
+        return ok
+
     def start(self) -> None:
         """Start the live paper trading engine"""
+        if self._started:
+            return
+        self._started = True
         self.engine.start()
+
+        try:
+            self._restore_price_history()
+        except Exception:
+            pass
         
         # Initialize data feed
         self.data_feed = create_data_feed(
@@ -482,6 +992,127 @@ class LivePaperTradingRunner:
         )
         self.data_feed.subscribe(self._on_market_data)
         self.data_feed.start()
+
+        try:
+            ds = str(getattr(self, "data_source", "auto") or "auto").lower()
+        except Exception:
+            ds = "auto"
+
+        try:
+            actual = str(getattr(self.data_feed, "source", "") or "").strip().lower()
+            if actual and actual != ds:
+                self.data_source = actual
+                ds = actual
+        except Exception:
+            pass
+
+        def _seed_strategy_history() -> None:
+            try:
+                ph = getattr(self, "price_history", {})
+                st = getattr(self, "strategy", None)
+                if st is None or not isinstance(ph, dict):
+                    return
+                for tk, bars in ph.items():
+                    if not isinstance(bars, list) or not bars:
+                        continue
+                    picked_bars = list(bars)
+                    if ds in {"yfinance", "auto"}:
+                        try:
+                            yf_bars = [b for b in picked_bars if isinstance(b, dict) and str(b.get("source") or "").lower() == "yfinance"]
+                            if yf_bars:
+                                picked_bars = yf_bars
+                        except Exception:
+                            pass
+                    try:
+                        st.price_history[str(tk).upper()] = list(picked_bars)[-60:]
+                    except Exception:
+                        continue
+            except Exception:
+                return
+
+        try:
+            _seed_strategy_history()
+        except Exception:
+            pass
+
+        def _maybe_backfill() -> None:
+            try:
+                import time
+
+                need = False
+                try:
+                    ph = getattr(self, "price_history", {})
+                    if not isinstance(ph, dict) or not ph:
+                        need = True
+                    else:
+                        for tk in list(getattr(self.strategy, "tickers", []) or []):
+                            tku = str(tk or "").upper()
+                            if not tku:
+                                continue
+                            bars = ph.get(tku)
+                            if not isinstance(bars, list):
+                                need = True
+                                break
+                            if ds in {"yfinance", "auto"}:
+                                try:
+                                    yf_n = sum(1 for b in bars if isinstance(b, dict) and str(b.get("source") or "").lower() == "yfinance")
+                                except Exception:
+                                    yf_n = 0
+                                if yf_n < 120:
+                                    need = True
+                                    break
+                            else:
+                                if len(bars) < 120:
+                                    need = True
+                                    break
+                except Exception:
+                    need = True
+
+                if ds not in {"yfinance", "auto"}:
+                    return
+                if not need:
+                    return
+
+                try:
+                    now = float(time.time())
+                    last = float(getattr(self, "_backfill_last_attempt_ts", 0.0) or 0.0)
+                    cooldown = float(getattr(self, "_backfill_cooldown_sec", 180.0) or 180.0)
+                    if last > 0 and (now - last) < cooldown:
+                        return
+                    self._backfill_last_attempt_ts = now
+                except Exception:
+                    pass
+
+                ok = self.backfill_intraday(max_bars=800)
+                try:
+                    # backfill_intraday already logs FAIL with an error sample.
+                    # Only emit a startup OK marker to avoid duplicate FAIL spam.
+                    if ok:
+                        t_str = datetime.now().strftime("%H:%M:%S")
+                        self.agent_logs.append(
+                            {
+                                "time": t_str,
+                                "type": "agent",
+                                "priority": 2,
+                                "message": "[Backfill] startup yfinance intraday OK",
+                            }
+                        )
+                        if len(self.agent_logs) > 500:
+                            self.agent_logs = self.agent_logs[-300:]
+                except Exception:
+                    pass
+
+                try:
+                    _seed_strategy_history()
+                except Exception:
+                    pass
+            except Exception:
+                return
+
+        try:
+            threading.Thread(target=_maybe_backfill, daemon=True).start()
+        except Exception:
+            pass
         
         print("=" * 60)
         print("Phase 3.4: Live Paper Trading Engine")
@@ -496,6 +1127,8 @@ class LivePaperTradingRunner:
 
     def stop(self) -> None:
         """Stop the engine and save trading data"""
+        if not self._started:
+            return
         self.stop_offline_playback()
         if self.data_feed:
             self.data_feed.stop()
@@ -505,6 +1138,7 @@ class LivePaperTradingRunner:
         # Save paper trading data for system upgrade
         self._save_trading_data()
         print("System Shutdown.")
+        self._started = False
     
     def start_offline_playback(self) -> None:
         """Start offline backtest playback mode"""
@@ -628,6 +1262,72 @@ class LivePaperTradingRunner:
             price_file.write_text(json.dumps(self.price_history, indent=2, ensure_ascii=False))
             print(f"Saved price history for {len(self.price_history)} tickers to {price_file.name}")
 
+    def _restore_price_history(self) -> None:
+        try:
+            data_dir = project_root / "data" / "paper_trading"
+            if not data_dir.exists():
+                return
+            cand = sorted(list(data_dir.glob("prices_*.json")), key=lambda p: p.stat().st_mtime, reverse=True)
+            if not cand:
+                return
+            raw = cand[0].read_text(encoding="utf-8")
+            obj = json.loads(raw)
+            if not isinstance(obj, dict):
+                return
+            out: Dict[str, List[Dict]] = {}
+            for tk, bars in obj.items():
+                tku = str(tk or "").upper().strip()
+                if not tku or not isinstance(bars, list):
+                    continue
+                cleaned: List[Dict] = []
+                for b in bars[-800:]:
+                    if not isinstance(b, dict):
+                        continue
+                    try:
+                        c = float(b.get("close") or 0.0)
+                    except Exception:
+                        c = 0.0
+                    if c <= 0:
+                        continue
+                    t = b.get("time")
+                    if not t:
+                        continue
+                    cleaned.append(dict(b))
+
+                try:
+                    ds = str(getattr(self, "data_source", "auto") or "auto").strip().lower()
+                except Exception:
+                    ds = "auto"
+
+                if ds in {"yfinance", "auto"}:
+                    try:
+                        yf_only = [x for x in cleaned if str(x.get("source") or "").strip().lower() == "yfinance"]
+                        if yf_only:
+                            cleaned = yf_only
+                    except Exception:
+                        pass
+
+                if cleaned:
+                    out[tku] = cleaned
+            if out:
+                self.price_history.update(out)
+                try:
+                    t_str = datetime.now().strftime("%H:%M:%S")
+                    self.agent_logs.append(
+                        {
+                            "time": t_str,
+                            "type": "agent",
+                            "priority": 2,
+                            "message": f"[Chart] restored price_history from {cand[0].name} (tickers={len(out)})",
+                        }
+                    )
+                    if len(self.agent_logs) > 500:
+                        self.agent_logs = self.agent_logs[-300:]
+                except Exception:
+                    pass
+        except Exception:
+            return
+
     def get_chart_data(self, ticker: str) -> List[Dict]:
         """Get price history for UI chart rendering"""
         return self.price_history.get(ticker.upper(), [])
@@ -653,51 +1353,84 @@ def main():
     print("=" * 60)
     print(f"Data Source: {args.data_source}")
     print(f"Load Models: {args.load_models}")
-    print("Loading Mari's voice model...")
-    
-    runner = LivePaperTradingRunner(
-        initial_cash=args.cash,
-        data_source=args.data_source,
-        load_models=args.load_models,
-    )
+    runner: Optional[LivePaperTradingRunner] = None
+    api_mod = None
 
     if args.with_api:
         try:
-            api_mod = importlib.import_module("src.api.main")
-            api_mod.set_live_runner(runner)
-            uvicorn = importlib.import_module("uvicorn")
+            if not _port_available(str(args.api_host), int(args.api_port)):
+                print(
+                    f"[API] Port already in use: http://{args.api_host}:{args.api_port} (skip starting API). "
+                    "Stop the process that is using the port, or run with --api-port <other>."
+                )
+                args.with_api = False
+        except Exception:
+            pass
 
-            def _run_api() -> None:
-                uvicorn.run(api_mod.app, host=str(args.api_host), port=int(args.api_port), log_level="warning")
+    if not args.with_api:
+        print("Loading Mari's voice model...")
+        runner = LivePaperTradingRunner(
+            initial_cash=args.cash,
+            data_source=args.data_source,
+            load_models=args.load_models,
+        )
+        runner.start()
+        try:
+            print("\n[Press Ctrl+C to stop]\n")
+            tick_count = 0
+            while True:
+                time.sleep(1)  # Just wait, data feed handles ticks
+                tick_count += 1
+                if tick_count % 20 == 0:
+                    nav = runner.broker.cash
+                    for ticker, pos in getattr(runner.broker, 'positions', {}).items():
+                        if ticker in runner.price_history and runner.price_history[ticker]:
+                            last_price = runner.price_history[ticker][-1].get("close", 0)
+                            nav += float(getattr(pos, "shares", 0.0)) * float(last_price or 0.0)
+                    runner._check_significant_events(nav)
+        except KeyboardInterrupt:
+            print("\n\nShutting down...")
+            runner.stop()
+        return
 
-            t = threading.Thread(target=_run_api, daemon=True)
-            t.start()
-            print(f"Live API started: http://{args.api_host}:{args.api_port}/api/v1/live/status")
-        except Exception as e:
-            print(f"[API] Failed to start live API server: {e}")
-
-    runner.start()
+    # ===== with-api path: run uvicorn in main thread (reliable port binding), init runner in background =====
 
     try:
-        print("\n[Press Ctrl+C to stop]\n")
-        tick_count = 0
-        while True:
-            time.sleep(1)  # Just wait, data feed handles ticks
-            tick_count += 1
-            
-            # Periodically check for significant PnL events
-            if tick_count % 20 == 0:
-                # Calculate NAV from positions (simplified)
-                nav = runner.broker.cash
-                for ticker, pos in getattr(runner.broker, 'positions', {}).items():
-                    if ticker in runner.price_history and runner.price_history[ticker]:
-                        last_price = runner.price_history[ticker][-1].get("close", 0)
-                        nav += float(getattr(pos, "shares", 0.0)) * float(last_price or 0.0)
-                runner._check_significant_events(nav)
+        api_mod = importlib.import_module("src.api.main")
+        uvicorn = importlib.import_module("uvicorn")
+    except Exception as e:
+        print(f"[API] Failed to import API server: {e}")
+        return
 
-    except KeyboardInterrupt:
-        print("\n\nShutting down...")
-        runner.stop()
+    def _boot_runner() -> None:
+        nonlocal runner
+        try:
+            print("Loading Mari's voice model...")
+            r = LivePaperTradingRunner(
+                initial_cash=args.cash,
+                data_source=args.data_source,
+                load_models=args.load_models,
+            )
+            runner = r
+            try:
+                api_mod.set_live_runner(r)
+            except Exception as e:
+                print(f"[API] Warning: failed to attach live runner: {e}")
+            r.start()
+        except Exception as e:
+            print(f"[Runner] boot failed: {e}")
+
+    threading.Thread(target=_boot_runner, daemon=True).start()
+
+    print(f"Live API starting: http://{args.api_host}:{args.api_port}/api/v1/live/status")
+    try:
+        uvicorn.run(api_mod.app, host=str(args.api_host), port=int(args.api_port), log_level="warning")
+    finally:
+        try:
+            if runner is not None:
+                runner.stop()
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":

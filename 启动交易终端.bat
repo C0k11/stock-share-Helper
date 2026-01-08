@@ -5,5 +5,5 @@ cd /d "%~dp0"
 echo ============================================================
 echo   AI Trading Terminal - 启动中...
 echo ============================================================
-powershell -ExecutionPolicy Bypass -File "scripts\launch_desktop.ps1"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "& 'scripts\launch_desktop.ps1' %*"
 pause

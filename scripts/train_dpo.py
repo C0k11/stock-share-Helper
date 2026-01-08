@@ -59,6 +59,8 @@ def train_dpo() -> None:
     parser.add_argument("--lr", type=float, default=5e-6, help="Lower LR for DPO stability")
     parser.add_argument("--beta", type=float, default=0.1, help="DPO beta parameter")
     parser.add_argument("--reference-free", action="store_true", help="Skip reference model (useful for dry-run/smoke)")
+    parser.add_argument("--bf16", action="store_true", help="Use BF16 mixed precision (preferred on Ampere+)")
+    parser.add_argument("--tf32", action="store_true", help="Enable TF32 matmul for stability/perf")
     parser.add_argument("--max-prompt-length", type=int, default=1024)
     parser.add_argument("--max-length", type=int, default=2048)
     parser.add_argument("--save-steps", type=int, default=50)
@@ -66,11 +68,22 @@ def train_dpo() -> None:
 
     args = parser.parse_args()
 
+    if args.tf32 and torch.cuda.is_available():
+        try:
+            torch.backends.cuda.matmul.allow_tf32 = True
+            torch.backends.cudnn.allow_tf32 = True
+        except Exception:
+            pass
+
+    use_bf16 = bool(args.bf16 and torch.cuda.is_available())
+    compute_dtype = torch.bfloat16 if use_bf16 else torch.float16
+
     print(f"Loading Base Model: {args.base_model} in 4-bit...")
     bnb_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_quant_type="nf4",
-        bnb_4bit_compute_dtype=torch.float16,
+        bnb_4bit_compute_dtype=compute_dtype,
+        bnb_4bit_use_double_quant=True,
     )
 
     model = AutoModelForCausalLM.from_pretrained(
@@ -115,7 +128,8 @@ def train_dpo() -> None:
         gradient_accumulation_steps=args.grad_accum,
         num_train_epochs=args.epochs,
         learning_rate=args.lr,
-        fp16=True,
+        fp16=not use_bf16,
+        bf16=use_bf16,
         logging_steps=args.logging_steps,
         save_steps=args.save_steps,
         save_total_limit=2,

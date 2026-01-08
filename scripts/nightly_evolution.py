@@ -2,6 +2,8 @@ import argparse
 import glob
 import json
 import re
+import os
+import sys
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -24,7 +26,14 @@ def _extract_instruction(context_raw: str) -> str:
     try:
         ctx_obj = json.loads(context_raw)
         if isinstance(ctx_obj, dict):
-            return str(ctx_obj.get("message") or "").strip()
+            msg = str(ctx_obj.get("message") or "").strip()
+            # Include shared URLs in the instruction if present
+            urls = ctx_obj.get("shared_urls")
+            if isinstance(urls, list) and urls:
+                url_text = "\n".join([f"Shared URL: {u}" for u in urls if isinstance(u, str)])
+                if url_text:
+                    msg += f"\n\n{url_text}"
+            return msg
     except Exception:
         return str(context_raw).strip()
     return ""
@@ -103,6 +112,16 @@ def _read_secretary_llm_cfg(repo_root: Path) -> tuple[str, str]:
         cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
     except Exception:
         cfg = {}
+    
+    # Try reading from trading config first (A2 architecture)
+    trading_cfg = cfg.get("trading") if isinstance(cfg, dict) and isinstance(cfg.get("trading"), dict) else {}
+    base_model = str((trading_cfg or {}).get("base_model") or "").strip()
+    secretary_adapter = str((trading_cfg or {}).get("moe_secretary") or "").strip()
+    
+    if base_model and secretary_adapter:
+        return base_model, secretary_adapter
+
+    # Fallback to legacy llm config
     llm_cfg = cfg.get("llm") if isinstance(cfg, dict) and isinstance(cfg.get("llm"), dict) else {}
     local_model = str((llm_cfg or {}).get("local_model") or "").strip() or "Qwen/Qwen3-8B"
     local_adapter = str((llm_cfg or {}).get("local_adapter") or "").strip()
@@ -126,6 +145,8 @@ def _bump_adapter_name(adapter_path: str) -> str:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--skip-sft", action="store_true")
+    parser.add_argument("--skip-dpo", action="store_true")
     args = parser.parse_args()
 
     repo_root = Path(__file__).resolve().parents[1]
@@ -167,6 +188,24 @@ def main() -> None:
         f"--output-dir {dpo_outdir} --epochs 1 --batch-size 1 --grad-accum 8 --reference-free"
     )
 
+    try:
+        meta = {
+            "time": datetime.now().isoformat(),
+            "dry_run": bool(args.dry_run),
+            "counts": {"sft_rows": int(len(sft_rows)), "dpo_rows": int(len(dpo_pairs))},
+            "inputs": {"trajectory_dir": str(trajectory_dir)},
+            "outputs": {
+                "sft_nightly": str(out_sft),
+                "dpo_nightly": str(out_dpo),
+                "next_sft_adapter": str(sft_outdir),
+                "next_dpo_adapter": str(dpo_outdir),
+            },
+            "commands": {"sft": str(cmd_sft), "dpo": str(cmd_dpo)},
+        }
+        (out_dir / "last_adapter.json").write_text(json.dumps(meta, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
     if args.dry_run:
         print("\n[DRY-RUN] Would execute:")
         print(cmd_sft)
@@ -185,6 +224,111 @@ def main() -> None:
             )
         except Exception:
             pass
+        return
+
+    # ===== Real run =====
+    py = repo_root / "venv311" / "Scripts" / "python.exe"
+    python_exe = str(py) if py.exists() else sys.executable
+    env = dict(os.environ)
+    env.setdefault("PYTHONUNBUFFERED", "1")
+
+    def _run(cmd: list[str], label: str) -> int:
+        print(f"\n[RUN] {label}: {' '.join(cmd)}")
+        try:
+            p = subprocess.run(cmd, cwd=str(repo_root), check=False, env=env)
+            return int(p.returncode)
+        except KeyboardInterrupt:
+            print("[RUN] Interrupted")
+            return 130
+        except Exception as e:
+            print(f"[RUN] Failed: {e}")
+            return 1
+
+    # Generate alpha dataset (no training here; keeps it safe by default).
+    try:
+        _ = subprocess.run(
+            [str(python_exe), "scripts/generate_alpha_dataset.py"],
+            cwd=str(repo_root),
+            check=False,
+            env=env,
+        )
+    except Exception:
+        pass
+
+    if (not args.skip_sft) and sft_rows:
+        sft_cmd = [
+            str(python_exe),
+            "scripts/finetune_llm.py",
+            "--data",
+            str(out_sft.as_posix()),
+            "--model",
+            str(local_model),
+            "--outdir",
+            str(sft_outdir),
+            "--epochs",
+            "1",
+            "--batch-size",
+            "1",
+            "--grad-acc",
+            "8",
+            "--max-seq-len",
+            "1024",
+            "--qlora",
+        ]
+        if str(current_adapter or "").strip():
+            sft_cmd.extend(["--init-adapter", str(current_adapter)])
+        rc = _run(sft_cmd, "SFT")
+        if rc != 0:
+            raise SystemExit(rc)
+    else:
+        print("\n[SKIP] SFT: no rows or --skip-sft")
+
+    if (not args.skip_dpo) and dpo_pairs:
+        if not (Path(sft_outdir) / "lora_weights").exists():
+            print(f"\n[WARN] SFT adapter missing: {sft_outdir}/lora_weights")
+            print("[WARN] If you skipped SFT, pass --skip-dpo too, or point DPO to an existing SFT adapter.")
+            raise SystemExit(2)
+        dpo_cmd = [
+            str(python_exe),
+            "scripts/train_dpo.py",
+            "--base-model",
+            str(local_model),
+            "--sft-adapter",
+            str((Path(sft_outdir) / "lora_weights").as_posix()),
+            "--data-path",
+            str(out_dpo.as_posix()),
+            "--output-dir",
+            str(dpo_outdir),
+            "--epochs",
+            "1",
+            "--batch-size",
+            "1",
+            "--grad-accum",
+            "8",
+            "--reference-free",
+        ]
+        rc = _run(dpo_cmd, "DPO")
+        if rc != 0:
+            raise SystemExit(rc)
+
+        try:
+            active = {
+                "time": datetime.now().isoformat(),
+                "base_model": str(local_model),
+                "active_secretary_adapter": str(dpo_outdir),
+                "source": "nightly_evolution",
+            }
+            (out_dir / "active_secretary_adapter.json").write_text(
+                json.dumps(active, ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except Exception:
+            pass
+    else:
+        print("\n[SKIP] DPO: no pairs or --skip-dpo")
+
+    print("\n[OK] Nightly evolution training finished.")
+    print(f"[NEXT] Set configs/secretary.yaml trading.moe_secretary to: {dpo_outdir}")
     return
 
 
