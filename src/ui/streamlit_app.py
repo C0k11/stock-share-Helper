@@ -1,5 +1,9 @@
 import json
+import os
+import subprocess
+import sys
 from datetime import datetime
+from pathlib import Path
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -51,6 +55,136 @@ def _req_json(url: str) -> dict:
         raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:2000]}")
     obj = resp.json()
     return obj if isinstance(obj, dict) else {}
+
+
+def _repo_root() -> Path:
+    # file = <repo>/src/ui/streamlit_app.py
+    return Path(__file__).resolve().parents[2]
+
+
+def _count_jsonl_types(jsonl_paths: list[Path]) -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for p in jsonl_paths:
+        try:
+            with p.open("r", encoding="utf-8") as f:
+                for line in f:
+                    try:
+                        obj = json.loads(line)
+                    except Exception:
+                        continue
+                    if not isinstance(obj, dict):
+                        continue
+                    t = str(obj.get("type") or "").strip() or "unknown"
+                    counts[t] = int(counts.get(t, 0)) + 1
+        except Exception:
+            continue
+    return counts
+
+
+@st.cache_data(ttl=20)
+def get_ouroboros_status() -> dict:
+    root = _repo_root()
+    traj_dir = root / "data" / "evolution" / "trajectories"
+    fin_dir = root / "data" / "finetune" / "evolution"
+
+    traj_files = []
+    try:
+        if traj_dir.exists():
+            traj_files = sorted([p for p in traj_dir.glob("*.jsonl") if p.is_file()])
+    except Exception:
+        traj_files = []
+
+    counts = _count_jsonl_types(traj_files)
+    newest = None
+    try:
+        if traj_files:
+            newest = max(traj_files, key=lambda p: p.stat().st_mtime)
+    except Exception:
+        newest = None
+
+    out_sft = fin_dir / "sft_nightly.json"
+    out_dpo = fin_dir / "dpo_nightly.jsonl"
+    out_alpha = fin_dir / "dpo_alpha_nightly.jsonl"
+
+    def _size(p: Path) -> int:
+        try:
+            return int(p.stat().st_size)
+        except Exception:
+            return 0
+
+    return {
+        "traj_dir": str(traj_dir),
+        "traj_files": [str(p.name) for p in traj_files],
+        "newest_traj": str(newest.name) if newest else "",
+        "counts": counts,
+        "outputs": {
+            "sft_nightly": {"path": str(out_sft), "exists": out_sft.exists(), "size": _size(out_sft)},
+            "dpo_nightly": {"path": str(out_dpo), "exists": out_dpo.exists(), "size": _size(out_dpo)},
+            "dpo_alpha_nightly": {"path": str(out_alpha), "exists": out_alpha.exists(), "size": _size(out_alpha)},
+        },
+    }
+
+
+def _pick_python_for_nightly(repo_root: Path) -> str:
+    # Prefer pinned venv311 python if present, otherwise use current interpreter.
+    cand = repo_root / "venv311" / "Scripts" / "python.exe"
+    if cand.exists():
+        return str(cand)
+    return sys.executable
+
+
+def run_nightly_evolution_dry_run() -> dict:
+    root = _repo_root()
+    py = _pick_python_for_nightly(root)
+    cmd = [
+        str(py),
+        "scripts/nightly_evolution.py",
+        "--dry-run",
+    ]
+    env = dict(os.environ)
+    env.setdefault("PYTHONUNBUFFERED", "1")
+    out = subprocess.run(
+        cmd,
+        cwd=str(root),
+        capture_output=True,
+        text=True,
+        check=False,
+        env=env,
+    )
+    return {
+        "cmd": " ".join(cmd),
+        "returncode": int(out.returncode),
+        "stdout": str(out.stdout or ""),
+        "stderr": str(out.stderr or ""),
+    }
+
+
+def _api_post_json(url: str, payload: dict | None = None) -> dict:
+    resp = requests.post(url, json=(payload or {}), timeout=30)
+    if resp.status_code != 200:
+        raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:2000]}")
+    obj = resp.json()
+    return obj if isinstance(obj, dict) else {}
+
+
+def _api_get_json(url: str) -> dict:
+    resp = requests.get(url, timeout=30)
+    if resp.status_code != 200:
+        raise RuntimeError(f"HTTP {resp.status_code}: {resp.text[:2000]}")
+    obj = resp.json()
+    return obj if isinstance(obj, dict) else {}
+
+
+def start_nightly_train(api_base: str) -> dict:
+    return _api_post_json(f"{api_base}/evolution/nightly/train/start")
+
+
+def stop_nightly_train(api_base: str) -> dict:
+    return _api_post_json(f"{api_base}/evolution/nightly/train/stop")
+
+
+def get_nightly_train_status(api_base: str) -> dict:
+    return _api_get_json(f"{api_base}/evolution/nightly/train/status?tail_bytes=16000")
 
 
 @st.cache_data(ttl=60)
@@ -108,6 +242,77 @@ with c_api:
     api_base = st.text_input("API 地址", value=API_BASE_DEFAULT, key="api_base")
     if st.button("刷新（清空缓存）", key="refresh_cache"):
         st.cache_data.clear()
+
+    with st.expander("Ouroboros 素材与 Nightly Evolution", expanded=False):
+        st.caption("素材来源：data/evolution/trajectories/*.jsonl；输出：data/finetune/evolution/")
+        st0 = get_ouroboros_status()
+        counts = st0.get("counts") if isinstance(st0.get("counts"), dict) else {}
+        col_a, col_b = st.columns([1, 1])
+        with col_a:
+            st.write(
+                {
+                    "trajectory": int(counts.get("trajectory", 0)),
+                    "feedback": int(counts.get("feedback", 0)),
+                    "outcome": int(counts.get("outcome", 0)),
+                    "newest": str(st0.get("newest_traj") or ""),
+                }
+            )
+        with col_b:
+            outs = st0.get("outputs") if isinstance(st0.get("outputs"), dict) else {}
+            st.write(outs)
+
+        if st.button("运行 nightly_evolution --dry-run", key="nightly_dry_run"):
+            res = run_nightly_evolution_dry_run()
+            st.session_state["nightly_last"] = res
+            st.cache_data.clear()
+
+        c1, c2, c3 = st.columns([1, 1, 2])
+        with c1:
+            if st.button("一键训练（SFT+DPO）", key="nightly_train_start"):
+                try:
+                    res = start_nightly_train(api_base)
+                    st.session_state["nightly_train_last"] = res
+                except Exception as e:
+                    st.session_state["nightly_train_last"] = {"ok": False, "error": str(e)}
+        with c2:
+            if st.button("停止训练", key="nightly_train_stop"):
+                try:
+                    res = stop_nightly_train(api_base)
+                    st.session_state["nightly_train_last"] = res
+                except Exception as e:
+                    st.session_state["nightly_train_last"] = {"ok": False, "error": str(e)}
+        with c3:
+            if st.button("刷新训练状态", key="nightly_train_refresh"):
+                try:
+                    res = get_nightly_train_status(api_base)
+                    st.session_state["nightly_train_status"] = res
+                except Exception as e:
+                    st.session_state["nightly_train_status"] = {"ok": False, "error": str(e)}
+
+        last = st.session_state.get("nightly_last")
+        if isinstance(last, dict):
+            st.text_input("Command", value=str(last.get("cmd") or ""), disabled=True, key="nightly_cmd")
+            st.text_input("Return code", value=str(last.get("returncode")), disabled=True, key="nightly_rc")
+            st.text_area("STDOUT", value=str(last.get("stdout") or ""), height=220, key="nightly_out")
+            if str(last.get("stderr") or "").strip():
+                st.text_area("STDERR", value=str(last.get("stderr") or ""), height=160, key="nightly_err")
+
+        try:
+            status = get_nightly_train_status(api_base)
+            st.session_state["nightly_train_status"] = status
+        except Exception:
+            status = st.session_state.get("nightly_train_status")
+
+        st.subheader("Nightly Evolution 训练状态")
+        if isinstance(status, dict):
+            st.write({"running": bool(status.get("running")), "pid": status.get("pid"), "returncode": status.get("returncode"), "log_path": status.get("log_path")})
+            meta = status.get("meta") if isinstance(status.get("meta"), dict) else {}
+            out_meta = meta.get("outputs") if isinstance(meta.get("outputs"), dict) else {}
+            next_adapter = str(out_meta.get("next_dpo_adapter") or "").strip()
+            if next_adapter:
+                st.text_input("建议切换到的 adapter", value=next_adapter, disabled=True, key="nightly_next_adapter")
+            tail = str(status.get("log_tail") or "")
+            st.text_area("训练日志尾部", value=tail, height=240, key="nightly_train_tail")
 
 runs = []
 try:

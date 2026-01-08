@@ -18,6 +18,15 @@ import uuid
 from pathlib import Path
 from typing import Any, Optional
 
+
+_flags = str(os.environ.get("QTWEBENGINE_CHROMIUM_FLAGS") or "").strip()
+# Default to GPU-enabled rendering for smooth UI.
+# Set DASHBOARD_DISABLE_GPU=1 to force software rendering (fallback for driver issues).
+if str(os.environ.get("DASHBOARD_DISABLE_GPU") or "").strip() in {"1", "true", "yes", "on"}:
+    if "--disable-gpu" not in _flags:
+        _flags = (_flags + " --disable-gpu --disable-gpu-compositing").strip()
+    os.environ["QTWEBENGINE_CHROMIUM_FLAGS"] = _flags
+
 import edge_tts
 import pygame
 import requests
@@ -31,6 +40,8 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 
 _GPT_SOVITS_REF_CACHE: dict[tuple[str, ...], list[dict[str, str]]] = {}
 _GPT_SOVITS_REF_CACHE_LOCK = threading.Lock()
+
+_TTS_AUDIO_LOCK = threading.Lock()
 
 
 class TTSThread(QThread):
@@ -211,13 +222,28 @@ class TTSThread(QThread):
 
     def _play_audio_file(self, path: str) -> Optional[str]:
         try:
-            pygame.mixer.init()
-            pygame.mixer.music.load(path)
-            pygame.mixer.music.play()
-            self.started_signal.emit()  # Signal that audio started
-            while pygame.mixer.music.get_busy():
-                pygame.time.Clock().tick(20)
-            pygame.mixer.quit()
+            with _TTS_AUDIO_LOCK:
+                try:
+                    if not pygame.mixer.get_init():
+                        pygame.mixer.init()
+                except Exception:
+                    pygame.mixer.init()
+
+                pygame.mixer.music.load(path)
+                pygame.mixer.music.play()
+                self.started_signal.emit()
+                while pygame.mixer.music.get_busy():
+                    if self.isInterruptionRequested():
+                        try:
+                            pygame.mixer.music.stop()
+                        except Exception:
+                            pass
+                        break
+                    pygame.time.Clock().tick(20)
+                try:
+                    pygame.mixer.quit()
+                except Exception:
+                    pass
             return None
         except Exception as e:
             return f"Audio Error: {e}"
@@ -558,7 +584,8 @@ class MainWindow(QMainWindow):
         avatar_url = self._start_avatar_server(avatar_model=avatar_model)
         self.avatar_view.setUrl(QUrl(avatar_url))
 
-        dash_url = f"http://127.0.0.1:{int(self._web_port)}/dashboard.html?api={urllib.parse.quote(self._api_base + '/api/v1', safe='')}" if self._web_port else ""
+        dash_ver = str(int(time.time()))
+        dash_url = f"http://127.0.0.1:{int(self._web_port)}/dashboard.html?api={urllib.parse.quote(self._api_base + '/api/v1', safe='')}&v={urllib.parse.quote(dash_ver, safe='')}" if self._web_port else ""
         if dash_url:
             self.dashboard_view.setUrl(QUrl(dash_url))
 
@@ -570,6 +597,10 @@ class MainWindow(QMainWindow):
         toggle = QAction("切换主题", self)
         toggle.triggered.connect(self._toggle_theme)
         self.addAction(toggle)
+
+        reset_layout = QAction("重置布局", self)
+        reset_layout.triggered.connect(self._apply_initial_splitter_sizes)
+        self.addAction(reset_layout)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.ActionsContextMenu)
 
 
@@ -609,6 +640,7 @@ class MainWindow(QMainWindow):
         self.input_box.returnPressed.connect(self.send_message)
         btn = QPushButton("发送")
         btn.clicked.connect(self.send_message)
+        self._send_btn = btn
         input_layout.addWidget(self.input_box)
         input_layout.addWidget(btn)
 
@@ -722,6 +754,8 @@ class MainWindow(QMainWindow):
         self.is_talking = False
         self.tts_thread: TTSThread | None = None
         self._chat_thread: QThread | None = None
+        self._thinking_timer: QTimer | None = None
+        self._thinking_phase: int = 0
 
         self.mouth_timer = QTimer()
         self.mouth_timer.timeout.connect(self._update_mouth)
@@ -1274,6 +1308,11 @@ class MainWindow(QMainWindow):
             self.is_talking = True
             self.mouth_timer.start(50)
         
+        try:
+            self._stop_current_tts()
+        except Exception:
+            pass
+
         preset = self._pick_tts_preset(greeting)
         self.tts_thread = TTSThread(
             greeting,
@@ -1540,13 +1579,35 @@ class MainWindow(QMainWindow):
         return {"reply": "收到。", "message_id": None}
 
     def send_message(self) -> None:
+        try:
+            if self._chat_thread is not None and bool(getattr(self._chat_thread, "isRunning", lambda: False)()):
+                self._append_chat(role="assistant", text="我正在思考上一条消息，请稍等。")
+                try:
+                    self.avatar_view.page().runJavaScript("window.setBubbleText('我们先把上一条想完，再继续。');")
+                except Exception:
+                    pass
+                return
+        except Exception:
+            pass
+
         text = self.input_box.text().strip()
         if not text:
             return
         self.input_box.clear()
 
+        try:
+            self.input_box.setEnabled(False)
+        except Exception:
+            pass
+        try:
+            if hasattr(self, "_send_btn") and self._send_btn is not None:
+                self._send_btn.setEnabled(False)
+        except Exception:
+            pass
+
         self._append_chat(role="user", text=text)
-        assistant_label = self._append_chat(role="assistant", text="", message_id=None, enable_feedback=True)
+        local_mid = "local_" + uuid.uuid4().hex
+        assistant_label = self._append_chat(role="assistant", text="", message_id=local_mid, enable_feedback=True)
 
         # Hide the assistant bubble row until voice actually starts.
         _bubble = assistant_label.parentWidget()
@@ -1560,6 +1621,25 @@ class MainWindow(QMainWindow):
             pass
 
         state: dict[str, bool] = {"started": False, "revealed": False}
+
+        try:
+            if self._thinking_timer is not None:
+                self._thinking_timer.stop()
+        except Exception:
+            pass
+        self._thinking_phase = 0
+
+        try:
+            self.avatar_view.page().runJavaScript("window.setBubbleText('我们来看一下…我想想…');")
+        except Exception:
+            pass
+
+        try:
+            self._thinking_timer = QTimer()
+            self._thinking_timer.timeout.connect(lambda: self._tick_thinking_bubble())
+            self._thinking_timer.start(650)
+        except Exception:
+            self._thinking_timer = None
 
         def _reveal(*, start_talking: bool) -> None:
             if state.get("revealed"):
@@ -1587,6 +1667,11 @@ class MainWindow(QMainWindow):
             _reveal(start_talking=True)
 
         def _done(resp: Any) -> None:
+            try:
+                if self._thinking_timer is not None:
+                    self._thinking_timer.stop()
+            except Exception:
+                pass
             reply_text = ""
             message_id: str | None = None
             if isinstance(resp, dict):
@@ -1625,16 +1710,20 @@ class MainWindow(QMainWindow):
 
             self._pending_reply = cleaned
 
+            try:
+                self.avatar_view.page().runJavaScript("window.setBubbleText('我整理一下结论…');")
+            except Exception:
+                pass
+
             # Enable feedback buttons when message_id is available.
             try:
                 if message_id:
                     assistant_label.setProperty("message_id", message_id)
-                    btn_like = getattr(assistant_label, "_btn_like", None)
-                    btn_dislike = getattr(assistant_label, "_btn_dislike", None)
-                    if btn_like is not None:
-                        btn_like.setEnabled(True)
-                    if btn_dislike is not None:
-                        btn_dislike.setEnabled(True)
+            except Exception:
+                pass
+
+            try:
+                self._stop_current_tts()
             except Exception:
                 pass
 
@@ -1657,6 +1746,16 @@ class MainWindow(QMainWindow):
             self.tts_thread.finished_signal.connect(_on_voice_finished)
             self.tts_thread.start()
 
+            try:
+                self.input_box.setEnabled(True)
+            except Exception:
+                pass
+            try:
+                if hasattr(self, "_send_btn") and self._send_btn is not None:
+                    self._send_btn.setEnabled(True)
+            except Exception:
+                pass
+
         class _ChatThread(QThread):
             finished = Signal(object)
 
@@ -1677,6 +1776,25 @@ class MainWindow(QMainWindow):
         t.start()
         self._chat_thread = t
 
+    def _tick_thinking_bubble(self) -> None:
+        try:
+            self._thinking_phase = int(getattr(self, "_thinking_phase", 0)) + 1
+            p = int(self._thinking_phase)
+            dots = "." * (p % 4)
+            if p < 3:
+                msg = "我们来看一下" + dots
+            elif p < 6:
+                msg = "我在对照数据" + dots
+            elif p < 10:
+                msg = "我仔细研究一下" + dots
+            else:
+                msg = "我在生成回答" + dots
+            self.avatar_view.page().runJavaScript(
+                "window.setBubbleText('" + msg.replace("\\", "\\\\").replace("'", "\\'") + "');"
+            )
+        except Exception:
+            return
+
     def _update_mouth(self) -> None:
         if not self.is_talking:
             self.avatar_view.page().runJavaScript("window.setMouthOpen(0);")
@@ -1691,6 +1809,27 @@ class MainWindow(QMainWindow):
             print(err)
         self.is_talking = False
         self._update_mouth()
+
+    def _stop_current_tts(self) -> None:
+        t = getattr(self, "tts_thread", None)
+        if t is None:
+            return
+        try:
+            if bool(getattr(t, "isRunning", lambda: False)()):
+                try:
+                    t.requestInterruption()
+                except Exception:
+                    pass
+                try:
+                    pygame.mixer.music.stop()
+                except Exception:
+                    pass
+                try:
+                    t.wait(600)
+                except Exception:
+                    pass
+        except Exception:
+            return
 
     @staticmethod
     def _http_ok(url: str, timeout_s: float = 1.0) -> bool:
@@ -1806,6 +1945,25 @@ class MainWindow(QMainWindow):
         return f"http://127.0.0.1:{self._web_port}/index.html{model_query}"
 
     def closeEvent(self, event) -> None:  # type: ignore[override]
+        try:
+            if hasattr(self, "_train_poll_timer") and self._train_poll_timer is not None:
+                self._train_poll_timer.stop()
+        except Exception:
+            pass
+
+        for name in ["_chat_thread", "_train_start_thread", "_train_stop_thread", "_train_status_thread", "_fb_thread"]:
+            try:
+                th = getattr(self, name, None)
+                if isinstance(th, QThread) and th.isRunning():
+                    th.requestInterruption()
+                    try:
+                        th.quit()
+                    except Exception:
+                        pass
+                    th.wait(1200)
+            except Exception:
+                pass
+
         for p in [self._ui_proc, self._api_proc]:
             if p is None:
                 continue

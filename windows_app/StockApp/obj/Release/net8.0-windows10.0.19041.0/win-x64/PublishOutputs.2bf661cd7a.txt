@@ -1,0 +1,9 @@
+D:\Project\Stock\dist\StockApp\StockApp.pdb
+D:\Project\Stock\dist\StockApp\runtimes\win-x64\native\WebView2Loader.dll
+D:\Project\Stock\dist\StockApp\D3DCompiler_47_cor3.dll
+D:\Project\Stock\dist\StockApp\PenImc_cor3.dll
+D:\Project\Stock\dist\StockApp\PresentationNative_cor3.dll
+D:\Project\Stock\dist\StockApp\vcruntime140_cor3.dll
+D:\Project\Stock\dist\StockApp\wpfgfx_cor3.dll
+D:\Project\Stock\dist\StockApp\WebView2Loader.dll
+D:\Project\Stock\dist\StockApp\StockApp.exe

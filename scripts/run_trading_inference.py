@@ -851,13 +851,28 @@ def load_model(base_model_id: str, adapter_path: str, load_4bit: bool) -> Tuple[
         tokenizer.pad_token = tokenizer.eos_token
 
     model_kwargs: Dict[str, Any] = {
-        "device_map": "auto",
         "trust_remote_code": True,
     }
 
     if torch.cuda.is_available():
+        # Force single-device placement for compatibility with PEFT adapters.
+        # device_map='auto' may create meta tensors and later .to() will crash.
+        model_kwargs["device_map"] = {"": 0}
         model_kwargs["torch_dtype"] = torch.bfloat16
-        model_kwargs["low_cpu_mem_usage"] = True
+        model_kwargs["low_cpu_mem_usage"] = False
+        try:
+            frac_raw = str(__import__("os").environ.get("TRADING_MAX_MEMORY_FRAC", "") or "").strip()
+            if frac_raw:
+                frac = float(frac_raw)
+                if frac > 0 and frac <= 1.0:
+                    total = int(torch.cuda.get_device_properties(0).total_memory)
+                    gib = int((total * frac) / (1024 ** 3))
+                    gib = max(1, gib - 1)
+                    model_kwargs["max_memory"] = {0: f"{gib}GiB"}
+        except Exception:
+            pass
+    else:
+        model_kwargs["device_map"] = "cpu"
 
     if load_4bit:
         from transformers import BitsAndBytesConfig
@@ -892,6 +907,21 @@ def load_model_moe(
     if not isinstance(adapters, dict) or not adapters:
         raise ValueError("adapters must be non-empty dict")
 
+    def _normalize_adapter_dir(p: str) -> str:
+        pp = Path(str(p or "").strip())
+        if not str(pp):
+            return str(pp)
+        if pp.exists() and pp.is_dir():
+            lw = pp / "lora_weights"
+            if lw.exists() and lw.is_dir():
+                return str(lw)
+        # If caller passed /lora_weights but it doesn't exist, fall back to parent
+        if pp.name.lower() == "lora_weights" and (not pp.exists()) and pp.parent.exists():
+            return str(pp.parent)
+        return str(pp)
+
+    adapters = {str(k): _normalize_adapter_dir(v) for k, v in adapters.items() if str(v or "").strip()}
+
     tok_src = base_model_id
     for p in adapters.values():
         if str(p or "").strip() and Path(str(p), "tokenizer_config.json").exists():
@@ -902,13 +932,28 @@ def load_model_moe(
         tokenizer.pad_token = tokenizer.eos_token
 
     model_kwargs: Dict[str, Any] = {
-        "device_map": "auto",
         "trust_remote_code": True,
     }
 
     if torch.cuda.is_available():
+        # Force single-device placement for compatibility with PEFT multi-adapter loading.
+        # device_map='auto' can create meta tensors and then .to() crashes.
+        model_kwargs["device_map"] = {"": 0}
         model_kwargs["torch_dtype"] = torch.bfloat16
-        model_kwargs["low_cpu_mem_usage"] = True
+        model_kwargs["low_cpu_mem_usage"] = False
+        try:
+            frac_raw = str(__import__("os").environ.get("TRADING_MAX_MEMORY_FRAC", "") or "").strip()
+            if frac_raw:
+                frac = float(frac_raw)
+                if frac > 0 and frac <= 1.0:
+                    total = int(torch.cuda.get_device_properties(0).total_memory)
+                    gib = int((total * frac) / (1024 ** 3))
+                    gib = max(1, gib - 1)
+                    model_kwargs["max_memory"] = {0: f"{gib}GiB"}
+        except Exception:
+            pass
+    else:
+        model_kwargs["device_map"] = "cpu"
 
     if load_4bit:
         from transformers import BitsAndBytesConfig

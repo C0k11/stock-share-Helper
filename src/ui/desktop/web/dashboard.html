@@ -5,18 +5,53 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Control Tower</title>
   <style>
-    body { background: #0b0f17; color: rgba(255,255,255,0.92); font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 18px; overflow-y: auto; }
+    body { background: #0b0f17; color: rgba(255,255,255,0.92); font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 18px; overflow-y: auto; -webkit-text-size-adjust: 100%; }
     .card { background: rgba(17,24,39,0.96); border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; padding: 14px; margin-bottom: 14px; box-shadow: 0 10px 22px rgba(0,0,0,0.35); }
     h2, h3 { margin: 0 0 10px 0; color: #60a5fa; letter-spacing: 0.2px; }
     .row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
-    select, button { background: rgba(31,41,55,0.96); color: rgba(255,255,255,0.92); border: 1px solid rgba(255,255,255,0.14); padding: 8px 10px; border-radius: 10px; }
+    select, button { background: rgba(31,41,55,0.96); color: rgba(255,255,255,0.92); border: 1px solid rgba(255,255,255,0.14); padding: 8px 10px; border-radius: 10px; font-size: 13px; line-height: 1.2; }
+    select { min-width: 96px; }
+    option { font-size: 13px; }
+
+    .dd { position: relative; display: inline-block; }
+    .dd-btn { background: rgba(31,41,55,0.96); color: rgba(255,255,255,0.92); border: 1px solid rgba(255,255,255,0.14); padding: 8px 10px; border-radius: 10px; font-size: 13px; line-height: 1.2; cursor: pointer; min-width: 96px; text-align: left; }
+    .dd-menu { position: absolute; top: calc(100% + 6px); left: 0; min-width: 140px; max-height: 280px; overflow-y: auto; background: rgba(17,24,39,0.98); border: 1px solid rgba(255,255,255,0.12); border-radius: 12px; box-shadow: 0 14px 30px rgba(0,0,0,0.55); display: none; z-index: 9999; }
+    .dd-item { padding: 10px 12px; font-size: 13px; color: rgba(255,255,255,0.92); cursor: pointer; }
+    .dd-item:hover { background: rgba(37,99,235,0.25); }
+    .dd-item.active { background: rgba(16,185,129,0.22); }
     button { background: rgba(37,99,235,0.92); border: 0; cursor: pointer; font-weight: 700; }
     button:hover { background: rgba(29,78,216,0.95); }
     button.active { background: rgba(16,185,129,0.92); }
     .metric { display: inline-block; margin-right: 16px; }
     .label { font-size: 12px; color: rgba(229,231,235,0.78); }
     .val { font-size: 15px; font-weight: 800; }
-    #chart { width: 100%; height: 420px; }
+    #chart { width: 100%; height: 72vh; min-height: 620px; }
+    .live-layout { display: flex; gap: 14px; align-items: stretch; }
+    .live-main { flex: 3; min-width: 520px; }
+    .live-side { flex: 1; min-width: 320px; max-width: 460px; }
+    .tile { background: rgba(0,0,0,0.18); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 10px; margin-bottom: 10px; }
+    .tile h3 { margin: 0 0 8px 0; font-size: 16px; color: rgba(229,231,235,0.92); }
+    .tile table { width: 100%; border-collapse: collapse; font-size: 13px; }
+    .tile th { text-align: left; font-weight: 700; color: rgba(229,231,235,0.72); border-bottom: 1px solid rgba(255,255,255,0.06); padding: 6px 0; }
+    .tile td { border-bottom: 1px solid rgba(255,255,255,0.06); padding: 8px 0; }
+    .tile .sym { color: #60a5fa; font-weight: 800; }
+    .tile .pos { color: #10b981; font-weight: 800; }
+    .tile .neg { color: #ef4444; font-weight: 800; }
+    .side-scroll { max-height: calc(72vh + 10px); overflow-y: auto; padding-right: 6px; }
+    .chat-messages { background: rgba(0,0,0,0.16); border: 1px solid rgba(255,255,255,0.08); border-radius: 10px; padding: 10px; height: 220px; overflow-y: auto; }
+    .bubble { padding: 8px 10px; border-radius: 12px; margin: 8px 0; font-size: 13px; line-height: 1.35; }
+    .bubble.user { background: rgba(37,99,235,0.22); border: 1px solid rgba(37,99,235,0.30); margin-left: 28px; }
+    .bubble.mari { background: rgba(16,185,129,0.14); border: 1px solid rgba(16,185,129,0.24); margin-right: 28px; }
+    .bubble .meta { display: block; font-size: 11px; color: rgba(229,231,235,0.65); margin-bottom: 4px; }
+    .chat-row { display: flex; gap: 8px; margin-top: 10px; }
+    .chat-row input { flex: 1; background: rgba(31,41,55,0.96); color: rgba(255,255,255,0.92); border: 1px solid rgba(255,255,255,0.14); padding: 10px; border-radius: 10px; font-size: 13px; }
+    .mari-dock { display: flex; gap: 14px; align-items: stretch; }
+    .mari-left { flex: 3; min-width: 320px; }
+    .mari-right { flex: 7; min-width: 520px; }
+    .mari-frame { width: 100%; height: 340px; border: 1px solid rgba(255,255,255,0.08); border-radius: 12px; background: rgba(0,0,0,0.12); }
+    .feedback-row { display: flex; gap: 8px; align-items: center; margin-top: 10px; }
+    .feedback-row button { background: rgba(31,41,55,0.96); border: 1px solid rgba(255,255,255,0.14); font-weight: 800; }
+    .feedback-row button:hover { background: rgba(55,65,81,0.96); }
     pre { white-space: pre-wrap; color: rgba(229,231,235,0.86); font-size: 12.5px; line-height: 1.45; margin: 0; }
     .small { font-size: 12px; color: rgba(229,231,235,0.72); }
     .tabs { display: flex; gap: 8px; margin-bottom: 12px; }
@@ -28,9 +63,9 @@
     .trade-row { padding: 6px 0; border-bottom: 1px solid rgba(255,255,255,0.06); font-size: 13px; }
     .trade-buy { color: #10b981; }
     .trade-sell { color: #ef4444; }
-    .agent-panel { background: rgba(0,0,0,0.25); border: 1px solid rgba(96,165,250,0.3); border-radius: 8px; padding: 8px; min-height: 100px; }
+    .agent-panel { background: rgba(0,0,0,0.25); border: 1px solid rgba(96,165,250,0.3); border-radius: 8px; padding: 10px; min-height: 170px; }
     .agent-title { font-size: 11px; font-weight: 700; color: #60a5fa; margin-bottom: 6px; text-align: center; border-bottom: 1px solid rgba(96,165,250,0.2); padding-bottom: 4px; }
-    .agent-log { font-size: 10px; font-family: 'Consolas', monospace; color: #9ca3af; height: 80px; overflow-y: auto; line-height: 1.4; }
+    .agent-log { font-size: 11px; font-family: 'Consolas', monospace; color: #9ca3af; height: 128px; overflow-y: auto; line-height: 1.45; }
     .agent-log .entry { margin-bottom: 3px; }
     .agent-log .time { color: #6b7280; }
     .agent-log .active { color: #10b981; }
@@ -39,7 +74,6 @@
 </head>
 <body>
   <div class="card">
-    <h2>Control Tower</h2>
     <div class="tabs">
       <div class="tab active" id="tabLive" onclick="switchTab('live')"><span class="live-indicator"></span>Live Trading</div>
       <div class="tab" id="tabBacktest" onclick="switchTab('backtest')">Backtest</div>
@@ -51,12 +85,31 @@
           <button id="btnOnline" class="active" onclick="setTradingMode('online')">Online</button>
           <button id="btnOffline" onclick="setTradingMode('offline')">Offline</button>
         </div>
-        <select id="liveTickerSelect"></select>
+        <div style="display: flex; gap: 6px; align-items: center; margin-right: 12px;">
+          <button id="btnSrcYahoo" onclick="switchDataSource('yfinance')" style="background: rgba(14,165,233,0.92);">Yahoo</button>
+          <button id="btnSrcSim" onclick="switchDataSource('simulated')" style="background: rgba(55,65,81,0.92);">Simulated</button>
+          <button id="btnOpenYahoo" onclick="openYahooChart()" style="background: rgba(31,41,55,0.96); border: 1px solid rgba(255,255,255,0.14);">Open Yahoo Chart</button>
+        </div>
+        <div id="liveTickerDD" class="dd">
+          <div id="liveTickerBtn" class="dd-btn">-- ▾</div>
+          <div id="liveTickerMenu" class="dd-menu"></div>
+        </div>
+        <button id="btnChartLine" class="active" onclick="setLiveChartMode('line')" style="background: rgba(239,68,68,0.78);">Line</button>
+        <button id="btnChartCandle" onclick="setLiveChartMode('candlestick')" style="background: rgba(55,65,81,0.92);">Candles</button>
         <button id="btnRefresh" onclick="loadLiveData()">Refresh</button>
-        <button id="btnRL" onclick="startOnlineRL()" style="background: rgba(139,92,246,0.92);">🧠 Start RL</button>
-        <label style="font-size: 13px;"><input type="checkbox" id="autoRefresh" checked> Auto (2s)</label>
+        <button id="btnReloadModels" onclick="reloadModels()" style="background: rgba(34,197,94,0.85);">Reload Models</button>
+        <button id="btnRL" onclick="startOnlineRL()" style="background: rgba(139,92,246,0.92);">Start RL</button>
+        <button id="btnPlannerOLRL" onclick="startNightlyTraining()" style="background: rgba(16,185,129,0.85);">Planner OLRL</button>
+        <button id="btnAlphaTrain" onclick="startAlphaTraining()" style="background: rgba(245,158,11,0.88);">Alpha Evolution (train)</button>
+        <button id="btnAlphaStop" onclick="stopAlphaTraining()" style="background: rgba(239,68,68,0.78);">Stop Alpha</button>
+        <label style="font-size: 13px;"><input type="checkbox" id="autoRefresh" checked> Auto (5s)</label>
         <span class="small" id="liveStatus"></span>
         <span class="small" id="rlStatus" style="color: #a78bfa;"></span>
+        <span class="small" id="modelStatus" style="color: rgba(229,231,235,0.78);"></span>
+      </div>
+      <div class="row" style="margin-top: 8px;">
+        <span class="small" id="trainStatus" style="color: rgba(229,231,235,0.78);"></span>
+        <span class="small" id="alphaStatus" style="color: rgba(251,191,36,0.92);"></span>
       </div>
       <div class="row">
         <div class="metric"><div class="label">Cash</div><div class="val" id="l_cash" style="color: #10b981;">--</div></div>
@@ -70,9 +123,9 @@
   </div>
 
   <!-- 8 Agent Panels -->
-  <div id="agentPanelsRow" class="card" style="display: grid; grid-template-columns: repeat(8, 1fr); gap: 8px; padding: 10px;">
+  <div id="agentPanelsRow" class="card" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 12px;">
     <div class="agent-panel" id="panel_planner">
-      <div class="agent-title">Planner (SFT)</div>
+      <div class="agent-title">Secretary Mari (Planner)</div>
       <div class="agent-log" id="log_planner">--</div>
     </div>
     <div class="agent-panel" id="panel_gatekeeper">
@@ -126,8 +179,23 @@
     </div>
   </div>
 
-  <div class="card">
-    <div id="chart"></div>
+  <div class="live-layout">
+    <div class="card live-main">
+      <div id="chart"></div>
+    </div>
+    <div class="card live-side">
+      <h2 style="margin-bottom: 10px;">My Portfolio & Markets</h2>
+      <div class="side-scroll">
+        <div class="tile"><h3>Trending Tickers &gt;</h3><div id="tile_trending">(loading...)</div></div>
+        <div class="tile"><h3>Futures &gt;</h3><div id="tile_futures">(loading...)</div></div>
+        <div class="tile"><h3>Currencies &gt;</h3><div id="tile_currencies">(loading...)</div></div>
+        <div class="tile"><h3>Cryptocurrencies &gt;</h3><div id="tile_crypto">(loading...)</div></div>
+        <div class="tile"><h3>ETFs &gt;</h3><div id="tile_etfs">(loading...)</div></div>
+        <div class="tile"><h3>Stocks: Gainers &gt;</h3><div id="tile_stocks_gainers">(loading...)</div></div>
+        <div class="tile"><h3>Stocks: Losers &gt;</h3><div id="tile_stocks_losers">(loading...)</div></div>
+        <div class="tile"><h3>Stocks: Most Actives &gt;</h3><div id="tile_stocks_most_actives">(loading...)</div></div>
+      </div>
+    </div>
   </div>
 
   <div class="card" id="bottomPanels" style="display: flex; gap: 14px;">
@@ -141,6 +209,42 @@
     </div>
   </div>
 
+  <div class="card" id="mariDock">
+    <h3>Mari <span class="small" id="mariConn" style="opacity:0.85;"></span></h3>
+    <div class="mari-dock">
+      <div class="mari-left">
+        <iframe id="mariFrame" class="mari-frame" src="/ui/index.html?model=/live2d_mari/%E7%8E%9B%E4%B8%BD%E5%85%AC%E5%BC%80%E6%A8%A1%E5%9E%8B.model3.json" title="Mari Live2D"></iframe>
+      </div>
+      <div class="mari-right">
+        <div id="chatMessages" class="chat-messages">(Say hi to Mari...)</div>
+        <div class="chat-row">
+          <input id="chatInput" placeholder="Ask Mari... (e.g., 我现在持仓多少？)" />
+          <button id="chatSend" onclick="sendChat()" style="background: rgba(37,99,235,0.92);">Send</button>
+        </div>
+        <div class="feedback-row" style="margin-top: 8px;">
+          <span class="small" style="min-width: 68px;">Voice</span>
+          <input id="ttsVol" type="range" min="0" max="100" step="1" value="85" style="flex: 1;" />
+          <span class="small" id="ttsVolVal" style="min-width: 46px; text-align: right;">85%</span>
+        </div>
+        <div class="feedback-row">
+          <button id="btnFbUp" onclick="sendFeedback(1)" title="Thumbs up">👍</button>
+          <button id="btnFbDown" onclick="sendFeedback(-1)" title="Thumbs down">👎</button>
+          <span class="small" id="fbStatus"></span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card" id="trainCard">
+    <h3>Nightly Training Log</h3>
+    <pre id="trainLog" style="max-height: 220px; overflow-y: auto;">(No training yet)</pre>
+  </div>
+
+  <div class="card" id="alphaCard">
+    <h3>Alpha Evolution Training Log</h3>
+    <pre id="alphaLog" style="max-height: 220px; overflow-y: auto;">(No alpha training yet)</pre>
+  </div>
+
   <div class="card hidden" id="traceCard">
     <h3>Trace</h3>
     <pre id="trace">(No data loaded)</pre>
@@ -151,10 +255,651 @@
       try { return new URLSearchParams(window.location.search || '').get(key); } catch (e) { return null; }
     }
 
-    const API = qs('api') || 'http://127.0.0.1:8000/api/v1';
+    function openYahooChart() {
+      const ticker = String(currentLiveTicker || '').toUpperCase();
+      if (!ticker) return;
+      const url = `https://finance.yahoo.com/quote/${encodeURIComponent(ticker)}/chart`;
+      try {
+        window.open(url, '_blank');
+      } catch (e) {
+        try { window.location.href = url; } catch (e2) {}
+      }
+    }
+
+    function _sessionId() {
+      try {
+        const k = 'stockapp_session_id';
+        let v = localStorage.getItem(k);
+        if (!v) {
+          v = 'sess_' + Math.random().toString(16).slice(2) + '_' + Date.now();
+          localStorage.setItem(k, v);
+        }
+        return v;
+      } catch (e) {
+        return 'sess_' + Date.now();
+      }
+    }
+
+    let _chatLocal = [];
+    let _lastChatMessageId = null;
+    let _lastLiveVoiceTime = '';
+    let _lastReasoningText = '';
+    let _ttsAudio = null;
+    let _ttsAudioUrl = null;
+    let _ttsVolume = 0.85;
+
+    function _sanitizeTtsText(s) {
+      try {
+        let t = String(s || '');
+        // Keep UI snappy: don't TTS extremely long outputs.
+        if (t.length > 220) t = t.slice(0, 220) + '…';
+        // Preserve the user's preferred addressing.
+        const keepSensei = t.includes('Sensei');
+        // Strip long hiragana/katakana runs which often cause language switching.
+        t = t.replace(/[\u3040-\u30ff]{6,}/g, '');
+        // Reduce repeated punctuation.
+        t = t.replace(/[.]{4,}/g, '...');
+        t = t.replace(/[…]{3,}/g, '…');
+        t = t.trim();
+        if (keepSensei && !t.includes('Sensei')) {
+          t = 'Sensei，' + t;
+        }
+        return t;
+      } catch (e) {
+        return String(s || '');
+      }
+    }
+
+    function _mariBubble(text) {
+      try {
+        const f = document.getElementById('mariFrame');
+        if (f && f.contentWindow && typeof f.contentWindow.showBubble === 'function') {
+          f.contentWindow.showBubble(String(text || ''));
+        }
+      } catch (e) {}
+    }
+
+    let _mariReady = false;
+    function _setMariConn(s) {
+      try {
+        const el = document.getElementById('mariConn');
+        if (el) el.textContent = String(s || '');
+      } catch (e) {}
+    }
+
+    function _postMariMouse(clientX, clientY) {
+      try {
+        const f = document.getElementById('mariFrame');
+        if (!f || !f.contentWindow) return;
+        const r = f.getBoundingClientRect();
+        const x = Number(clientX || 0) - Number(r.left || 0);
+        const y = Number(clientY || 0) - Number(r.top || 0);
+        f.contentWindow.postMessage({ type: 'mari_mouse', x, y }, '*');
+      } catch (e) {}
+    }
+
+    (function () {
+      let _mmPending = null;
+      function onMove(ev) {
+        try {
+          const x = (ev && typeof ev.clientX === 'number') ? ev.clientX : 0;
+          const y = (ev && typeof ev.clientY === 'number') ? ev.clientY : 0;
+          _mmPending = { x, y };
+          if (_mmPending && !onMove._raf) {
+            onMove._raf = requestAnimationFrame(() => {
+              onMove._raf = null;
+              const p = _mmPending;
+              _mmPending = null;
+              if (p) _postMariMouse(p.x, p.y);
+            });
+          }
+        } catch (e) {}
+      }
+
+      try {
+        window.addEventListener('pointermove', onMove, { passive: true });
+        window.addEventListener('mousemove', onMove, { passive: true });
+      } catch (e) {}
+
+      try {
+        window.addEventListener('message', (ev) => {
+          const d = ev ? ev.data : null;
+          if (!d || typeof d !== 'object') return;
+          if (d.type === 'mari_ready') {
+            _mariReady = true;
+            _setMariConn('Live2D: connected');
+          }
+        });
+      } catch (e) {}
+
+      _setMariConn('Live2D: connecting...');
+    })();
+
+    function renderChat() {
+      const el = document.getElementById('chatMessages');
+      if (!el) return;
+      const items = _chatLocal.slice(-40);
+      if (!items.length) {
+        el.textContent = '(Say hi to Mari...)';
+        return;
+      }
+      el.innerHTML = items.map((m, idx) => {
+        const cls = m.role === 'user' ? 'user' : 'mari';
+        const who = m.role === 'user' ? 'You' : 'Mari';
+        const t = (m.time || '').slice(11, 19);
+        const txt = String(m.text || '').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        const mid = (m && m.message_id) ? String(m.message_id) : '';
+        const rated = !!(m && m._rated);
+        const fb = (m.role === 'mari') ? (
+          `<div class="feedback-row" style="margin-top:8px; justify-content:flex-start; gap:8px;">
+            <button ${(!mid || rated) ? 'disabled' : ''} onclick="rateMsg(${idx}, 1)" title="Thumbs up" style="width:36px; height:28px;">👍</button>
+            <button ${(!mid || rated) ? 'disabled' : ''} onclick="rateMsg(${idx}, -1)" title="Thumbs down" style="width:36px; height:28px;">👎</button>
+            <span class="small" style="opacity:0.85;">${mid ? ('id=' + mid.slice(0, 10) + '…') : ''}</span>
+          </div>`
+        ) : '';
+        return `<div class="bubble ${cls}"><span class="meta">${who}${t ? (' · ' + t) : ''}</span>${txt}${fb}</div>`;
+      }).join('');
+      try { el.scrollTop = el.scrollHeight; } catch (e) {}
+    }
+
+    async function rateMsg(idx, score) {
+      try {
+        const i = Number(idx);
+        if (!isFinite(i) || i < 0 || i >= _chatLocal.length) return;
+        const m = _chatLocal[i] || {};
+        const mid = (m && m.message_id) ? String(m.message_id) : '';
+        if (!mid) return;
+        if (m && m._rated) return;
+
+        let comment = '';
+        if (Number(score) === -1) {
+          try {
+            const s = prompt('Sensei，我哪里说错了？请教教我：', '');
+            if (s !== null && s !== undefined) comment = String(s);
+          } catch (e) {}
+        }
+
+        const resp = await fetch(apiBase + '/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message_id: mid, score: Number(score), comment: String(comment || '') })
+        });
+        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        _chatLocal[i]._rated = true;
+        renderChat();
+      } catch (e) {
+        try {
+          const el = document.getElementById('fbStatus');
+          if (el) el.textContent = 'Feedback error: ' + (e && e.message ? e.message : String(e));
+        } catch (e2) {}
+      }
+    }
+
+    async function playMariTts(text) {
+      try {
+        const t = _sanitizeTtsText(text);
+        if (!t) return;
+        try {
+          if (_ttsAudio) {
+            _ttsAudio.pause();
+            _ttsAudio.currentTime = 0;
+          }
+        } catch (e) {}
+        try {
+          if (_ttsAudioUrl) {
+            URL.revokeObjectURL(_ttsAudioUrl);
+            _ttsAudioUrl = null;
+          }
+        } catch (e) {}
+
+        const preset = 'gentle';
+        const resp = await fetch(apiBase + '/voice/tts', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: t, preset })
+        });
+        if (!resp.ok) {
+          let msg = 'HTTP ' + resp.status;
+          try {
+            const ct = resp.headers.get('content-type') || '';
+            if (ct.includes('application/json')) {
+              const j = await resp.json();
+              msg = (j && (j.detail || j.error)) ? String(j.detail || j.error) : msg;
+            }
+          } catch (e) {}
+          throw new Error(msg);
+        }
+
+        const blob = await resp.blob();
+        const url = URL.createObjectURL(blob);
+        _ttsAudioUrl = url;
+        const a = new Audio(url);
+        _ttsAudio = a;
+        try {
+          const v = Number(_ttsVolume);
+          a.volume = (isFinite(v) ? Math.max(0, Math.min(1, v)) : 0.85);
+        } catch (e) {}
+        a.onended = () => {
+          try {
+            URL.revokeObjectURL(url);
+            if (_ttsAudioUrl === url) _ttsAudioUrl = null;
+          } catch (e) {}
+        };
+        try {
+          await new Promise((resolve) => {
+            const done = () => resolve(true);
+            a.addEventListener('canplaythrough', done, { once: true });
+            a.addEventListener('error', done, { once: true });
+            setTimeout(done, 1500);
+          });
+        } catch (e) {}
+        try {
+          await a.play();
+          return true;
+        } catch (e) {
+          return false;
+        }
+      } catch (e) {
+        try {
+          const el = document.getElementById('fbStatus');
+          if (el) el.textContent = 'TTS error: ' + (e && e.message ? e.message : String(e));
+        } catch (e2) {}
+      }
+      return false;
+    }
+
+    async function loadMariChat() {
+      try {
+        const data = await apiGet('/live/chat?limit=1');
+        const msgs = (data && data.messages) ? data.messages : [];
+        if (msgs && msgs.length) {
+          const m = msgs[msgs.length - 1] || {};
+          const t = String(m.time || '');
+          const txt = String(m.text || '');
+          if (t && txt && t !== _lastLiveVoiceTime) {
+            _lastLiveVoiceTime = t;
+            _mariBubble(txt);
+          }
+        }
+      } catch (e) {
+      }
+    }
+
+    async function sendChat() {
+      const input = document.getElementById('chatInput');
+      const btn = document.getElementById('chatSend');
+      if (!input) return;
+      const text = String(input.value || '').trim();
+      if (!text) return;
+      input.value = '';
+      _chatLocal.push({ role: 'user', time: new Date().toISOString(), text });
+      renderChat();
+      let pendingIdx = null;
+      try {
+        if (btn) btn.disabled = true;
+        pendingIdx = _chatLocal.push({ role: 'mari', time: new Date().toISOString(), text: '...', message_id: null }) - 1;
+        renderChat();
+
+        try { _mariBubble('推理中…'); } catch (e) {}
+
+        const controller = new AbortController();
+        const t0 = setTimeout(() => {
+          try { controller.abort(); } catch (e) {}
+        }, 300000);
+
+        let resp;
+        try {
+          resp = await fetch(apiBase + '/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: text, context: { client: 'desktop', session_id: _sessionId() } }),
+            signal: controller.signal
+          });
+        } finally {
+          try { clearTimeout(t0); } catch (e) {}
+        }
+
+        let data = null;
+        try {
+          data = await resp.json();
+        } catch (e) {
+          data = null;
+        }
+
+        if (!resp.ok) {
+          const detail = (data && (data.detail || data.error)) ? (data.detail || data.error) : ('HTTP ' + resp.status);
+          _chatLocal[pendingIdx] = { role: 'mari', time: new Date().toISOString(), text: 'Error: ' + String(detail) };
+          renderChat();
+          return;
+        }
+
+        const reply = (data && (data.reply || data.message)) ? String(data.reply || data.message) : '(no reply)';
+        _lastChatMessageId = (data && (data.message_id || data.id)) ? String(data.message_id || data.id) : null;
+        try { await playMariTts(reply); } catch (e) {}
+        _chatLocal[pendingIdx] = { role: 'mari', time: new Date().toISOString(), text: reply, message_id: _lastChatMessageId, _rated: false };
+        renderChat();
+      } catch (e) {
+        let msg = (e && e.message) ? String(e.message) : String(e);
+        try {
+          if (e && (e.name === 'AbortError' || String(msg).toLowerCase().includes('aborted'))) {
+            msg = '请求超时：后端仍在处理请求。请稍等后重试，或先点 Refresh / Reload Models 查看系统状态。';
+          }
+        } catch (e2) {}
+        try {
+          if (pendingIdx !== null && pendingIdx >= 0 && pendingIdx < _chatLocal.length) {
+            _chatLocal[pendingIdx] = { role: 'mari', time: new Date().toISOString(), text: 'Error: ' + msg, message_id: null };
+          } else {
+            _chatLocal.push({ role: 'mari', time: new Date().toISOString(), text: 'Error: ' + msg });
+          }
+        } catch (e3) {
+          _chatLocal.push({ role: 'mari', time: new Date().toISOString(), text: 'Error: ' + msg });
+        }
+        renderChat();
+      } finally {
+        try { if (btn) btn.disabled = false; } catch (e) {}
+      }
+    }
+
+    async function sendFeedback(score) {
+      try {
+        const el = document.getElementById('fbStatus');
+        if (el) el.textContent = '';
+        const mid = _lastChatMessageId;
+        if (!mid) {
+          if (el) el.textContent = 'No message to rate yet';
+          return;
+        }
+        let comment = '';
+        try {
+          const s = Number(score);
+          if (s === -1) {
+            comment = String(prompt('给 Planner 的改进建议（可选）：', '') || '');
+          }
+        } catch (e) {}
+
+        const resp = await fetch(apiBase + '/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ message_id: mid, score: Number(score), comment: String(comment || '') })
+        });
+        if (!resp.ok) {
+          if (el) el.textContent = 'Feedback failed';
+          return;
+        }
+        if (el) el.textContent = (Number(score) === 1) ? 'Thanks!' : 'Got it.';
+      } catch (e) {
+        const el = document.getElementById('fbStatus');
+        if (el) el.textContent = 'Feedback error';
+      }
+    }
+
+    let liveChartMode = 'line';
+    function setLiveChartMode(mode) {
+      liveChartMode = String(mode || 'line');
+      document.getElementById('btnChartLine').classList.toggle('active', liveChartMode === 'line');
+      document.getElementById('btnChartCandle').classList.toggle('active', liveChartMode === 'candlestick');
+      document.getElementById('btnChartLine').style.background = (liveChartMode === 'line') ? 'rgba(239,68,68,0.78)' : 'rgba(55,65,81,0.92)';
+      document.getElementById('btnChartCandle').style.background = (liveChartMode === 'candlestick') ? 'rgba(239,68,68,0.78)' : 'rgba(55,65,81,0.92)';
+      lastChartKey = '';
+      loadLiveChart();
+    }
+
+    async function loadMarketsTiles() {
+      try {
+        const data = await apiGet('/markets/tiles');
+        const tiles = (data && data.tiles) ? data.tiles : {};
+        function fmtNum(x) {
+          try { return Number(x).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2}); } catch (e) { return String(x); }
+        }
+        function renderTable(rows) {
+          rows = rows || [];
+          if (!rows.length) return '(no data)';
+          const head = '<table><thead><tr><th>Symbol</th><th style="text-align:right;">Last</th><th style="text-align:right;">Change</th><th style="text-align:right;">% Change</th></tr></thead><tbody>';
+          const body = rows.slice(0, 6).map(r => {
+            const sym = String(r.symbol || '');
+            const last = (r.last !== undefined && r.last !== null) ? fmtNum(r.last) : '--';
+            const chg = (r.change !== undefined && r.change !== null) ? Number(r.change) : null;
+            const pct = (r.pct !== undefined && r.pct !== null) ? Number(r.pct) : null;
+            const cls = (pct !== null && !isNaN(pct)) ? (pct >= 0 ? 'pos' : 'neg') : '';
+            const chgTxt = (chg !== null && !isNaN(chg)) ? ((chg >= 0 ? '+' : '') + fmtNum(chg)) : '--';
+            const pctTxt = (pct !== null && !isNaN(pct)) ? ((pct >= 0 ? '+' : '') + pct.toFixed(2) + '%') : '--';
+            return `<tr><td class="sym">${sym}</td><td style="text-align:right;">${last}</td><td class="${cls}" style="text-align:right;">${chgTxt}</td><td class="${cls}" style="text-align:right;">${pctTxt}</td></tr>`;
+          }).join('');
+          return head + body + '</tbody></table>';
+        }
+
+        const map = {
+          trending: 'tile_trending',
+          futures: 'tile_futures',
+          currencies: 'tile_currencies',
+          crypto: 'tile_crypto',
+          etfs: 'tile_etfs',
+          stocks_gainers: 'tile_stocks_gainers',
+          stocks_losers: 'tile_stocks_losers',
+          stocks_most_actives: 'tile_stocks_most_actives'
+        };
+        for (const k of Object.keys(map)) {
+          const el = document.getElementById(map[k]);
+          if (!el) continue;
+          el.innerHTML = renderTable(tiles[k]);
+        }
+      } catch (e) {
+        try {
+          const ids = ['tile_trending','tile_futures','tile_currencies','tile_crypto','tile_etfs','tile_stocks_gainers','tile_stocks_losers','tile_stocks_most_actives'];
+          for (const id of ids) {
+            const el = document.getElementById(id);
+            if (el) el.textContent = 'Error: ' + (e && e.message ? e.message : String(e));
+          }
+        } catch (e2) {}
+      }
+    }
+
+    // ===== Ouroboros Nightly Evolution (Planner OLRL) =====
+    let trainPoll = null;
+
+    async function pollNightlyTraining() {
+      try {
+        const data = await apiGet('/evolution/nightly/train/status?tail_bytes=12000');
+        const running = !!(data && data.running);
+        const rc = (data && data.returncode !== undefined && data.returncode !== null) ? String(data.returncode) : '';
+        const pid = (data && data.pid) ? String(data.pid) : '';
+        const tail = (data && data.log_tail) ? String(data.log_tail) : '';
+        setTrainLog(tail || '(No log yet)');
+
+        if (running) {
+          setTrainStatus('Planner OLRL running' + (pid ? (' (pid=' + pid + ')') : ''));
+        } else {
+          const meta = (data && data.meta && typeof data.meta === 'object') ? data.meta : null;
+          let next = '';
+          try {
+            next = meta && meta.outputs ? String(meta.outputs.next_dpo_adapter || '') : '';
+          } catch (e) { next = ''; }
+          setTrainStatus('Planner OLRL finished' + (rc ? (' (rc=' + rc + ')') : '') + (next ? (' | next: ' + next) : ''));
+          if (trainPoll) {
+            clearInterval(trainPoll);
+            trainPoll = null;
+          }
+        }
+      } catch (e) {
+        setTrainStatus('Planner OLRL status error: ' + (e && e.message ? e.message : String(e)));
+      }
+    }
+
+    async function startNightlyTraining() {
+      const btn = document.getElementById('btnPlannerOLRL');
+      if (btn) btn.disabled = true;
+      setTrainStatus('Starting Planner OLRL...');
+      try {
+        const resp = await fetch(apiBase + '/evolution/nightly/train/start', { method: 'POST' });
+        const data = await resp.json();
+        if (data && data.ok) {
+          setTrainStatus('Planner OLRL started');
+          await pollNightlyTraining();
+          if (!trainPoll) {
+            trainPoll = setInterval(pollNightlyTraining, 2000);
+          }
+        } else {
+          setTrainStatus('Planner OLRL start failed');
+        }
+      } catch (e) {
+        setTrainStatus('Planner OLRL start error: ' + (e && e.message ? e.message : String(e)));
+      } finally {
+        if (btn) btn.disabled = false;
+      }
+    }
+
+    // ===== Alpha Evolution (train) =====
+    let alphaPoll = null;
+
+    function setAlphaStatus(s) {
+      const el = document.getElementById('alphaStatus');
+      if (el) el.textContent = String(s || '');
+    }
+
+    function setAlphaLog(s) {
+      const el = document.getElementById('alphaLog');
+      if (el) el.textContent = String(s || '');
+    }
+
+    async function pollAlphaTraining() {
+      try {
+        const data = await apiGet('/evolution/alpha/train/status?tail_bytes=12000');
+        const running = !!(data && data.running);
+        const rc = (data && data.returncode !== undefined && data.returncode !== null) ? String(data.returncode) : '';
+        const pid = (data && data.pid) ? String(data.pid) : '';
+        const tail = (data && data.log_tail) ? String(data.log_tail) : '';
+        setAlphaLog(tail || '(No log yet)');
+        if (running) {
+          setAlphaStatus('Alpha training running' + (pid ? (' (pid=' + pid + ')') : ''));
+        } else {
+          setAlphaStatus('Alpha training finished' + (rc ? (' (rc=' + rc + ')') : ''));
+          if (alphaPoll) {
+            clearInterval(alphaPoll);
+            alphaPoll = null;
+          }
+        }
+      } catch (e) {
+        setAlphaStatus('Alpha status error: ' + (e && e.message ? e.message : String(e)));
+      }
+    }
+
+    async function startAlphaTraining() {
+      const btn = document.getElementById('btnAlphaTrain');
+      btn.disabled = true;
+      setAlphaStatus('Starting alpha training...');
+      try {
+        const resp = await fetch(apiBase + '/evolution/alpha/train/start', { method: 'POST' });
+        const data = await resp.json();
+        if (data && data.ok) {
+          setAlphaStatus('Alpha training started');
+          await pollAlphaTraining();
+          if (!alphaPoll) {
+            alphaPoll = setInterval(pollAlphaTraining, 2000);
+          }
+        } else {
+          setAlphaStatus('Alpha start failed');
+        }
+      } catch (e) {
+        setAlphaStatus('Alpha start error: ' + (e && e.message ? e.message : String(e)));
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    async function stopAlphaTraining() {
+      const btn = document.getElementById('btnAlphaStop');
+      btn.disabled = true;
+      setAlphaStatus('Stopping alpha training...');
+      try {
+        const resp = await fetch(apiBase + '/evolution/alpha/train/stop', { method: 'POST' });
+        const data = await resp.json();
+        if (data && data.ok) {
+          setAlphaStatus('Alpha stop requested');
+          await pollAlphaTraining();
+        } else {
+          setAlphaStatus('Alpha stop failed');
+        }
+      } catch (e) {
+        setAlphaStatus('Alpha stop error: ' + (e && e.message ? e.message : String(e)));
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function setTrainStatus(s) {
+      const el = document.getElementById('trainStatus');
+      if (el) el.textContent = String(s || '');
+    }
+
+    function setTrainLog(s) {
+      const el = document.getElementById('trainLog');
+      if (el) el.textContent = String(s || '');
+    }
+
+    let API = qs('api');
+    if (!API) {
+      try {
+        const origin = (window && window.location && window.location.origin) ? String(window.location.origin) : '';
+        if (origin && origin.startsWith('http')) {
+          API = origin.replace(/\/$/, '') + '/api/v1';
+        }
+      } catch (e) {}
+    }
+    if (!API) {
+      API = 'http://127.0.0.1:8000/api/v1';
+    }
+    const apiBase = API;
     let currentTab = 'live';
     let autoRefreshInterval = null;
     let liveTradesCache = [];
+    let liveLoading = false;
+    let lastChartKey = '';
+    let lastTickersKey = '';
+    let currentLiveTicker = '';
+
+    function _ddClose() {
+      const m = document.getElementById('liveTickerMenu');
+      if (m) m.style.display = 'none';
+    }
+
+    function _ddToggle() {
+      const m = document.getElementById('liveTickerMenu');
+      if (!m) return;
+      m.style.display = (m.style.display === 'block') ? 'none' : 'block';
+    }
+
+    function _ddSetTicker(tk) {
+      currentLiveTicker = String(tk || '').toUpperCase();
+      const b = document.getElementById('liveTickerBtn');
+      if (b) b.textContent = (currentLiveTicker || '--') + ' ▾';
+      try {
+        const m = document.getElementById('liveTickerMenu');
+        if (m) {
+          const items = Array.from(m.querySelectorAll('.dd-item'));
+          items.forEach(it => it.classList.toggle('active', String(it.getAttribute('data-tk') || '') === currentLiveTicker));
+        }
+      } catch (e) {}
+    }
+
+    function _ddFill(tickers) {
+      const m = document.getElementById('liveTickerMenu');
+      if (!m) return;
+      m.innerHTML = '';
+      (tickers || []).forEach(tk => {
+        const t = String(tk || '').toUpperCase();
+        if (!t) return;
+        const div = document.createElement('div');
+        div.className = 'dd-item' + (t === currentLiveTicker ? ' active' : '');
+        div.textContent = t;
+        div.setAttribute('data-tk', t);
+        div.addEventListener('click', () => {
+          _ddSetTicker(t);
+          _ddClose();
+          loadLiveChart();
+        });
+        m.appendChild(div);
+      });
+    }
 
     function switchTab(tab) {
       currentTab = tab;
@@ -181,7 +926,7 @@
         if (document.getElementById('autoRefresh').checked && currentTab === 'live') {
           loadLiveData();
         }
-      }, 2000);
+      }, 5000);
     }
 
     function stopAutoRefresh() {
@@ -194,6 +939,113 @@
     function setLiveStatus(s) {
       const el = document.getElementById('liveStatus');
       if (el) el.textContent = String(s || '');
+    }
+
+    function setModelStatus(s) {
+      const el = document.getElementById('modelStatus');
+      if (el) el.textContent = String(s || '');
+    }
+
+    async function reloadModels() {
+      const btn = document.getElementById('btnReloadModels');
+      try {
+        if (btn) btn.disabled = true;
+        setLiveStatus('Reloading models...');
+        const resp = await fetch(apiBase + '/live/reload_models', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({})
+        });
+        if (!resp.ok) {
+          throw new Error('HTTP ' + resp.status);
+        }
+        const j = await resp.json();
+        if (j && j.ok) {
+          const m = (j && j.message) ? String(j.message) : '';
+          setLiveStatus('Models reloaded' + (m ? (' (' + m + ')') : ''));
+          const s = (j.moe_scalper || '') + ' | ' + (j.moe_analyst || '');
+          setModelStatus('MoE: ' + s);
+        } else {
+          setLiveStatus('Reload models failed: ' + (j && (j.error || j.detail) ? String(j.error || j.detail) : 'unknown'));
+        }
+
+        // Also reload secretary local LLM (Mari chat) so adapter changes take effect immediately.
+        try {
+          setLiveStatus('Reloading secretary model...');
+          await fetch(apiBase + '/llm/unload', { method: 'POST' });
+        } catch (e) {}
+        try {
+          const r2 = await fetch(apiBase + '/llm/warmup', { method: 'POST' });
+          if (r2 && r2.ok) {
+            let j2 = null;
+            try { j2 = await r2.json(); } catch (e) { j2 = null; }
+            if (j2 && j2.ok) {
+              setLiveStatus('Secretary warmed: ' + String(j2.model || '') + (j2.adapter ? (' | ' + String(j2.adapter)) : ''));
+            } else {
+              setLiveStatus('Secretary warmup done');
+            }
+          } else {
+            setLiveStatus('Secretary warmup failed');
+          }
+        } catch (e) {
+          setLiveStatus('Secretary warmup error: ' + (e && e.message ? e.message : String(e)));
+        }
+
+        // Force-reload Mari iframe (pickup new DPI/mouse tracking changes and reset Live2D state).
+        try {
+          const f = document.getElementById('mariFrame');
+          if (f) {
+            const base = String(f.getAttribute('src') || f.src || '').split('&v=')[0];
+            const sep = base.includes('?') ? '&' : '?';
+            f.src = base + sep + 'v=' + Date.now();
+            _setMariConn('Live2D: reconnecting...');
+          }
+        } catch (e) {}
+      } catch (e) {
+        setLiveStatus('Reload models error: ' + (e && e.message ? e.message : String(e)));
+      } finally {
+        try { if (btn) btn.disabled = false; } catch (e) {}
+      }
+    }
+
+    async function switchDataSource(src) {
+      try {
+        setLiveStatus('Switching source...');
+        try { lastChartKey = ''; } catch (e) {}
+        try { liveLoading = false; } catch (e) {}
+        try {
+          document.getElementById('btnSrcYahoo').disabled = true;
+          document.getElementById('btnSrcSim').disabled = true;
+        } catch (e) {}
+        const resp = await fetch(apiBase + '/live/restart', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          // Keep current model setting to avoid blocking UI on heavy model load.
+          body: JSON.stringify({ data_source: String(src || ''), load_models: null })
+        });
+        if (!resp.ok) {
+          let msg = 'HTTP ' + resp.status;
+          try {
+            const ct = resp.headers.get('content-type') || '';
+            if (ct.includes('application/json')) {
+              const j = await resp.json();
+              msg = (j && (j.detail || j.message)) ? String(j.detail || j.message) : msg;
+            } else {
+              const t = await resp.text();
+              if (t) msg = t.slice(0, 200);
+            }
+          } catch (e) {}
+          throw new Error(msg);
+        }
+        await loadLiveData();
+      } catch (e) {
+        setLiveStatus('Source switch error: ' + (e && e.message ? e.message : String(e)));
+      } finally {
+        try {
+          document.getElementById('btnSrcYahoo').disabled = false;
+          document.getElementById('btnSrcSim').disabled = false;
+        } catch (e) {}
+      }
     }
 
     function setStatus(s) {
@@ -384,7 +1236,7 @@
         // Stop RL
         try {
           await fetch(apiBase + '/live/rl/stop', { method: 'POST' });
-          btn.textContent = '🧠 Start RL';
+          btn.textContent = 'Start RL';
           btn.style.background = 'rgba(139,92,246,0.92)';
           status.textContent = 'RL stopped';
           rlRunning = false;
@@ -396,9 +1248,9 @@
         try {
           const resp = await fetch(apiBase + '/live/rl/start', { method: 'POST' });
           const data = await resp.json();
-          btn.textContent = '⏹️ Stop RL';
+          btn.textContent = 'Stop RL';
           btn.style.background = 'rgba(16,185,129,0.92)';
-          status.textContent = 'RL active: ' + (data.message || 'learning from trades');
+          status.textContent = 'RL enabled (buffer=' + (data.buffer_size || 0) + ')';
           rlRunning = true;
         } catch(e) {
           status.textContent = 'Error: ' + e.message;
@@ -418,6 +1270,8 @@
         // Show data source and freshness
         try {
           const src = data.data_source || 'unknown';
+          document.getElementById('btnSrcYahoo').classList.toggle('active', String(src) === 'yfinance');
+          document.getElementById('btnSrcSim').classList.toggle('active', String(src) === 'simulated');
           const stale = !!data.stale;
           const age = (data.age_sec !== undefined && data.age_sec !== null) ? (Number(data.age_sec) / 60.0) : null;
           const lastBar = data.last_bar_time ? String(data.last_bar_time) : '';
@@ -427,24 +1281,35 @@
           if (stale) s += ' | STALE (market closed / delayed)';
           setLiveStatus(s);
         } catch (e) {}
+
+        try {
+          const lm = !!data.load_models;
+          const ml = !!data.models_loaded;
+          const im = (data.infer_mode !== undefined && data.infer_mode !== null) ? String(data.infer_mode) : '';
+          const me = (data.models_error !== undefined && data.models_error !== null) ? String(data.models_error) : '';
+          setModelStatus(`Models=${lm ? 'ON' : 'OFF'} | Loaded=${ml ? 'YES' : 'NO'}` + (im ? (` | Infer=${im}`) : '') + (me ? (` | Err=${me.slice(0,120)}`) : ''));
+        } catch (e) {}
         
+        const cur = String(data.currency || 'USD').toUpperCase();
+        const initialCash = Number(data.initial_cash || 0);
+
         // Update cash with animation
         const cashEl = document.getElementById('l_cash');
-        const newCash = '$' + Number(data.cash || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        const newCash = `${cur}$` + Number(data.cash || 0).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
         if (cashEl.textContent !== newCash) {
           cashEl.style.transition = 'color 0.3s';
-          cashEl.style.color = data.cash > 500000 ? '#10b981' : '#ef4444';
+          cashEl.style.color = Number(data.cash || 0) >= initialCash ? '#10b981' : '#ef4444';
           cashEl.textContent = newCash;
         }
         
         // Update total value
         const totalValue = data.total_value || data.cash || 0;
-        document.getElementById('l_total_value').textContent = '$' + Number(totalValue).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        document.getElementById('l_total_value').textContent = `${cur}$` + Number(totalValue).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
         
         // Update P&L with color
         const pnl = data.total_pnl || 0;
         const pnlEl = document.getElementById('l_pnl');
-        pnlEl.textContent = (pnl >= 0 ? '+' : '') + '$' + Number(pnl).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+        pnlEl.textContent = (pnl >= 0 ? '+' : '') + `${cur}$` + Number(pnl).toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
         pnlEl.style.color = pnl >= 0 ? '#10b981' : '#ef4444';
         
         document.getElementById('l_positions').textContent = Object.keys(data.positions || {}).length;
@@ -453,14 +1318,19 @@
         // Update mode display
         document.getElementById('l_mode').textContent = data.mode === 'offline' ? 'Offline' : 'Online';
         
-        // Populate ticker select
-        const sel = document.getElementById('liveTickerSelect');
-        const current = sel.value;
+        // Populate ticker dropdown
         const tickers = data.tickers || [];
-        if (tickers.length && !sel.options.length) {
-          fillSelect(sel, tickers, null);
+        try {
+          const key = JSON.stringify(tickers);
+          if (tickers.length && key !== lastTickersKey) {
+            lastTickersKey = key;
+            _ddFill(tickers);
+          }
+        } catch (e) {}
+
+        if (!currentLiveTicker && tickers.length) {
+          _ddSetTicker(tickers[0]);
         }
-        if (current) sel.value = current;
         
         return data;
       } catch (e) {
@@ -470,12 +1340,12 @@
     }
 
     async function loadLiveChart() {
-      const ticker = document.getElementById('liveTickerSelect').value;
+      const ticker = String(currentLiveTicker || '').toUpperCase();
       if (!ticker) return;
       
       try {
         const [chartData, tradesData] = await Promise.all([
-          apiGet(`/live/chart/${encodeURIComponent(ticker)}?limit=100`),
+          apiGet(`/live/chart/${encodeURIComponent(ticker)}?limit=600`),
           apiGet('/live/trades')
         ]);
         
@@ -487,10 +1357,56 @@
         
         if (!prices.length) {
           Plotly.purge('chart');
+          lastChartKey = '';
+          try {
+            setLiveStatus('No chart data yet (try Refresh or switch source)');
+          } catch (e) {}
           return;
         }
+
+        const last = prices[prices.length - 1] || {};
+        const chartKey = `${ticker}|${prices.length}|${String(last.time || '')}|${String(last.close || '')}|${String(last.source || '')}`;
+        if (chartKey === lastChartKey) {
+          return;
+        }
+        lastChartKey = chartKey;
         
         const x = prices.map(p => p.time);
+        const closes = prices.map(p => {
+          try {
+            const v = Number(p.close);
+            return (typeof v === 'number' && isFinite(v)) ? v : NaN;
+          } catch (e) { return NaN; }
+        });
+        const volumes = prices.map(p => {
+          try {
+            const v = Number(p.volume);
+            return (typeof v === 'number' && isFinite(v)) ? v : 0;
+          } catch (e) { return 0; }
+        });
+
+        // Prev close baseline (Yahoo-style)
+        let prevClose = null;
+        try {
+          if (prices.length >= 2) {
+            const lastDay = String(prices[prices.length - 1].time || '').slice(0, 10);
+            for (let i = prices.length - 2; i >= 0; i--) {
+              const d = String(prices[i].time || '').slice(0, 10);
+              if (d && lastDay && d !== lastDay) {
+                prevClose = Number(prices[i].close || 0);
+                break;
+              }
+            }
+          }
+        } catch (e) { prevClose = null; }
+        if (!prevClose) {
+          try { prevClose = Number(prices[0].close || 0); } catch (e) { prevClose = null; }
+        }
+        const lastClose = closes.length ? closes[closes.length - 1] : null;
+        const base = (prevClose && !isNaN(prevClose)) ? prevClose : (closes.length ? closes[0] : null);
+        const up = (lastClose !== null && base !== null) ? (lastClose >= base) : true;
+        const mainColor = up ? '#10b981' : '#ef4444';
+
         const traceCandles = {
           x,
           open: prices.map(p => p.open),
@@ -502,8 +1418,31 @@
           increasing: { line: { color: '#10b981' } },
           decreasing: { line: { color: '#ef4444' } }
         };
+
+        const traceLine = {
+          x,
+          y: closes,
+          type: 'scatter',
+          mode: 'lines+markers',
+          name: ticker,
+          line: { color: mainColor, width: 2 },
+          marker: { size: 3, color: mainColor },
+          fill: 'tozeroy',
+          fillcolor: up ? 'rgba(16,185,129,0.18)' : 'rgba(239,68,68,0.18)',
+          hovertemplate: `${ticker} $%{y:.2f}<extra></extra>`
+        };
         
-        const traces = [traceCandles];
+        const traceVol = {
+          x,
+          y: volumes,
+          type: 'bar',
+          name: 'Volume',
+          yaxis: 'y2',
+          marker: { color: 'rgba(156,163,175,0.35)' },
+          hovertemplate: 'Vol %{y}<extra></extra>'
+        };
+
+        const traces = [traceVol, (liveChartMode === 'candlestick' ? traceCandles : traceLine)];
         
         // Add buy markers
         const buys = liveTradesCache.filter(t => t.ticker === ticker && t.action === 'BUY');
@@ -531,19 +1470,92 @@
           });
         }
         
+        const shapes = [];
+        if (prevClose && !isNaN(prevClose) && prevClose > 0) {
+          shapes.push({
+            type: 'line',
+            xref: 'paper',
+            x0: 0,
+            x1: 1,
+            yref: 'y',
+            y0: prevClose,
+            y1: prevClose,
+            line: { color: 'rgba(255,255,255,0.35)', width: 1, dash: 'dot' }
+          });
+        }
+
+        // Avoid a "flat" looking chart due to y-axis including 0 (e.g. area fill).
+        // Auto-range around the actual price series.
+        let yRange = null;
+        try {
+          const ys = closes.filter(v => typeof v === 'number' && isFinite(v) && v > 0);
+          if (ys.length >= 1) {
+            let ymin = Math.min(...ys);
+            let ymax = Math.max(...ys);
+            if (isFinite(ymin) && isFinite(ymax) && ymin > 0 && ymax > 0) {
+              if (ymax <= ymin) {
+                const pad0 = Math.max(0.02 * ymin, 0.5);
+                yRange = [ymin - pad0, ymax + pad0];
+              } else {
+                const pad = Math.max(0.02 * (ymax - ymin), 0.01 * ymin);
+                yRange = [ymin - pad, ymax + pad];
+              }
+            }
+          }
+        } catch (e) { yRange = null; }
+
         const layout = {
           title: { text: `${ticker} - Live`, font: { color: '#e5e7eb' } },
           plot_bgcolor: 'rgba(17,24,39,0.96)',
           paper_bgcolor: 'rgba(17,24,39,0.96)',
           font: { color: '#e5e7eb' },
           margin: { l: 48, r: 18, t: 46, b: 32 },
-          xaxis: { rangeslider: { visible: false }, gridcolor: 'rgba(255,255,255,0.08)' },
-          yaxis: { gridcolor: 'rgba(255,255,255,0.08)' },
+          dragmode: 'pan',
+          hovermode: 'x unified',
+          shapes,
+          xaxis: {
+            rangeslider: { visible: true, thickness: 0.08 },
+            rangeselector: {
+              bgcolor: 'rgba(31,41,55,0.96)',
+              bordercolor: 'rgba(255,255,255,0.14)',
+              borderwidth: 1,
+              font: { color: '#e5e7eb', size: 12 },
+              activecolor: 'rgba(16,185,129,0.92)',
+              buttons: [
+                { count: 1, label: '1H', step: 'hour', stepmode: 'backward' },
+                { count: 6, label: '6H', step: 'hour', stepmode: 'backward' },
+                { count: 1, label: '1D', step: 'day', stepmode: 'backward' },
+                { count: 5, label: '5D', step: 'day', stepmode: 'backward' },
+                { step: 'all', label: 'ALL' }
+              ]
+            },
+            gridcolor: 'rgba(255,255,255,0.08)',
+            showspikes: true,
+            spikemode: 'across',
+            spikesnap: 'cursor',
+            spikecolor: 'rgba(255,255,255,0.22)'
+          },
+          yaxis: {
+            gridcolor: 'rgba(255,255,255,0.08)',
+            domain: [0.25, 1],
+            showspikes: true,
+            spikemode: 'across',
+            spikecolor: 'rgba(255,255,255,0.22)',
+            autorange: yRange ? false : true,
+            range: yRange || undefined
+          },
+          yaxis2: { gridcolor: 'rgba(255,255,255,0.04)', domain: [0, 0.20], fixedrange: false, showticklabels: false },
           showlegend: true,
           legend: { orientation: 'h', y: 1.1 }
         };
         
-        Plotly.newPlot('chart', traces, layout, { displayModeBar: false, responsive: true });
+        const el = document.getElementById('chart');
+        const config = { displayModeBar: true, responsive: true, scrollZoom: true };
+        if (el && el.data) {
+          Plotly.react('chart', traces, layout, config);
+        } else {
+          Plotly.newPlot('chart', traces, layout, config);
+        }
       } catch (e) {
         setLiveStatus('Chart error: ' + e.message);
       }
@@ -565,8 +1577,16 @@
 
     async function loadAgentLogs() {
       try {
-        const data = await apiGet('/live/agent_logs?limit=100');
+        if (currentTab !== 'live') return;
+        const data = await apiGet('/live/agent_logs?limit=260');
         const logs = data.logs || [];
+        const logsNoMd = logs.filter(l => {
+          try {
+            const m = String((l && l.message) ? l.message : '').toLowerCase();
+            return !m.includes('[marketdata]');
+          } catch (e) { return true; }
+        });
+        const logsForPanels = (logsNoMd.length ? logsNoMd : logs);
         
         // Categorize logs into 8 agent panels
         const panels = {
@@ -574,17 +1594,25 @@
           chartist: [], macro: [], system2: [], execution: []
         };
         
-        logs.forEach(log => {
+        logsForPanels.forEach(log => {
           const msg = (log.message || '').toLowerCase();
+          const isBackfill = msg.includes('backfill');
           // Match to appropriate panel - each log can go to multiple panels if relevant
           if (msg.includes('planner')) panels.planner.push(log);
           if (msg.includes('gatekeeper')) panels.gatekeeper.push(log);
           if (msg.includes('scalper')) panels.scalper.push(log);
           if (msg.includes('analyst') || msg.includes('dpo')) panels.analyst.push(log);
           if (msg.includes('chartist') || msg.includes('vlm') || msg.includes('pattern')) panels.chartist.push(log);
-          if (msg.includes('macro') || msg.includes('governor') || msg.includes('regime')) panels.macro.push(log);
+          if (msg.includes('macro') || msg.includes('governor')) panels.macro.push(log);
           if (msg.includes('system 2') || msg.includes('debate') || msg.includes('judge')) panels.system2.push(log);
-          if (msg.includes('fill') || msg.includes('execution') || msg.includes('order') || log.type === 'fill') panels.execution.push(log);
+          const isExec = (
+            (!isBackfill && (msg.includes('[fill]') || msg.includes(' fill ') || msg.startsWith('fill '))) ||
+            msg.includes('execution') ||
+            msg.includes(' order ') || msg.startsWith('order ') ||
+            msg.includes(' signal ') || msg.startsWith('signal ') ||
+            log.type === 'fill'
+          );
+          if (isExec) panels.execution.push(log);
         });
         
         // Update each panel
@@ -603,10 +1631,11 @@
         
         // Bottom terminal panel (all logs)
         const el = document.getElementById('agentLog');
-        if (!logs.length) {
+        const logsForTerminal = (logsNoMd.length ? logsNoMd : logs);
+        if (!logsForTerminal.length) {
           el.innerHTML = '<span style="color: #6b7280;">(Waiting for logs...)</span>';
         } else {
-          el.innerHTML = logs.slice(-30).map(log => {
+          el.innerHTML = logsForTerminal.slice(-30).map(log => {
             let color = '#9ca3af';
             if (log.type === 'fill') color = '#10b981';
             else if (log.type === 'error') color = '#ef4444';
@@ -615,48 +1644,168 @@
           }).join('');
           el.scrollTop = el.scrollHeight;
         }
+
+        // Live2D bubble shows reasoning snippets (not final answer)
+        try {
+          const keyLogs = (logsForPanels || []).filter(l => {
+            const m = String((l && l.message) ? l.message : '').toLowerCase();
+            return (
+              m.includes('planner') ||
+              m.includes('gatekeeper') ||
+              m.includes('router') ||
+              m.includes('[committee]') ||
+              m.includes('macro') ||
+              m.includes('system 2') ||
+              m.includes('debate')
+            );
+          }).slice(-4);
+
+          const lines = keyLogs.map(l => {
+            const t0 = String(l.time || '').slice(0, 8);
+            let s = String(l.message || '');
+            if (s.length > 90) s = s.slice(0, 90) + '…';
+            return (t0 ? ('[' + t0 + '] ') : '') + s;
+          }).join('\n');
+
+          if (lines && lines !== _lastReasoningText) {
+            _lastReasoningText = lines;
+            _mariBubble(lines);
+          }
+        } catch (e) {}
       } catch (e) {
         // Silently fail if not available
       }
     }
 
     async function loadLiveData() {
+      if (liveLoading) return;
+      liveLoading = true;
       setLiveStatus('Refreshing...');
-      await loadLiveStatus();
-      await loadLiveChart();
-      await loadAgentLogs();
-      renderTradeLog();
-      setLiveStatus('Updated ' + new Date().toLocaleTimeString());
+      try {
+        await loadLiveStatus();
+        try {
+          await loadMarketsTiles();
+        } catch (e) {}
+        try {
+          await loadMariChat();
+        } catch (e) {}
+        // If we still have no selected ticker, don't try to render chart.
+        if (!currentLiveTicker) {
+          setLiveStatus('Waiting for ticker list...');
+          return;
+        }
+        await loadLiveChart();
+        await loadAgentLogs();
+        renderTradeLog();
+        setLiveStatus('Updated ' + new Date().toLocaleTimeString());
+      } finally {
+        liveLoading = false;
+      }
     }
 
     // ===== INIT =====
     async function init() {
+      // Force-refresh Mari iframe to avoid WebView2 caching old /ui/index.html.
+      try {
+        const f = document.getElementById('mariFrame');
+        if (f) {
+          const base = String(f.getAttribute('src') || f.src || '').split('&v=')[0];
+          const sep = base.includes('?') ? '&' : '?';
+          f.src = base + sep + 'v=' + Date.now();
+          _setMariConn('Live2D: connecting...');
+          _mariReady = false;
+          setTimeout(() => {
+            try {
+              if (!_mariReady) {
+                _setMariConn('Live2D: not connected');
+              }
+            } catch (e) {}
+          }, 5000);
+        }
+      } catch (e) {}
+
       // Try live first
       try {
+        try {
+          const volEl = document.getElementById('ttsVol');
+          const volValEl = document.getElementById('ttsVolVal');
+          const k = 'mari_tts_volume';
+          let v = null;
+          try { v = localStorage.getItem(k); } catch (e) { v = null; }
+          let f = v !== null ? Number(v) : 0.85;
+          if (!isFinite(f)) f = 0.85;
+          f = Math.max(0, Math.min(1, f));
+          _ttsVolume = f;
+          if (volEl) {
+            volEl.value = String(Math.round(_ttsVolume * 100));
+            const _applyVol = () => {
+              try {
+                const x = Number(volEl.value);
+                const vf = isFinite(x) ? (Math.max(0, Math.min(100, x)) / 100.0) : 0.85;
+                _ttsVolume = vf;
+                try { localStorage.setItem(k, String(vf)); } catch (e) {}
+                if (volValEl) volValEl.textContent = String(Math.round(vf * 100)) + '%';
+                try {
+                  if (_ttsAudio) {
+                    _ttsAudio.volume = (isFinite(vf) ? Math.max(0, Math.min(1, vf)) : 0.85);
+                  }
+                } catch (e) {}
+              } catch (e) {}
+            };
+            volEl.addEventListener('input', _applyVol);
+            volEl.addEventListener('change', _applyVol);
+          }
+          if (volValEl) volValEl.textContent = String(Math.round(_ttsVolume * 100)) + '%';
+        } catch (e) {}
+
         await loadLiveData();
+        try {
+          await loadMarketsTiles();
+        } catch (e) {}
         try {
           const rs = await apiGet('/live/rl/status');
           rlRunning = !!(rs && rs.enabled);
           const btn = document.getElementById('btnRL');
           const status = document.getElementById('rlStatus');
           if (rlRunning) {
-            btn.textContent = '⏹️ Stop RL';
+            btn.textContent = 'Stop RL';
             btn.style.background = 'rgba(16,185,129,0.92)';
             status.textContent = 'RL active';
           } else {
-            btn.textContent = '🧠 Start RL';
+            btn.textContent = 'Start RL';
             btn.style.background = 'rgba(139,92,246,0.92)';
             status.textContent = '';
           }
         } catch (e) {}
         startAutoRefresh();
+        try {
+          await pollNightlyTraining();
+          if (!trainPoll) {
+            trainPoll = setInterval(pollNightlyTraining, 2000);
+          }
+        } catch (e) {}
+
+        try {
+          await pollAlphaTraining();
+          if (!alphaPoll) {
+            alphaPoll = setInterval(pollAlphaTraining, 2000);
+          }
+        } catch (e) {}
       } catch (e) {
         setLiveStatus('Live not available');
       }
       
       // Setup backtest controls
       document.getElementById('btnLoad').addEventListener('click', loadSnapshot);
-      document.getElementById('liveTickerSelect').addEventListener('change', loadLiveChart);
+      document.getElementById('liveTickerBtn').addEventListener('click', (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        _ddToggle();
+      });
+
+      document.addEventListener('click', () => {
+        _ddClose();
+      });
 
       document.getElementById('runSelect').addEventListener('change', async () => {
         await loadDates();

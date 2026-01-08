@@ -286,15 +286,21 @@ class OnlineLearningManager:
         self,
         update_interval_trades: int = 50,
         min_experiences: int = 100,
-        enable_updates: bool = True  # Enabled for live learning
+        enable_updates: bool = False  # Enabled only when explicitly started
     ):
         self.experience_buffer = ExperienceBuffer()
         self.reward_shaper = RewardShaper()
         self.preference_logger = PreferenceLogger()
-        
+
+        self.enabled = bool(enable_updates)
+        self.learning_rate = 0.001
+
         self.update_interval = update_interval_trades
         self.min_experiences = min_experiences
         self.enable_updates = enable_updates
+
+        self.buffer = self.experience_buffer.buffer
+        self.update_count = 0
         
         self.trade_count = 0
         self.last_update_trade = 0
@@ -316,6 +322,8 @@ class OnlineLearningManager:
         exit_reason: str
     ) -> None:
         """Called when a trade is closed"""
+        if not bool(getattr(self, "enabled", False)):
+            return
         self.trade_count += 1
         
         # Compute reward
@@ -369,6 +377,10 @@ class OnlineLearningManager:
     def _trigger_update(self) -> None:
         """Trigger a model update (placeholder for actual implementation)"""
         self.last_update_trade = self.trade_count
+        try:
+            self.update_count = int(getattr(self, "update_count", 0) or 0) + 1
+        except Exception:
+            self.update_count = 1
         
         # Sample experiences for training
         batch = self.experience_buffer.sample(batch_size=64)
@@ -407,5 +419,5 @@ def get_online_learning_manager() -> OnlineLearningManager:
     """Get the global online learning manager"""
     global _online_learning_manager
     if _online_learning_manager is None:
-        _online_learning_manager = OnlineLearningManager()
+        _online_learning_manager = OnlineLearningManager(enable_updates=False)
     return _online_learning_manager

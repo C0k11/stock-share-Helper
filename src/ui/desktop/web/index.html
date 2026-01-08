@@ -23,17 +23,17 @@
     #canvas { display: block; background: transparent; }
     .bubble {
       position: absolute;
-      top: 20px;
-      right: 20px;
+      top: 12px;
+      left: 14px;
       background: var(--bubble-bg);
       border: 2px solid var(--bubble-border);
-      padding: 15px;
-      border-radius: 15px 15px 0 15px;
+      padding: 8px 10px;
+      border-radius: 12px 12px 12px 2px;
       font-family: 'Segoe UI', sans-serif;
-      font-size: 16px;
+      font-size: 12px;
       color: var(--bubble-fg);
       box-shadow: 0 4px 10px rgba(0,0,0,0.1);
-      max-width: 320px;
+      max-width: 220px;
       display: none;
       opacity: 0;
       transition: opacity 0.3s;
@@ -119,7 +119,6 @@
     }
   </style>
   <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/qwebchannel/6.5.3/qwebchannel.js"></script>
 </head>
 <body>
   <canvas id="canvas"></canvas>
@@ -151,14 +150,52 @@
     window.__layout_hint = null;
     window.__scene_hint = null;
 
-    function showBubble(text) {
+    let __bubbleHideTimer = null;
+
+    function _bubbleShowNow(text) {
       const b = document.getElementById('bubble');
-      b.innerText = text;
+      if (!b) return;
+      b.innerText = String(text || '');
       b.style.display = 'block';
       setTimeout(() => { b.style.opacity = 1; }, 10);
-      setTimeout(() => {
-        b.style.opacity = 0;
-        setTimeout(() => { b.style.display = 'none'; }, 300);
+    }
+
+    function clearBubble() {
+      const b = document.getElementById('bubble');
+      if (!b) return;
+      if (__bubbleHideTimer) {
+        try { clearTimeout(__bubbleHideTimer); } catch (e) {}
+        __bubbleHideTimer = null;
+      }
+      b.style.opacity = 0;
+      setTimeout(() => { b.style.display = 'none'; }, 300);
+    }
+
+    function setBubbleText(text) {
+      if (__bubbleHideTimer) {
+        try { clearTimeout(__bubbleHideTimer); } catch (e) {}
+        __bubbleHideTimer = null;
+      }
+      _bubbleShowNow(text);
+    }
+
+    function appendBubbleText(text) {
+      const b = document.getElementById('bubble');
+      if (!b) return;
+      const cur = String(b.innerText || '');
+      const next = cur ? (cur + String(text || '')) : String(text || '');
+      setBubbleText(next);
+    }
+
+    function showBubble(text) {
+      if (__bubbleHideTimer) {
+        try { clearTimeout(__bubbleHideTimer); } catch (e) {}
+        __bubbleHideTimer = null;
+      }
+      _bubbleShowNow(text);
+      __bubbleHideTimer = setTimeout(() => {
+        __bubbleHideTimer = null;
+        clearBubble();
       }, 4000);
     }
 
@@ -304,11 +341,26 @@
         return;
       }
 
+      const _getEffectiveDpr = () => {
+        try {
+          const dpr = (window.devicePixelRatio || 1);
+          const vv = window.visualViewport;
+          const scale = vv && isFinite(vv.scale) ? Number(vv.scale) : 1;
+          const eff = dpr * scale;
+          return Math.max(1, Math.min(6, eff));
+        } catch (e) {
+          return Math.max(1, Math.min(6, (window.devicePixelRatio || 1)));
+        }
+      };
+
       const app = new PIXI.Application({
         view: document.getElementById('canvas'),
         autoStart: true,
         resizeTo: window,
-        backgroundAlpha: 0
+        backgroundAlpha: 0,
+        autoDensity: true,
+        resolution: _getEffectiveDpr(),
+        antialias: true
       });
 
       if (!dockContainer) {
@@ -454,6 +506,77 @@
         currentModel = model;
         layoutModel(model);
 
+        // Mouse/pointer tracking: map cursor to normalized gaze target [-1..1].
+        // We use the computed eye anchor from layoutModel to avoid "looking" from the wrong origin.
+        function updateGazeFromClientXY(clientX, clientY) {
+          try {
+            const cfg = window.__track_cfg || {};
+            const a = window.__eye_anchor || { x: window.innerWidth * 0.5, y: window.innerHeight * 0.35, w: window.innerWidth * 0.6, h: window.innerHeight * 0.8 };
+            const oxr = Number(cfg.eyeXOffsetRatio);
+            const oyr = Number(cfg.eyeYOffsetRatio);
+            const ox = (isFinite(oxr) ? oxr : -0.04) * (Number(a.w || 1));
+            const oy = (isFinite(oyr) ? oyr : 0.13) * (Number(a.h || 1));
+            const ex = Number(a.x || 0) + ox;
+            const ey = Number(a.y || 0) + oy;
+
+            const dx = Number(clientX || 0) - ex;
+            const dy = Number(clientY || 0) - ey;
+
+            const denomX = Math.max(120, (Number(a.w || 1) * 0.55));
+            const denomYScale = Number(cfg.denomYScale);
+            const denomY = Math.max(70, (Number(a.h || 1) * (isFinite(denomYScale) ? denomYScale : 0.24)));
+
+            let nx = dx / denomX;
+            let ny = -(dy / denomY);
+
+            nx = Math.max(-1, Math.min(1, nx));
+            ny = Math.max(-1, Math.min(1, ny));
+
+            if (gazeState) {
+              gazeState.tx = nx;
+              gazeState.ty = ny;
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+
+        function onPointerMove(ev) {
+          try {
+            const x = (ev && typeof ev.clientX === 'number') ? ev.clientX : 0;
+            const y = (ev && typeof ev.clientY === 'number') ? ev.clientY : 0;
+            updateGazeFromClientXY(x, y);
+          } catch (e) {}
+        }
+
+        // Note: pointer events only fire inside the iframe. Parent dashboard will also forward
+        // global mouse via postMessage; we listen to both sources.
+        try {
+          window.addEventListener('pointermove', onPointerMove, { passive: true });
+          window.addEventListener('mousemove', onPointerMove, { passive: true });
+        } catch (e) {}
+
+        try {
+          window.addEventListener('message', (ev) => {
+            const d = ev ? ev.data : null;
+            if (!d || typeof d !== 'object') return;
+            if (d.type === 'mari_mouse') {
+              // x/y are in iframe local coords.
+              if (typeof window.setMousePx === 'function') {
+                window.setMousePx(Number(d.x || 0), Number(d.y || 0));
+              } else {
+                updateGazeFromClientXY(Number(d.x || 0), Number(d.y || 0));
+              }
+            }
+          });
+        } catch (e) {}
+
+        try {
+          if (window.parent && window.parent !== window) {
+            window.parent.postMessage({ type: 'mari_ready' }, '*');
+          }
+        } catch (e) {}
+
         // Smooth gaze application inside PIXI ticker to reduce runJavaScript overhead.
         gazeState = { tx: 0, ty: 0, x: 0, y: 0, acc: 0 };
         app.ticker.add((delta) => {
@@ -520,9 +643,29 @@
         showBubble('右侧离线模式：模型加载失败。');
       });
 
+      const _applyDpi = () => {
+        try {
+          const r = _getEffectiveDpr();
+          if (app && app.renderer) {
+            try { app.renderer.resolution = r; } catch (e) {}
+            try { app.renderer.resize(window.innerWidth, window.innerHeight); } catch (e) {}
+          }
+        } catch (e) {}
+      };
+
       window.addEventListener('resize', () => {
+        _applyDpi();
         if (currentModel) layoutModel(currentModel);
       });
+
+      try {
+        if (window.visualViewport) {
+          window.visualViewport.addEventListener('resize', () => {
+            _applyDpi();
+            if (currentModel) layoutModel(currentModel);
+          });
+        }
+      } catch (e) {}
     }
 
     // Centralized tuning knobs (edit these values to fine-tune gaze center & amplitude).

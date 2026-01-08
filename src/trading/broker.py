@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any, Dict
 
@@ -13,6 +13,7 @@ class Position:
     ticker: str
     shares: float
     avg_price: float
+    trace_ids: list[str] = field(default_factory=list)
 
 
 class PaperBroker:
@@ -29,6 +30,21 @@ class PaperBroker:
         price = float(signal.get("price") or 0.0)
         shares = float(signal.get("shares") or 0.0)
         trace_id = str(signal.get("trace_id") or "").strip() or None
+        trace_ids_raw = signal.get("trace_ids")
+        trace_ids: list[str] = []
+        try:
+            if isinstance(trace_ids_raw, (list, tuple)):
+                for x in trace_ids_raw:
+                    s = str(x or "").strip()
+                    if s:
+                        trace_ids.append(s)
+        except Exception:
+            trace_ids = []
+        if trace_id and trace_id not in trace_ids:
+            trace_ids.append(trace_id)
+
+        expert = str(signal.get("expert") or "").strip()
+        analysis = str(signal.get("analysis") or "")
         if not ticker or not action or price <= 0 or shares == 0:
             return
 
@@ -42,7 +58,7 @@ class PaperBroker:
             self.cash -= total_cost
             pos = self.positions.get(ticker)
             if pos is None:
-                self.positions[ticker] = Position(ticker=ticker, shares=shares, avg_price=price)
+                self.positions[ticker] = Position(ticker=ticker, shares=shares, avg_price=price, trace_ids=list(trace_ids))
             else:
                 new_shares = pos.shares + shares
                 if new_shares == 0:
@@ -50,6 +66,12 @@ class PaperBroker:
                 else:
                     pos.avg_price = (pos.avg_price * pos.shares + price * shares) / new_shares
                     pos.shares = new_shares
+                    try:
+                        for rid in list(trace_ids):
+                            if rid and rid not in pos.trace_ids:
+                                pos.trace_ids.append(rid)
+                    except Exception:
+                        pass
 
         elif action == "SELL":
             pos = self.positions.get(ticker)
@@ -66,13 +88,16 @@ class PaperBroker:
                 pos.shares = remaining
 
             try:
-                if trace_id:
+                if getattr(pos, "trace_ids", None):
                     realized = (price - entry_price) * float(sell_shares) - float(commission)
-                    evolution_recorder.log_outcome(
-                        ref_id=trace_id,
-                        outcome=float(realized),
-                        comment=f"realized_pnl={realized:.4f} entry={entry_price:.4f} exit={price:.4f} shares={sell_shares:.4f}",
-                    )
+                    for rid in list(pos.trace_ids):
+                        if not rid:
+                            continue
+                        evolution_recorder.log_outcome(
+                            ref_id=str(rid),
+                            outcome=float(realized),
+                            comment=f"realized_pnl={realized:.4f} entry={entry_price:.4f} exit={price:.4f} shares={sell_shares:.4f}",
+                        )
             except Exception:
                 pass
         else:
@@ -88,5 +113,8 @@ class PaperBroker:
             "action": action,
             "commission": commission,
             "trace_id": trace_id,
+            "trace_ids": trace_ids,
+            "expert": expert,
+            "analysis": analysis,
         }
         self.engine.push_event(Event(type=EventType.FILL, timestamp=datetime.now(), payload=fill))

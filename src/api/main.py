@@ -18,11 +18,13 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import re
+import random
 import yaml
 import pandas as pd
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from starlette.concurrency import run_in_threadpool
 from loguru import logger
 from pydantic import BaseModel
@@ -39,10 +41,44 @@ app = FastAPI(
 )
 
 
+@app.middleware("http")
+async def _disable_ui_cache(request: Request, call_next):
+    resp = await call_next(request)
+    try:
+        p = str(getattr(request, "url", None).path or "")
+        if p == "/dashboard.html" or p.startswith("/ui/"):
+            resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+            resp.headers["Pragma"] = "no-cache"
+            resp.headers["Expires"] = "0"
+    except Exception:
+        pass
+    return resp
+
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 RESULTS_DIR = REPO_ROOT / "results"
 DATA_DIR = REPO_ROOT / "data"
 SECRETARY_CONFIG_PATH = REPO_ROOT / "configs" / "secretary.yaml"
+
+_DESKTOP_WEB_DIR = REPO_ROOT / "src" / "ui" / "desktop" / "web"
+try:
+    if _DESKTOP_WEB_DIR.exists():
+        app.mount("/ui", StaticFiles(directory=str(_DESKTOP_WEB_DIR), html=True), name="ui")
+except Exception:
+    pass
+
+_LIVE2D_MARI_DIR = REPO_ROOT / "玛丽偶像 _vts"
+_LIVE2D_CHANGLI_DIR = REPO_ROOT / "长离带水印" / "长离带水印"
+try:
+    if _LIVE2D_MARI_DIR.exists():
+        app.mount("/live2d_mari", StaticFiles(directory=str(_LIVE2D_MARI_DIR), html=False), name="live2d_mari")
+except Exception:
+    pass
+try:
+    if _LIVE2D_CHANGLI_DIR.exists():
+        app.mount("/live2d_changli", StaticFiles(directory=str(_LIVE2D_CHANGLI_DIR), html=False), name="live2d_changli")
+except Exception:
+    pass
 
 AGENT_HUB_DIR = DATA_DIR / "agent_hub"
 AGENT_HUB_DIR.mkdir(parents=True, exist_ok=True)
@@ -50,12 +86,59 @@ AGENT_AUDIT_PATH = AGENT_HUB_DIR / "audit.jsonl"
 CHAT_LOG_PATH = AGENT_HUB_DIR / "chat.jsonl"
 TRAJECTORY_LOG_PATH = AGENT_HUB_DIR / "trajectory.jsonl"
 
+
+@app.get("/")
+async def root():
+    try:
+        fp = _DESKTOP_WEB_DIR / "dashboard.html"
+        if fp.exists():
+            return RedirectResponse(url="/dashboard.html")
+    except Exception:
+        pass
+    return {"ok": True}
+
+
+@app.get("/dashboard.html")
+async def dashboard_html():
+    fp = _DESKTOP_WEB_DIR / "dashboard.html"
+    if not fp.exists():
+        raise HTTPException(status_code=404, detail="dashboard.html not found")
+    return FileResponse(str(fp))
+
 _SECRETARY_CFG: Optional[Dict[str, Any]] = None
 _SECRETARY_CFG_MTIME: Optional[float] = None
 
 _AGENT_LOCK = threading.Lock()
 _NEWS_JOBS: Dict[str, Dict[str, Any]] = {}
 _TASKS: Dict[str, Dict[str, Any]] = {}
+
+_EVOLUTION_TRAIN_LOCK = threading.Lock()
+_EVOLUTION_TRAIN_PROC: Optional[subprocess.Popen] = None
+_EVOLUTION_TRAIN_FH: Optional[Any] = None
+_EVOLUTION_TRAIN_LOG: Optional[Path] = None
+_EVOLUTION_TRAIN_CMD: Optional[List[str]] = None
+_EVOLUTION_TRAIN_STARTED_AT: Optional[str] = None
+_EVOLUTION_TRAIN_WATCHER: Optional[threading.Thread] = None
+
+_SOVITS_LOCK = threading.Lock()
+_SOVITS_RESUME_AFTER_TRAIN: bool = False
+_SOVITS_RESTARTED_AFTER_TRAIN: bool = False
+
+_RL_LOCK = threading.Lock()
+_SOVITS_RESUME_AFTER_RL: bool = False
+_SOVITS_RESTARTED_AFTER_RL: bool = False
+
+_ALPHA_TRAIN_LOCK = threading.Lock()
+_ALPHA_TRAIN_PROC: Optional[subprocess.Popen] = None
+_ALPHA_TRAIN_FH: Optional[Any] = None
+_ALPHA_TRAIN_LOG: Optional[Path] = None
+_ALPHA_TRAIN_CMD: Optional[List[str]] = None
+_ALPHA_TRAIN_STARTED_AT: Optional[str] = None
+_ALPHA_TRAIN_WATCHER: Optional[threading.Thread] = None
+_ALPHA_TRAIN_OUTPUT_DIR: Optional[str] = None
+_ALPHA_TRAIN_SFT_ADAPTER: Optional[str] = None
+_SOVITS_RESUME_AFTER_ALPHA: bool = False
+_SOVITS_RESTARTED_AFTER_ALPHA: bool = False
 
 # Short-lived per-session state for better conversational continuity (desktop only).
 _SESSION_STATE: Dict[str, Dict[str, Any]] = {}
@@ -69,6 +152,272 @@ def _get_session_id(ctx: Dict[str, Any]) -> Optional[str]:
         return sid or None
     except Exception:
         return None
+
+
+def _agent_logs_digest(*, text: str, ctx: Dict[str, Any]) -> Optional[str]:
+    tl = str(text or "").lower()
+    if _live_runner is None:
+        return None
+
+    want_any = any(
+        k in tl
+        for k in (
+            "planner",
+            "gatekeeper",
+            "scalper",
+            "analyst",
+            "chartist",
+            "macro",
+            "system 2",
+            "system2",
+            "debate",
+            "路由",
+            "router",
+            "moe",
+        )
+    )
+    if not want_any:
+        return None
+
+    try:
+        tk = _extract_ticker_hint(str(text or ""))
+        if tk:
+            tk = str(tk).upper().strip()
+    except Exception:
+        tk = None
+
+    logs = getattr(_live_runner, "agent_logs", [])
+    if not isinstance(logs, list) or (not logs):
+        return "Sensei, 我这边还没收到 Multi-Agent 的终端日志（agent_logs 为空）。"
+
+    tail = logs[-300:]
+    groups = {
+        "planner": [],
+        "gatekeeper": [],
+        "router": [],
+        "scalper": [],
+        "analyst": [],
+        "chartist": [],
+        "macro": [],
+        "system2": [],
+    }
+
+    def _push(key: str, item: dict) -> None:
+        try:
+            groups[key].append(item)
+            if len(groups[key]) > 6:
+                groups[key] = groups[key][-6:]
+        except Exception:
+            return
+
+    for it in tail:
+        try:
+            msg = str((it or {}).get("message") or "")
+            m = msg.lower()
+            if tk and (tk not in msg.upper()):
+                continue
+            if "planner" in m:
+                _push("planner", it)
+            if "gatekeeper" in m:
+                _push("gatekeeper", it)
+            if "moe router" in m or "router" in m:
+                _push("router", it)
+            if "scalper" in m:
+                _push("scalper", it)
+            if "analyst" in m or "dpo" in m:
+                _push("analyst", it)
+            if "chartist" in m or "vlm" in m:
+                _push("chartist", it)
+            if "macro" in m or "governor" in m or "regime" in m:
+                _push("macro", it)
+            if "system 2" in m or "system2" in m or "debate" in m or "judge" in m:
+                _push("system2", it)
+        except Exception:
+            continue
+
+    order = ["planner", "gatekeeper", "router", "scalper", "analyst", "chartist", "macro", "system2"]
+    title_map = {
+        "planner": "Planner",
+        "gatekeeper": "Gatekeeper",
+        "router": "MoE Router",
+        "scalper": "Scalper",
+        "analyst": "Analyst",
+        "chartist": "Chartist",
+        "macro": "Macro",
+        "system2": "System2",
+    }
+
+    lines: list[str] = []
+    head = "Sensei, 我直接从 Multi-Agent 终端里摘取了最近输出："
+    if tk:
+        head = head + f" (ticker={tk})"
+    lines.append(head)
+
+    any_out = False
+    for k in order:
+        items = groups.get(k) or []
+        if not items:
+            continue
+        any_out = True
+        lines.append(f"\n[{title_map.get(k, k)}]")
+        for it in items:
+            t0 = str((it or {}).get("time") or "")
+            msg0 = str((it or {}).get("message") or "")
+            lines.append(f"- [{t0}] {msg0}")
+
+    if not any_out:
+        try:
+            t0 = str((tail[-1] or {}).get("time") or "")
+            msg0 = str((tail[-1] or {}).get("message") or "")
+            return "\n".join(
+                [
+                    "Sensei, 我这边能看到 live 终端在输出，但没有命中 planner/gatekeeper/chartist 等关键字。",
+                    f"最近一条：[{t0}] {msg0}",
+                ]
+            )
+        except Exception:
+            return "Sensei, 我这边能看到 live 终端在输出，但没有命中 planner/gatekeeper/chartist 等关键字。"
+
+    return "\n".join(lines)
+
+
+def _models_status_digest(*, text: str, ctx: Dict[str, Any]) -> Optional[str]:
+    t = str(text or "")
+    tl = t.lower()
+    want = any(
+        k in tl
+        for k in (
+            "models",
+            "model",
+            "loaded",
+            "load models",
+            "on",
+            "off",
+            "模型",
+            "开了吗",
+            "开着",
+            "关了",
+            "有没有在工作",
+            "有在工作",
+            "在工作吗",
+        )
+    )
+    if (not want) and ("工作" in t) and ("吗" in t or "?" in t or "？" in t):
+        want = True
+    if not want:
+        return None
+    if _live_runner is None:
+        return "Sensei, live 引擎还没有启动，所以现在没有 Multi-Agent 在跑。"
+    try:
+        lm = bool(getattr(_live_runner, "load_models", False))
+    except Exception:
+        lm = False
+    try:
+        stg = getattr(_live_runner, "strategy", None)
+        ml = bool(getattr(stg, "models_loaded", False)) if stg is not None else False
+    except Exception:
+        ml = False
+    try:
+        me = str(getattr(getattr(_live_runner, "strategy", None), "models_error", "") or "").strip()
+    except Exception:
+        me = ""
+    infer_mode = "REAL" if (lm and ml) else "HEURISTIC"
+    tail = ""
+    if me:
+        tail = f" (Err={me[:120]})"
+    if infer_mode == "REAL":
+        return f"Sensei, 现在模型是 ON 的：Models=ON | Loaded=YES | Infer=REAL{tail}"
+    return (
+        f"Sensei, 现在模型还没真正加载：Models={'ON' if lm else 'OFF'} | Loaded={'YES' if ml else 'NO'} | Infer=HEURISTIC{tail}\n"
+        "终端仍然会有输出是因为策略会用 heuristic/规则推理兜底（不代表 GPU MoE 已经启用）。"
+    )
+
+
+def _portfolio_digest(*, text: str, ctx: Dict[str, Any]) -> Optional[str]:
+    tl = str(text or "").lower()
+    if _live_runner is None:
+        return None
+
+    want = any(
+        k in tl
+        for k in (
+            "position",
+            "positions",
+            "portfolio",
+            "cash",
+            "trade",
+            "trades",
+            "holdings",
+            "stock",
+            "stocks",
+            "持仓",
+            "仓位",
+            "建仓",
+            "入场",
+            "开仓",
+            "买入",
+            "卖出",
+            "现金",
+            "账户",
+            "股票",
+        )
+    )
+    if not want:
+        return None
+
+    try:
+        cash = float(getattr(getattr(_live_runner, "broker", None), "cash", 0.0) or 0.0)
+    except Exception:
+        cash = 0.0
+
+    try:
+        cur = str(getattr(_live_runner, "currency", "USD") or "USD")
+    except Exception:
+        cur = "USD"
+
+    positions = {}
+    try:
+        positions = getattr(getattr(_live_runner, "broker", None), "positions", {})
+        if not isinstance(positions, dict):
+            positions = {}
+    except Exception:
+        positions = {}
+
+    lines: list[str] = []
+    lines.append(f"Cash: {cur}${cash:,.2f}")
+    lines.append(f"Positions: {len(list(positions.keys()))}")
+
+    if positions:
+        for tk, pos in list(positions.items())[:12]:
+            try:
+                tku = str(tk or "").upper()
+                sh = float(getattr(pos, "shares", 0.0) or 0.0)
+                ap = float(getattr(pos, "avg_price", 0.0) or 0.0)
+                lines.append(f"- {tku}: shares={sh:g} avg=${ap:.2f}")
+            except Exception:
+                continue
+
+    trades = []
+    try:
+        trades = getattr(_live_runner, "trade_log", [])
+        if not isinstance(trades, list):
+            trades = []
+    except Exception:
+        trades = []
+    if trades:
+        lines.append("Recent Trades:")
+        for tr in trades[-5:]:
+            try:
+                lines.append(
+                    f"- [{str(tr.get('time') or '')[:19].replace('T',' ')}] {str(tr.get('action') or '')} {str(tr.get('ticker') or '')} x{tr.get('shares')} @ ${float(tr.get('price') or 0.0):.2f}"
+                )
+            except Exception:
+                continue
+
+    if not positions and not trades:
+        lines.append("No positions and no trades recorded yet.")
+
+    return "\n".join(lines)
 
 
 def _get_session_state(ctx: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -195,7 +544,8 @@ def _elaborate_task(task_id: str) -> str:
             "2) 然后逐条细化（每条 2-4 句：为什么、怎么做、注意什么）\n"
             "要求：用中文，明确、可执行。"
         )
-        expanded = _call_llm_direct(system_prompt=expand_prompt, user_text=base, temperature=0.2, max_tokens=650)
+        # Use 'secretary' adapter for elaboration
+        expanded = _call_llm_direct(system_prompt=expand_prompt, user_text=base, temperature=0.2, max_tokens=650, adapter="secretary")
         if isinstance(expanded, str) and expanded.strip():
             return (expanded.strip() + f"\n\n(task_id={task_id})").strip()
     except Exception:
@@ -270,6 +620,11 @@ class FeedbackRequest(BaseModel):
     message_id: str
     score: int
     comment: str = ""
+
+
+class TtsRequest(BaseModel):
+    text: str
+    preset: str = "gentle"
 
 
 class NewsSubmitRequest(BaseModel):
@@ -1013,11 +1368,10 @@ def _load_recent_audit(limit: int = 200) -> List[Dict[str, Any]]:
         return []
 
 
-def _call_llm_direct(*, system_prompt: str, user_text: str, temperature: Optional[float] = None, max_tokens: Optional[int] = None) -> Optional[str]:
+def _call_llm_direct(*, system_prompt: str, user_text: str, temperature: Optional[float] = None, max_tokens: Optional[int] = None, adapter: Optional[str] = None) -> Optional[str]:
     cfg = _get_secretary_config()
     llm_cfg = cfg.get("llm") if isinstance(cfg.get("llm"), dict) else {}
 
-    mode = str((llm_cfg or {}).get("mode") or "api").strip().lower()
     try:
         t = float((llm_cfg or {}).get("temperature", 0.7)) if temperature is None else float(temperature)
     except Exception:
@@ -1027,30 +1381,32 @@ def _call_llm_direct(*, system_prompt: str, user_text: str, temperature: Optiona
     except Exception:
         mt = 256
 
-    if mode == "local":
+    # 1. Try Shared Model (A2 Architecture) - Primary Choice
+    # This ensures tasks/news analysis use the loaded Qwen 7B model if available.
+    if _live_runner and getattr(_live_runner, "strategy", None):
         try:
-            from src.llm.local_chat import chat as local_chat
-            local_model = str((llm_cfg or {}).get("local_model") or "Qwen/Qwen3-8B")
-            local_adapter = str((llm_cfg or {}).get("local_adapter") or "").strip() or None
-            use_4bit = bool((llm_cfg or {}).get("use_4bit", False))
-            use_8bit = bool((llm_cfg or {}).get("use_8bit", True))
-            messages = [
-                {"role": "system", "content": str(system_prompt)},
-                {"role": "user", "content": str(user_text)},
-            ]
-            resp = local_chat(
-                messages,
-                model_name=local_model,
-                temperature=t,
-                max_new_tokens=mt,
-                use_4bit=use_4bit,
-                use_8bit=use_8bit,
-                adapter_path=local_adapter,
-            )
-            return resp.strip() if isinstance(resp, str) and resp.strip() else None
+            # Check if models are actually loaded
+            if _live_runner.strategy.models_loaded:
+                resp = _live_runner.strategy.generic_inference(
+                    user_msg=user_text,
+                    system_prompt=system_prompt,
+                    temperature=t,
+                    max_new_tokens=mt,
+                    adapter=adapter # Use specific adapter if requested (e.g., 'analyst'), else None (Base)
+                )
+                if resp:
+                    return resp.strip()
         except Exception as e:
-            logger.error(f"[LLM] local direct error: {e}")
-            return None
+            logger.error(f"[LLM] shared model direct error: {e}")
+            # Fallthrough to other methods
+
+    mode = str((llm_cfg or {}).get("mode") or "api").strip().lower()
+    
+    if mode == "local":
+        # Legacy local mode - only if shared model failed or not ready
+        # In A2 architecture, we do NOT want to load a separate local model.
+        # If shared model failed, we return None (fallback to rules/templates).
+        return None
 
     api_base = str((llm_cfg or {}).get("api_base") or "").strip()
     api_key = str((llm_cfg or {}).get("api_key") or "").strip() or "local"
@@ -1267,18 +1623,23 @@ def _run_task_job(task_id: str) -> None:
         )
 
         analyst_in = f"标的：{tk_s}\n用户指令：{text}".strip()
-        analyst_out = _call_llm_direct(system_prompt=analyst_prompt, user_text=analyst_in, temperature=0.2, max_tokens=420) or ""
+        # Use 'analyst' adapter for deep analysis if available
+        analyst_out = _call_llm_direct(system_prompt=analyst_prompt, user_text=analyst_in, temperature=0.2, max_tokens=420, adapter="analyst") or ""
+        
         trader_in = f"标的：{tk_s}\n用户指令：{text}\n\n[分析员输出]\n{analyst_out}".strip()
-        trader_out = _call_llm_direct(system_prompt=trader_prompt, user_text=trader_in, temperature=0.2, max_tokens=420) or ""
+        # Use 'scalper' adapter (or base) for trading execution plan
+        trader_out = _call_llm_direct(system_prompt=trader_prompt, user_text=trader_in, temperature=0.2, max_tokens=420, adapter="scalper") or ""
 
         merge_prompt = (
             "你是 Mari（交易秘书）。请用自然口吻对 Sensei 输出派单结果：\n"
             "1) 先确认：我已经把任务交给分析员和交易员（必须有）。\n"
             "2) 然后给一个‘特别措施’清单（精炼、可执行）。\n"
-            "要求：不要编造价格/持仓；若信息不足，用条件式。"
+            "3) 对交易的可执行建议(0-5条)\n"
+            "要求：明确、可核查、不要编造。"
         )
         merge_in = json.dumps({"task_id": task_id, "ticker": ticker, "analyst": analyst_out, "trader": trader_out}, ensure_ascii=False)
-        merged = _call_llm_direct(system_prompt=merge_prompt, user_text=merge_in, temperature=0.2, max_tokens=520) or ""
+        # Use 'secretary' adapter for the final personality wrapper
+        merged = _call_llm_direct(system_prompt=merge_prompt, user_text=merge_in, temperature=0.2, max_tokens=520, adapter="secretary") or ""
 
         result = {
             "ticker": ticker,
@@ -1383,7 +1744,9 @@ def _run_news_analysis_job(news_id: str) -> None:
 
         results: Dict[str, Any] = {}
         for role, sp in roles.items():
-            raw = _call_llm_direct(system_prompt=sp, user_text=base_news, temperature=0.2, max_tokens=256)
+            # Use 'analyst' adapter for all specialized analysis roles (macro/risk/factcheck/sentiment)
+            # as it is DPO-trained for financial reasoning.
+            raw = _call_llm_direct(system_prompt=sp, user_text=base_news, temperature=0.2, max_tokens=256, adapter="analyst")
             parsed: Any = None
             if isinstance(raw, str) and raw.strip():
                 try:
@@ -1409,7 +1772,8 @@ def _run_news_analysis_job(news_id: str) -> None:
             "要求：明确、可核查、不要编造。"
         )
         merge_input = json.dumps(results, ensure_ascii=False)
-        summary = _call_llm_direct(system_prompt=merge_prompt, user_text=merge_input, temperature=0.2, max_tokens=256) or ""
+        # Use 'secretary' adapter for the final summary to maintain persona
+        summary = _call_llm_direct(system_prompt=merge_prompt, user_text=merge_input, temperature=0.2, max_tokens=256, adapter="secretary") or ""
 
         try:
             mem = get_mari_memory()
@@ -1544,7 +1908,14 @@ def _execute_action(*, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         rl_manager = getattr(_live_runner, "rl_manager", None)
         if rl_manager is None:
             return {"ok": False, "error": "rl manager not initialized"}
+        strategy = getattr(_live_runner, "strategy", None)
+        if strategy is not None:
+            strategy.load_models = True
+            if not strategy.models_loaded:
+                strategy._load_models()
         rl_manager.enabled = True
+        rl_manager.enable_updates = True
+        rl_manager.learning_rate = 0.001
         return {"ok": True, "enabled": True}
 
     if a in {"stop_rl", "rl_stop"}:
@@ -1614,6 +1985,21 @@ async def chat(req: ChatRequest):
     if not text:
         raise HTTPException(status_code=400, detail="message is required")
     ctx = req.context if isinstance(req.context, dict) else {}
+
+    # If Ouroboros training is running, do not start new local inference.
+    try:
+        with _EVOLUTION_TRAIN_LOCK:
+            p = _EVOLUTION_TRAIN_PROC
+        if p is not None and p.poll() is None:
+            return JSONResponse(
+                content={
+                    "reply": "Sensei, Ouroboros 正在训练中（会占满 GPU）。训练完成后我再继续回答。",
+                    "message_id": None,
+                },
+                media_type="application/json; charset=utf-8",
+            )
+    except Exception:
+        pass
 
     t0 = time.perf_counter()
     reply = await run_in_threadpool(_secretary_reply, text, ctx)
@@ -1728,14 +2114,24 @@ async def chat(req: ChatRequest):
     msg_id: Optional[str] = None
     try:
         tid = _extract_task_id(text) or _extract_task_id(str(reply or ""))
+        shared_urls = []
+        try:
+            url_in_msg = _extract_first_url(text)
+            if url_in_msg:
+                shared_urls.append(url_in_msg)
+        except Exception:
+            pass
+
         msg_id = evolution_recorder.record(
-            agent_id="mari",
+            agent_id="planner",
             context=json.dumps(
                 {
                     "client": str(ctx.get("client") or ""),
                     "session_id": str(ctx.get("session_id") or ""),
                     "message": text,
                     "task_id": tid,
+                    "trainer": "planner_olrl",
+                    "shared_urls": shared_urls,
                 },
                 ensure_ascii=False,
             ),
@@ -1762,15 +2158,946 @@ async def feedback(req: FeedbackRequest):
 
 @app.post("/api/v1/llm/unload")
 async def unload_local_llm():
+    if _live_runner and getattr(_live_runner, "strategy", None):
+        try:
+            stg = _live_runner.strategy
+            # Manually unload to free memory
+            stg.model = None
+            stg.tokenizer = None
+            stg.models_loaded = False
+            
+            import torch
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+                
+            return {"ok": True, "message": "Shared models unloaded"}
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"unload failed: {e}")
+    
+    return {"ok": False, "message": "No active strategy to unload"}
+
+
+@app.post("/api/v1/llm/warmup")
+async def warmup_local_llm():
+    cfg = _get_secretary_config()
+    trading_cfg = cfg.get("trading") if isinstance(cfg.get("trading"), dict) else {}
+    
+    # Check if we are in local/shared mode logic?
+    # Actually, we should just ensure the strategy models are loaded.
+    
+    if _live_runner and getattr(_live_runner, "strategy", None):
+        try:
+            stg = _live_runner.strategy
+            if not stg.models_loaded:
+                # Trigger load in threadpool to avoid blocking
+                await run_in_threadpool(stg._load_models)
+            
+            return {
+                "ok": True, 
+                "warmed": True, 
+                "base_model": stg.base_model,
+                "adapters": list(stg._adapters_loaded)
+            }
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"warmup failed: {e}")
+
+    return {"ok": False, "message": "Live runner not ready"}
+
+
+_REF_WAV_CACHE: Dict[str, Dict[str, Any]] = {}
+
+
+def _read_ref_prompt_text(path: Path) -> str:
+    try:
+        s = path.read_text(encoding="utf-8", errors="replace")
+        s = str(s or "").strip()
+        return s[:200]
+    except Exception:
+        return ""
+
+
+def _pick_ref_audio_from_dirs(ref_dirs: List[str], *, max_files: int = 1800, ttl_sec: float = 60.0) -> Optional[Dict[str, str]]:
+    try:
+        dirs = [str(d or "").strip() for d in (ref_dirs or []) if str(d or "").strip()]
+        if not dirs:
+            return None
+        key = "|".join(dirs)
+        now = time.time()
+        cached = _REF_WAV_CACHE.get(key) if isinstance(_REF_WAV_CACHE.get(key), dict) else None
+        if cached and (now - float(cached.get("t") or 0.0) < float(ttl_sec)):
+            files = cached.get("files")
+            if isinstance(files, list) and files:
+                picked = random.choice(files)
+                return dict(picked) if isinstance(picked, dict) else None
+
+        audio_exts = {".mp3", ".ogg", ".wav", ".flac", ".m4a"}
+
+        files: List[Dict[str, str]] = []
+        for d in dirs:
+            try:
+                p = Path(d)
+                if not p.exists():
+                    continue
+                for root, _, fns in os.walk(str(p)):
+                    for fn in fns:
+                        if not isinstance(fn, str):
+                            continue
+                        fp = Path(root) / fn
+                        if fp.suffix.lower() not in audio_exts:
+                            continue
+                        prompt = ""
+                        try:
+                            txt1 = fp.with_name(fp.name + ".txt")
+                            txt2 = fp.with_suffix(".txt")
+                            if txt1.exists() and txt1.is_file():
+                                prompt = _read_ref_prompt_text(txt1)
+                            elif txt2.exists() and txt2.is_file():
+                                prompt = _read_ref_prompt_text(txt2)
+                        except Exception:
+                            prompt = ""
+
+                        files.append({"audio": str(fp), "prompt_text": str(prompt or "")})
+                        if len(files) >= int(max_files):
+                            break
+                    if len(files) >= int(max_files):
+                        break
+            except Exception:
+                continue
+
+        if files:
+            _REF_WAV_CACHE[key] = {"t": now, "files": files}
+            picked = random.choice(files)
+            return dict(picked) if isinstance(picked, dict) else None
+        _REF_WAV_CACHE[key] = {"t": now, "files": []}
+        return None
+    except Exception:
+        return None
+
+
+def _pick_tts_preset(text: str) -> str:
+    t = str(text or "")
+    tl = t.lower()
+    if any(k in t for k in ["亏", "回撤", "止损", "爆仓", "试炼", "下跌", "跌破"]) or any(k in tl for k in ["drawdown", "stop", "loss", "risk", "crash"]):
+        return "worry"
+    if any(k in t for k in ["盈利", "赚钱", "福报", "上涨", "恭喜", "祝福"]) or any(k in tl for k in ["profit", "pnl", "gain", "win"]):
+        return "happy"
+    return "gentle"
+
+
+@app.post("/api/v1/voice/tts")
+async def voice_tts(req: TtsRequest):
+    """Generate Mari voice audio (web dashboard).
+
+    Uses secretary.yaml voice.gpt_sovits preset configuration.
+    Returns audio bytes (wav or other audio/*).
+    """
+    text = str(req.text or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail="text is required")
+
+    cfg = _get_secretary_config()
+    voice_cfg = cfg.get("voice") if isinstance(cfg.get("voice"), dict) else {}
+    backend = str((voice_cfg or {}).get("backend") or "").strip().lower() or "gpt_sovits"
+    if backend != "gpt_sovits":
+        raise HTTPException(status_code=400, detail=f"unsupported voice backend: {backend}")
+
+    gs = (voice_cfg or {}).get("gpt_sovits") if isinstance((voice_cfg or {}).get("gpt_sovits"), dict) else {}
+    api_base = str((gs or {}).get("api_base") or "").strip()
+    endpoint = str((gs or {}).get("endpoint") or "/tts").strip() or "/tts"
+    if not api_base:
+        raise HTTPException(status_code=500, detail="gpt_sovits api_base missing")
+
+    preset = str(req.preset or "").strip() or _pick_tts_preset(text)
+    presets = gs.get("presets") if isinstance(gs.get("presets"), dict) else {}
+    p0 = presets.get(preset) if isinstance(presets.get(preset), dict) else {}
+
+    ref_dirs = (p0 or {}).get("ref_dirs") if isinstance((p0 or {}).get("ref_dirs"), list) else []
+    try:
+        max_ref_tries = int((gs or {}).get("max_ref_tries") or 6)
+    except Exception:
+        max_ref_tries = 6
+    max_ref_tries = max(1, min(max_ref_tries, 20))
+
+    refer_wav_path = str((p0 or {}).get("refer_wav_path") or "").strip()
+    picked_audio = None
+    picked_prompt = None
+    for _ in range(int(max_ref_tries)):
+        picked = _pick_ref_audio_from_dirs(ref_dirs)
+        if isinstance(picked, dict):
+            a0 = str(picked.get("audio") or "").strip()
+            p0t = str(picked.get("prompt_text") or "").strip()
+            if a0 and Path(a0).exists():
+                picked_audio = a0
+                picked_prompt = p0t or None
+                break
+            continue
+    if picked_audio:
+        refer_wav_path = str(picked_audio)
+    prompt_text = str((p0 or {}).get("prompt_text") or "").strip()
+    if picked_prompt:
+        prompt_text = picked_prompt
+    try:
+        logger.info(f"[TTS] preset={preset} ref={refer_wav_path} prompt_from_file={bool(picked_prompt)}")
+    except Exception:
+        pass
+    text_lang = str((gs or {}).get("text_language") or "zh").strip() or "zh"
+    prompt_lang = str((gs or {}).get("prompt_language") or "ja").strip() or "ja"
+    gpt_path = str((gs or {}).get("gpt_path") or "").strip()
+    sovits_path = str((gs or {}).get("sovits_path") or "").strip()
+    timeout_sec = float((gs or {}).get("timeout_sec") or 120)
+
+    if not refer_wav_path:
+        raise HTTPException(status_code=500, detail=f"gpt_sovits preset '{preset}' refer_wav_path missing")
+
+    url = api_base.rstrip("/") + "/" + endpoint.lstrip("/")
+    payload: Dict[str, Any] = {
+        "text": text,
+        "text_lang": text_lang,
+        "ref_audio_path": refer_wav_path,
+        "ref_wav_path": refer_wav_path,
+        "refer_wav_path": refer_wav_path,
+        "prompt_lang": prompt_lang,
+        "prompt_text": prompt_text,
+    }
+    if gpt_path:
+        payload["gpt_path"] = gpt_path
+    if sovits_path:
+        payload["sovits_path"] = sovits_path
+
+    try:
+        try:
+            logger.info(f"[TTS] POST {url}")
+        except Exception:
+            pass
+        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+        ureq = urllib.request.Request(url, data=raw, headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(ureq, timeout=timeout_sec) as resp:
+            ct = str(resp.headers.get("content-type") or "").lower()
+            data = resp.read()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"gpt_sovits request failed: {e}")
+
+    try:
+        logger.info(f"[TTS] response content-type={ct} bytes={len(data) if data else 0}")
+    except Exception:
+        pass
+
+    if ct.startswith("audio/"):
+        return Response(content=data, media_type=ct.split(";")[0] or "audio/wav")
+
+    try:
+        obj = json.loads(data.decode("utf-8", errors="replace"))
+    except Exception:
+        raise HTTPException(status_code=500, detail="gpt_sovits bad response")
+
+    if isinstance(obj, dict):
+        b64 = obj.get("audio") or obj.get("data") or obj.get("wav")
+        if isinstance(b64, str) and b64.strip():
+            try:
+                import base64
+
+                wav = base64.b64decode(b64)
+                return Response(content=wav, media_type="audio/wav")
+            except Exception:
+                pass
+        msg = obj.get("message") or obj.get("detail") or obj.get("error")
+        raise HTTPException(status_code=500, detail=f"gpt_sovits error: {msg}")
+
+    raise HTTPException(status_code=500, detail="gpt_sovits bad response")
+
+
+def _pick_python_for_repo() -> str:
+    try:
+        py = REPO_ROOT / "venv311" / "Scripts" / "python.exe"
+        return str(py) if py.exists() else sys.executable
+    except Exception:
+        return sys.executable
+
+
+def _tail_text(path: Path, max_bytes: int = 12000) -> str:
+    try:
+        if not path.exists():
+            return ""
+        bs = int(max_bytes)
+        with path.open("rb") as f:
+            try:
+                f.seek(0, os.SEEK_END)
+                n = f.tell()
+                f.seek(max(0, n - bs), os.SEEK_SET)
+            except Exception:
+                pass
+            raw = f.read(bs)
+        return raw.decode("utf-8", errors="replace")
+    except Exception:
+        return ""
+
+
+def _read_sovits_state() -> Dict[str, Any]:
+    try:
+        p = REPO_ROOT / "logs" / "gpt_sovits.state.json"
+        if not p.exists():
+            return {}
+        obj = json.loads(p.read_text(encoding="utf-8"))
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        return {}
+
+
+def _write_sovits_state(obj: Dict[str, Any]) -> None:
+    try:
+        p = REPO_ROOT / "logs" / "gpt_sovits.state.json"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(json.dumps(obj, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        return
+
+
+def _tcp_listening(host: str, port: int, timeout_s: float = 0.3) -> bool:
+    try:
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(float(timeout_s))
+        try:
+            return s.connect_ex((str(host), int(port))) == 0
+        finally:
+            try:
+                s.close()
+            except Exception:
+                pass
+    except Exception:
+        return False
+
+
+def _stop_gpt_sovits_from_state() -> Dict[str, Any]:
+    st = _read_sovits_state()
+    host = str(st.get("host") or "127.0.0.1")
+    try:
+        port = int(st.get("port") or 9880)
+    except Exception:
+        port = 9880
+
+    listening = _tcp_listening(host, int(port))
+    pid = st.get("pid")
+    try:
+        pid_i = int(pid) if pid is not None else 0
+    except Exception:
+        pid_i = 0
+
+    if (not listening) and pid_i <= 0:
+        return {"ok": True, "running": False, "stopped": False, "pid": 0, "host": host, "port": int(port)}
+
+    if pid_i > 0:
+        try:
+            subprocess.run(["taskkill", "/PID", str(pid_i), "/T", "/F"], capture_output=True, text=True)
+        except Exception as e:
+            return {"ok": False, "running": bool(listening), "stopped": False, "pid": pid_i, "error": str(e)}
+
+        t0 = time.time()
+        while time.time() - t0 < 8.0:
+            if not _tcp_listening(host, int(port)):
+                break
+            time.sleep(0.25)
+
+        return {"ok": True, "running": False, "stopped": True, "pid": pid_i, "host": host, "port": int(port)}
+
+    return {"ok": True, "running": bool(listening), "stopped": False, "pid": 0, "host": host, "port": int(port)}
+
+
+def _start_gpt_sovits_from_state() -> Dict[str, Any]:
+    st = _read_sovits_state()
+    host = str(st.get("host") or "127.0.0.1")
+    try:
+        port = int(st.get("port") or 9880)
+    except Exception:
+        port = 9880
+
+    if _tcp_listening(host, int(port)):
+        return {"ok": True, "started": False, "running": True, "host": host, "port": int(port), "pid": int(st.get("pid") or 0)}
+
+    py = str(st.get("py") or "").strip()
+    root = str(st.get("root") or "").strip()
+    args = st.get("args") if isinstance(st.get("args"), list) else []
+    outp = str(st.get("out") or str(REPO_ROOT / "logs" / "gpt_sovits.out.log"))
+    errp = str(st.get("err") or str(REPO_ROOT / "logs" / "gpt_sovits.err.log"))
+
+    if (not py) or (not Path(py).exists()) or (not root) or (not Path(root).exists()):
+        return {"ok": False, "started": False, "error": "missing sovits py/root", "py": py, "root": root}
+
+    if not args:
+        args = ["api_v2.py", "-a", host, "-p", str(int(port))]
+
+    try:
+        Path(outp).parent.mkdir(parents=True, exist_ok=True)
+        Path(errp).parent.mkdir(parents=True, exist_ok=True)
+        fout = open(outp, "a", encoding="utf-8", errors="replace")
+        ferr = open(errp, "a", encoding="utf-8", errors="replace")
+    except Exception as e:
+        return {"ok": False, "started": False, "error": f"log open failed: {e}"}
+
+    try:
+        proc = subprocess.Popen([py, *[str(x) for x in args]], cwd=str(root), stdout=fout, stderr=ferr)
+    except Exception as e:
+        try:
+            fout.close()
+        except Exception:
+            pass
+        try:
+            ferr.close()
+        except Exception:
+            pass
+        return {"ok": False, "started": False, "error": str(e)}
+
+    t0 = time.time()
+    while time.time() - t0 < 12.0:
+        if _tcp_listening(host, int(port)):
+            break
+        time.sleep(0.25)
+
+    st2 = dict(st)
+    st2["pid"] = int(getattr(proc, "pid", 0) or 0)
+    st2["updated_at"] = datetime.now().isoformat()
+    st2["note"] = "restarted"
+    _write_sovits_state(st2)
+    return {"ok": True, "started": True, "running": _tcp_listening(host, int(port)), "host": host, "port": int(port), "pid": int(getattr(proc, "pid", 0) or 0)}
+
+
+def _spawn_train_watcher(proc: subprocess.Popen) -> None:
+    global _EVOLUTION_TRAIN_WATCHER
+    global _SOVITS_RESUME_AFTER_TRAIN, _SOVITS_RESTARTED_AFTER_TRAIN
+
+    def _run() -> None:
+        global _EVOLUTION_TRAIN_FH
+        try:
+            proc.wait()
+        except Exception:
+            return
+
+        with _EVOLUTION_TRAIN_LOCK:
+            fh = _EVOLUTION_TRAIN_FH
+        if fh is not None:
+            try:
+                fh.close()
+            except Exception:
+                pass
+            with _EVOLUTION_TRAIN_LOCK:
+                _EVOLUTION_TRAIN_FH = None
+
+        with _SOVITS_LOCK:
+            if _SOVITS_RESUME_AFTER_TRAIN and (not _SOVITS_RESTARTED_AFTER_TRAIN):
+                _start_gpt_sovits_from_state()
+                _SOVITS_RESTARTED_AFTER_TRAIN = True
+                _SOVITS_RESUME_AFTER_TRAIN = False
+
+    try:
+        th = threading.Thread(target=_run, daemon=True)
+        _EVOLUTION_TRAIN_WATCHER = th
+        th.start()
+    except Exception:
+        _EVOLUTION_TRAIN_WATCHER = None
+
+
+def _spawn_alpha_train_watcher(proc: subprocess.Popen) -> None:
+    global _ALPHA_TRAIN_WATCHER
+    global _SOVITS_RESUME_AFTER_ALPHA, _SOVITS_RESTARTED_AFTER_ALPHA
+
+    def _run() -> None:
+        global _ALPHA_TRAIN_FH
+        global _ALPHA_TRAIN_OUTPUT_DIR, _ALPHA_TRAIN_SFT_ADAPTER
+        try:
+            proc.wait()
+        except Exception:
+            return
+
+        try:
+            rc = proc.returncode
+        except Exception:
+            rc = None
+
+        try:
+            if rc == 0:
+                out_dir = str(_ALPHA_TRAIN_OUTPUT_DIR or "").strip()
+                sft_adapter = str(_ALPHA_TRAIN_SFT_ADAPTER or "").strip()
+                if out_dir:
+                    out_path = Path(out_dir)
+                    if not out_path.is_absolute():
+                        out_path = (REPO_ROOT / out_path).resolve()
+                    ok = out_path.exists() and (
+                        (out_path / "adapter_config.json").exists()
+                        or (out_path / "adapter_model.safetensors").exists()
+                        or (out_path / "adapter_model.bin").exists()
+                    )
+                    if ok:
+                        scalper_path = ""
+                        try:
+                            cfg = _get_secretary_config()
+                            trading_cfg = cfg.get("trading") if isinstance(cfg, dict) and isinstance(cfg.get("trading"), dict) else {}
+                            scalper_path = str(trading_cfg.get("moe_scalper") or "").strip()
+                        except Exception:
+                            scalper_path = ""
+
+                        try:
+                            payload = {
+                                "time": datetime.now().isoformat(),
+                                "source": "alpha_evolution",
+                                "base_model": "Qwen/Qwen2.5-7B-Instruct",
+                                "active_moe_scalper": scalper_path,
+                                "active_moe_analyst": str(out_path),
+                                "alpha_sft_adapter": sft_adapter,
+                            }
+                            p = REPO_ROOT / "data" / "finetune" / "evolution" / "active_trading_models.json"
+                            p.parent.mkdir(parents=True, exist_ok=True)
+                            p.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+        with _ALPHA_TRAIN_LOCK:
+            fh = _ALPHA_TRAIN_FH
+        if fh is not None:
+            try:
+                fh.close()
+            except Exception:
+                pass
+            with _ALPHA_TRAIN_LOCK:
+                _ALPHA_TRAIN_FH = None
+
+        with _SOVITS_LOCK:
+            if _SOVITS_RESUME_AFTER_ALPHA and (not _SOVITS_RESTARTED_AFTER_ALPHA):
+                _start_gpt_sovits_from_state()
+                _SOVITS_RESTARTED_AFTER_ALPHA = True
+                _SOVITS_RESUME_AFTER_ALPHA = False
+
+    try:
+        th = threading.Thread(target=_run, daemon=True)
+        _ALPHA_TRAIN_WATCHER = th
+        th.start()
+    except Exception:
+        _ALPHA_TRAIN_WATCHER = None
+
+
+def _read_last_adapter_meta() -> dict:
+    try:
+        p = REPO_ROOT / "data" / "finetune" / "evolution" / "last_adapter.json"
+        if not p.exists():
+            return {}
+        obj = json.loads(p.read_text(encoding="utf-8"))
+        return obj if isinstance(obj, dict) else {}
+    except Exception:
+        return {}
+
+
+@app.post("/api/v1/evolution/nightly/train/start")
+async def start_nightly_evolution_train():
+    """Start Ouroboros nightly_evolution training (SFT + DPO) in background."""
+    global _EVOLUTION_TRAIN_PROC, _EVOLUTION_TRAIN_FH, _EVOLUTION_TRAIN_LOG, _EVOLUTION_TRAIN_CMD, _EVOLUTION_TRAIN_STARTED_AT
+    global _EVOLUTION_TRAIN_WATCHER
+    global _SOVITS_RESUME_AFTER_TRAIN, _SOVITS_RESTARTED_AFTER_TRAIN
+    with _EVOLUTION_TRAIN_LOCK:
+        p = _EVOLUTION_TRAIN_PROC
+        if p is not None and p.poll() is None:
+            return {
+                "ok": True,
+                "running": True,
+                "pid": int(getattr(p, "pid", 0) or 0),
+                "log_path": str(_EVOLUTION_TRAIN_LOG) if _EVOLUTION_TRAIN_LOG else "",
+                "cmd": " ".join(_EVOLUTION_TRAIN_CMD or []),
+            }
+
+    with _SOVITS_LOCK:
+        if not _SOVITS_RESUME_AFTER_TRAIN and not _SOVITS_RESTARTED_AFTER_TRAIN:
+            res = _stop_gpt_sovits_from_state()
+            if bool(res.get("stopped")):
+                _SOVITS_RESUME_AFTER_TRAIN = True
+                _SOVITS_RESTARTED_AFTER_TRAIN = False
+
     try:
         from src.llm.local_chat import unload_model
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"failed to import local llm: {e}")
-    try:
         await run_in_threadpool(unload_model)
-        return {"ok": True}
+    except Exception:
+        pass
+
+    try:
+        setattr(_live_runner, "load_models", True)
+    except Exception:
+        pass
+
+    try:
+        stg = getattr(_live_runner, "strategy", None)
+        if stg is not None and (not bool(getattr(stg, "models_loaded", False))):
+            fn = getattr(stg, "_load_models", None)
+            if callable(fn):
+                fn()
+    except Exception:
+        pass
+
+    out_dir = REPO_ROOT / "data" / "finetune" / "evolution"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    log_path = out_dir / f"nightly_train_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+
+    python_exe = _pick_python_for_repo()
+    cmd = [str(python_exe), "scripts/nightly_evolution.py"]
+    env = dict(os.environ)
+    env.setdefault("PYTHONUNBUFFERED", "1")
+
+    fh: Any = None
+    proc: Optional[subprocess.Popen] = None
+    try:
+        fh = log_path.open("w", encoding="utf-8", errors="replace")
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(REPO_ROOT),
+            stdout=fh,
+            stderr=subprocess.STDOUT,
+            env=env,
+            text=True,
+        )
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"unload failed: {e}")
+        try:
+            if fh is not None:
+                fh.close()
+        except Exception:
+            pass
+        return {"ok": False, "running": False, "error": str(e)}
+
+    with _EVOLUTION_TRAIN_LOCK:
+        _EVOLUTION_TRAIN_PROC = proc
+        _EVOLUTION_TRAIN_FH = fh
+        _EVOLUTION_TRAIN_LOG = log_path
+        _EVOLUTION_TRAIN_CMD = list(cmd)
+        _EVOLUTION_TRAIN_STARTED_AT = datetime.now().isoformat()
+
+    try:
+        _spawn_train_watcher(proc)
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "running": True,
+        "pid": int(getattr(proc, "pid", 0) or 0),
+        "log_path": str(log_path),
+        "cmd": " ".join(cmd),
+    }
+
+
+@app.get("/api/v1/evolution/nightly/train/status")
+async def get_nightly_evolution_train_status(tail_bytes: int = 12000):
+    """Get status and log tail for Ouroboros nightly_evolution training."""
+    global _EVOLUTION_TRAIN_FH
+    global _SOVITS_RESUME_AFTER_TRAIN, _SOVITS_RESTARTED_AFTER_TRAIN
+    with _EVOLUTION_TRAIN_LOCK:
+        p = _EVOLUTION_TRAIN_PROC
+        logp = _EVOLUTION_TRAIN_LOG
+        cmd = list(_EVOLUTION_TRAIN_CMD or [])
+        started = _EVOLUTION_TRAIN_STARTED_AT
+        fh = _EVOLUTION_TRAIN_FH
+
+    if p is None:
+        meta = _read_last_adapter_meta()
+        return {"ok": True, "running": False, "started_at": None, "returncode": None, "cmd": "", "log_path": "", "log_tail": "", "meta": meta}
+
+    rc = p.poll()
+    running = rc is None
+    if (not running) and fh is not None:
+        try:
+            fh.close()
+        except Exception:
+            pass
+        with _EVOLUTION_TRAIN_LOCK:
+            _EVOLUTION_TRAIN_FH = None
+
+    if (not running):
+        with _SOVITS_LOCK:
+            if _SOVITS_RESUME_AFTER_TRAIN and (not _SOVITS_RESTARTED_AFTER_TRAIN):
+                _start_gpt_sovits_from_state()
+                _SOVITS_RESTARTED_AFTER_TRAIN = True
+                _SOVITS_RESUME_AFTER_TRAIN = False
+
+    meta = _read_last_adapter_meta()
+    tail = _tail_text(logp, max_bytes=int(tail_bytes)) if logp is not None else ""
+    return {
+        "ok": True,
+        "running": bool(running),
+        "pid": int(getattr(p, "pid", 0) or 0),
+        "started_at": started,
+        "returncode": None if running else int(rc if rc is not None else -1),
+        "cmd": " ".join(cmd),
+        "log_path": str(logp) if logp is not None else "",
+        "log_tail": str(tail or ""),
+        "meta": meta,
+    }
+
+
+@app.post("/api/v1/evolution/nightly/train/stop")
+async def stop_nightly_evolution_train():
+    """Stop Ouroboros nightly_evolution training process."""
+    global _EVOLUTION_TRAIN_PROC, _EVOLUTION_TRAIN_FH
+    global _SOVITS_RESUME_AFTER_TRAIN, _SOVITS_RESTARTED_AFTER_TRAIN
+    with _EVOLUTION_TRAIN_LOCK:
+        p = _EVOLUTION_TRAIN_PROC
+        fh = _EVOLUTION_TRAIN_FH
+        logp = _EVOLUTION_TRAIN_LOG
+
+    if p is None or p.poll() is not None:
+        if fh is not None:
+            try:
+                fh.close()
+            except Exception:
+                pass
+        with _EVOLUTION_TRAIN_LOCK:
+            _EVOLUTION_TRAIN_PROC = None
+            _EVOLUTION_TRAIN_FH = None
+
+        with _SOVITS_LOCK:
+            if _SOVITS_RESUME_AFTER_TRAIN and (not _SOVITS_RESTARTED_AFTER_TRAIN):
+                _start_gpt_sovits_from_state()
+                _SOVITS_RESTARTED_AFTER_TRAIN = True
+                _SOVITS_RESUME_AFTER_TRAIN = False
+
+        return {"ok": True, "stopped": False, "message": "not running", "log_path": str(logp) if logp else ""}
+
+    try:
+        p.terminate()
+    except Exception as e:
+        return {"ok": False, "stopped": False, "error": str(e), "log_path": str(logp) if logp else ""}
+
+    with _SOVITS_LOCK:
+        if _SOVITS_RESUME_AFTER_TRAIN:
+            _SOVITS_RESTARTED_AFTER_TRAIN = False
+
+    return {"ok": True, "stopped": True, "pid": int(getattr(p, "pid", 0) or 0), "log_path": str(logp) if logp else ""}
+
+
+@app.post("/api/v1/evolution/alpha/train/start")
+async def start_alpha_evolution_train(
+    reward_thr: float = 50.0,
+    punish_thr: float = -20.0,
+    base_model: str = "Qwen/Qwen2.5-7B-Instruct",
+    sft_adapter: str = "models/trader_stock_v1_1_tech_plus_news/lora_weights",
+    output_dir: str = "",
+):
+    global _ALPHA_TRAIN_PROC, _ALPHA_TRAIN_FH, _ALPHA_TRAIN_LOG, _ALPHA_TRAIN_CMD, _ALPHA_TRAIN_STARTED_AT
+    global _SOVITS_RESUME_AFTER_ALPHA, _SOVITS_RESTARTED_AFTER_ALPHA
+
+    with _ALPHA_TRAIN_LOCK:
+        p = _ALPHA_TRAIN_PROC
+        if p is not None and p.poll() is None:
+            return {
+                "ok": True,
+                "running": True,
+                "pid": int(getattr(p, "pid", 0) or 0),
+                "log_path": str(_ALPHA_TRAIN_LOG) if _ALPHA_TRAIN_LOG else "",
+                "cmd": " ".join(_ALPHA_TRAIN_CMD or []),
+            }
+
+    try:
+        with _EVOLUTION_TRAIN_LOCK:
+            tp = _EVOLUTION_TRAIN_PROC
+        if tp is not None and tp.poll() is None:
+            return {"ok": False, "running": False, "error": "nightly training is running"}
+    except Exception:
+        pass
+
+    with _SOVITS_LOCK:
+        if not _SOVITS_RESUME_AFTER_ALPHA and not _SOVITS_RESTARTED_AFTER_ALPHA:
+            res = _stop_gpt_sovits_from_state()
+            if bool(res.get("stopped")):
+                _SOVITS_RESUME_AFTER_ALPHA = True
+                _SOVITS_RESTARTED_AFTER_ALPHA = False
+
+    try:
+        from src.llm.local_chat import unload_model
+        await run_in_threadpool(unload_model)
+    except Exception:
+        pass
+
+    try:
+        if _live_runner is not None:
+            rm = getattr(_live_runner, "rl_manager", None)
+            if rm is not None:
+                try:
+                    setattr(rm, "enabled", False)
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    python_exe = _pick_python_for_repo()
+    env = dict(os.environ)
+    env.setdefault("PYTHONUNBUFFERED", "1")
+
+    evo_out_dir = REPO_ROOT / "data" / "finetune" / "evolution"
+    evo_out_dir.mkdir(parents=True, exist_ok=True)
+
+    alpha_data_path = evo_out_dir / "dpo_alpha_nightly.jsonl"
+    gen_cmd = [str(python_exe), "scripts/generate_alpha_dataset.py", "--reward-thr", str(float(reward_thr)), "--punish-thr", str(float(punish_thr))]
+    try:
+        subprocess.run(gen_cmd, cwd=str(REPO_ROOT), check=False, env=env, capture_output=True, text=True, timeout=180)
+    except Exception as e:
+        return {"ok": False, "running": False, "error": f"alpha dataset generation failed: {e}"}
+
+    pairs_count = 0
+    try:
+        if alpha_data_path.exists():
+            with alpha_data_path.open("r", encoding="utf-8") as f:
+                for _ in f:
+                    pairs_count += 1
+    except Exception:
+        pairs_count = 0
+
+    if pairs_count <= 0:
+        with _SOVITS_LOCK:
+            if _SOVITS_RESUME_AFTER_ALPHA and (not _SOVITS_RESTARTED_AFTER_ALPHA):
+                _start_gpt_sovits_from_state()
+                _SOVITS_RESTARTED_AFTER_ALPHA = True
+                _SOVITS_RESUME_AFTER_ALPHA = False
+        return {"ok": False, "running": False, "error": "no alpha dpo pairs", "pairs": int(pairs_count), "data_path": str(alpha_data_path)}
+
+    out_dir = str(output_dir or "").strip()
+    if not out_dir:
+        out_dir = str(REPO_ROOT / "models" / f"alpha_dpo_from_pnl_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+
+    log_path = evo_out_dir / f"alpha_train_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+    cmd = [
+        str(python_exe),
+        "scripts/train_dpo.py",
+        "--base-model",
+        str(base_model),
+        "--sft-adapter",
+        str(sft_adapter),
+        "--data-path",
+        str(alpha_data_path.as_posix()),
+        "--output-dir",
+        str(out_dir),
+        "--epochs",
+        "1",
+        "--batch-size",
+        "1",
+        "--grad-accum",
+        "8",
+        "--reference-free",
+    ]
+
+    fh: Any = None
+    proc: Optional[subprocess.Popen] = None
+    try:
+        fh = log_path.open("w", encoding="utf-8", errors="replace")
+        proc = subprocess.Popen(
+            cmd,
+            cwd=str(REPO_ROOT),
+            stdout=fh,
+            stderr=subprocess.STDOUT,
+            env=env,
+            text=True,
+        )
+    except Exception as e:
+        try:
+            if fh is not None:
+                fh.close()
+        except Exception:
+            pass
+        return {"ok": False, "running": False, "error": str(e)}
+
+    with _ALPHA_TRAIN_LOCK:
+        _ALPHA_TRAIN_PROC = proc
+        _ALPHA_TRAIN_FH = fh
+        _ALPHA_TRAIN_LOG = log_path
+        _ALPHA_TRAIN_CMD = list(cmd)
+        _ALPHA_TRAIN_STARTED_AT = datetime.now().isoformat()
+        _ALPHA_TRAIN_OUTPUT_DIR = str(out_dir)
+        _ALPHA_TRAIN_SFT_ADAPTER = str(sft_adapter)
+
+    try:
+        _spawn_alpha_train_watcher(proc)
+    except Exception:
+        pass
+
+    return {
+        "ok": True,
+        "running": True,
+        "pid": int(getattr(proc, "pid", 0) or 0),
+        "pairs": int(pairs_count),
+        "data_path": str(alpha_data_path),
+        "output_dir": str(out_dir),
+        "log_path": str(log_path),
+        "cmd": " ".join(cmd),
+    }
+
+
+@app.get("/api/v1/evolution/alpha/train/status")
+async def get_alpha_evolution_train_status(tail_bytes: int = 12000):
+    global _ALPHA_TRAIN_FH
+    with _ALPHA_TRAIN_LOCK:
+        p = _ALPHA_TRAIN_PROC
+        logp = _ALPHA_TRAIN_LOG
+        cmd = list(_ALPHA_TRAIN_CMD or [])
+        started = _ALPHA_TRAIN_STARTED_AT
+        fh = _ALPHA_TRAIN_FH
+
+    if p is None:
+        return {"ok": True, "running": False, "started_at": None, "returncode": None, "cmd": "", "log_path": "", "log_tail": "", "voice_stopped": bool(_SOVITS_RESUME_AFTER_ALPHA)}
+
+    rc = p.poll()
+    running = rc is None
+    if (not running) and fh is not None:
+        try:
+            fh.close()
+        except Exception:
+            pass
+        with _ALPHA_TRAIN_LOCK:
+            _ALPHA_TRAIN_FH = None
+
+    tail = _tail_text(logp, max_bytes=int(tail_bytes)) if logp is not None else ""
+    return {
+        "ok": True,
+        "running": bool(running),
+        "pid": int(getattr(p, "pid", 0) or 0),
+        "started_at": started,
+        "returncode": None if running else int(rc if rc is not None else -1),
+        "cmd": " ".join(cmd),
+        "log_path": str(logp) if logp is not None else "",
+        "log_tail": str(tail or ""),
+        "voice_stopped": bool(_SOVITS_RESUME_AFTER_ALPHA),
+    }
+
+
+@app.post("/api/v1/evolution/alpha/train/stop")
+async def stop_alpha_evolution_train():
+    global _ALPHA_TRAIN_PROC, _ALPHA_TRAIN_FH
+    global _SOVITS_RESUME_AFTER_ALPHA, _SOVITS_RESTARTED_AFTER_ALPHA
+    with _ALPHA_TRAIN_LOCK:
+        p = _ALPHA_TRAIN_PROC
+        fh = _ALPHA_TRAIN_FH
+        logp = _ALPHA_TRAIN_LOG
+
+    if p is None or p.poll() is not None:
+        if fh is not None:
+            try:
+                fh.close()
+            except Exception:
+                pass
+        with _ALPHA_TRAIN_LOCK:
+            _ALPHA_TRAIN_PROC = None
+            _ALPHA_TRAIN_FH = None
+
+        with _SOVITS_LOCK:
+            if _SOVITS_RESUME_AFTER_ALPHA and (not _SOVITS_RESTARTED_AFTER_ALPHA):
+                _start_gpt_sovits_from_state()
+                _SOVITS_RESTARTED_AFTER_ALPHA = True
+                _SOVITS_RESUME_AFTER_ALPHA = False
+
+        return {"ok": True, "stopped": False, "message": "not running", "log_path": str(logp) if logp else ""}
+
+    try:
+        p.terminate()
+    except Exception as e:
+        return {"ok": False, "stopped": False, "error": str(e), "log_path": str(logp) if logp else ""}
+
+    with _SOVITS_LOCK:
+        if _SOVITS_RESUME_AFTER_ALPHA:
+            _SOVITS_RESTARTED_AFTER_ALPHA = False
+
+    return {"ok": True, "stopped": True, "pid": int(getattr(p, "pid", 0) or 0), "log_path": str(logp) if logp else ""}
 
 
 @app.get("/api/v1/status")
@@ -1797,6 +3124,25 @@ def _get_secretary_config() -> Dict[str, Any]:
         cfg = yaml.safe_load(fp.read_text(encoding="utf-8"))
         if not isinstance(cfg, dict):
             cfg = {}
+
+        try:
+            p = REPO_ROOT / "data" / "finetune" / "evolution" / "active_secretary_adapter.json"
+            if p.exists():
+                obj = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(obj, dict):
+                    ap = str(obj.get("active_secretary_adapter") or "").strip()
+                    if ap:
+                        cand = Path(ap)
+                        if not cand.is_absolute():
+                            cand = (REPO_ROOT / cand).resolve()
+                        if cand.exists():
+                            llm_cfg = cfg.get("llm") if isinstance(cfg.get("llm"), dict) else {}
+                            llm_cfg = dict(llm_cfg)
+                            llm_cfg["local_adapter"] = str(cand)
+                            cfg["llm"] = llm_cfg
+        except Exception:
+            pass
+
         _SECRETARY_CFG = dict(cfg)
         _SECRETARY_CFG_MTIME = mtime
         return dict(_SECRETARY_CFG)
@@ -2139,8 +3485,26 @@ def _classify_secretary_profile(text: str) -> str:
         "持仓",
         "现金",
         "盈亏",
+        "股票",
+        "美股",
+        "买",
+        "买入",
+        "卖",
+        "卖出",
+        "入场",
+        "开仓",
+        "平仓",
+        "加仓",
+        "减仓",
+        "持有",
         "pnl",
         "portfolio",
+        "position",
+        "positions",
+        "holding",
+        "holdings",
+        "share",
+        "shares",
         "gatekeeper",
         "planner",
         "router",
@@ -2245,7 +3609,7 @@ def _call_llm(*, text: str, ctx: Dict[str, Any], profile: str = "work") -> Optio
                 temperature=temperature,
                 max_new_tokens=max_tokens,
                 use_4bit=use_4bit,
-                use_8bit=use_8bit,
+                use_8bit=(not use_4bit),
                 adapter_path=local_adapter,
             )
             if response:
@@ -2262,17 +3626,30 @@ def _call_llm(*, text: str, ctx: Dict[str, Any], profile: str = "work") -> Optio
     if not api_base or not model:
         return None
 
-    client = OpenAI(base_url=api_base, api_key=api_key)
+    try:
+        timeout_sec = float((llm_cfg or {}).get("timeout_sec", 35.0))
+    except Exception:
+        timeout_sec = 35.0
+    timeout_sec = max(5.0, min(timeout_sec, 180.0))
+
+    try:
+        client = OpenAI(base_url=api_base, api_key=api_key, timeout=timeout_sec)
+    except Exception:
+        client = OpenAI(base_url=api_base, api_key=api_key)
     logger.info(f"[LLM] API mode: {api_base} model={model} profile={prof}")
-    resp = client.chat.completions.create(
-        model=model,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": str(text)},
-        ],
-        temperature=temperature,
-        max_tokens=max_tokens,
-    )
+    try:
+        resp = client.chat.completions.create(
+            model=model,
+            messages=[
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": str(text)},
+            ],
+            temperature=temperature,
+            max_tokens=max_tokens,
+        )
+    except Exception as e:
+        logger.warning(f"[LLM] API call failed: {e}")
+        return None
     logger.info(f"[LLM] Response received, choices={bool(getattr(resp, 'choices', None))}")
     if not getattr(resp, "choices", None):
         return None
@@ -2294,6 +3671,27 @@ def _call_llm(*, text: str, ctx: Dict[str, Any], profile: str = "work") -> Optio
 def _secretary_reply(text: str, ctx: Dict[str, Any]) -> str:
     t = str(text or "").strip()
     tl = t.lower()
+
+    try:
+        d0 = _portfolio_digest(text=t, ctx=ctx)
+        if isinstance(d0, str) and d0.strip():
+            return d0.strip()
+    except Exception:
+        pass
+
+    try:
+        dms = _models_status_digest(text=t, ctx=ctx)
+        if isinstance(dms, str) and dms.strip():
+            return dms.strip()
+    except Exception:
+        pass
+
+    try:
+        d = _agent_logs_digest(text=t, ctx=ctx)
+        if isinstance(d, str) and d.strip():
+            return d.strip()
+    except Exception:
+        pass
 
     # 0) Follow-up handling for desktop sessions (no explicit id).
     try:
@@ -2495,40 +3893,68 @@ def _secretary_reply(text: str, ctx: Dict[str, Any]) -> str:
         )
 
     try:
-        prof = _classify_secretary_profile(t)
-        r = _call_llm(text=t, ctx=ctx, profile=prof)
+        r = _planner_mari_reply(t, ctx)
         if isinstance(r, str) and r.strip():
             return r.strip()
-    except Exception as e:
-        logger.warning(f"secretary llm call failed: {e}")
-        return (
-            "我这边暂时连不上本地 LLM（OpenAI-compatible）服务。\n"
-            f"错误：{e}\n"
-            "请检查：\n"
-            "1) LM Studio / vLLM / Ollama 是否在运行（例如 http://localhost:1234/v1）\n"
-            "2) configs/secretary.yaml 里的 llm.api_base 和 llm.model 是否和服务端一致"
-        )
-
-    try:
-        cfg0 = _get_secretary_config()
-        llm0 = cfg0.get("llm") if isinstance(cfg0.get("llm"), dict) else {}
-        mode0 = str((llm0 or {}).get("mode") or "api").strip().lower()
     except Exception:
-        mode0 = "api"
+        pass
 
-    if mode0 == "local":
-        return (
-            "本地 LLM 没有返回有效内容。\n"
-            "请检查：configs/secretary.yaml 的 llm.local_model / llm.local_adapter 是否存在且可读，\n"
-            "以及本机是否已安装 transformers / peft / bitsandbytes（本地模式需要）。\n"
-            "另外请查看 API 控制台日志中的 [LLM] Local mode error / [LocalLLM] LoRA load failed 具体原因。"
-        )
+    # Fallback to shared-base LLM chat (A2 Architecture)
+    # Planner strategy holds the shared model and can hot-swap to 'secretary' adapter.
+    try:
+        if _live_runner is not None and getattr(_live_runner, "strategy", None):
+            # Only use LLM if it's actually loaded (lazy load check)
+            if _live_runner.strategy.models_loaded:
+                # System prompt injection (context + personality)
+                sys_p = _build_secretary_system_prompt(ctx)
+                reply = _live_runner.strategy.generate_reply(t, system_prompt=sys_p)
+                if reply:
+                    return reply
+    except Exception:
+        pass
 
-    return (
-        "本地 LLM 没有返回有效内容。\n"
-        "请检查：configs/secretary.yaml 的 llm.api_base / llm.model 是否正确，"
-        "以及本地 LLM 服务是否支持 /v1/chat/completions。"
-    )
+    return "Sensei，我这边暂时没有新的可播报结论。"
+
+def _build_secretary_system_prompt(ctx: Dict[str, Any]) -> str:
+    """Build the system prompt for Secretary LLM from config and context"""
+    cfg = _get_secretary_config()
+    base_prompt = str((cfg.get("secretary") or {}).get("system_prompt") or "").strip()
+    
+    # Add context (time, user role, etc.)
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    context_lines = [
+        f"Current Time: {now_str}",
+        f"User Role: {str((ctx or {}).get('user_role') or 'Sensei')}",
+    ]
+    
+    # Add memory context if available
+    try:
+        mem = get_mari_memory()
+        mem_ctx = mem.get_context_for_llm(limit=5)
+        if mem_ctx:
+            context_lines.append("\n[Memory]\n" + mem_ctx)
+    except Exception:
+        pass
+
+    # Add Live Agent Logs (System Status) for situational awareness
+    if _live_runner is not None:
+        try:
+            logs = getattr(_live_runner, "agent_logs", [])
+            if logs:
+                # Take last 15 logs for context to understand current system state
+                tail = logs[-15:]
+                log_lines = []
+                for it in tail:
+                    t = str((it or {}).get("time") or "")
+                    m = str((it or {}).get("message") or "")
+                    if t and m:
+                        log_lines.append(f"[{t}] {m}")
+                if log_lines:
+                    context_lines.append("\n[System Live Logs]\n" + "\n".join(log_lines))
+        except Exception:
+            pass
+
+    return base_prompt + "\n\n" + "\n".join(context_lines)
 
 
 def _read_json(path: Path) -> Any:
@@ -2947,11 +4373,36 @@ async def snapshot(run_id: str, system: str, date_str: str, ticker: str, lookbac
 # Global reference to live trading runner (set by external script)
 _live_runner = None
 
+_markets_tiles_cache: Dict[str, Any] = {"ts": 0.0, "data": None}
+
 
 def set_live_runner(runner):
     """Set the live trading runner for API access"""
     global _live_runner
     _live_runner = runner
+
+    try:
+        cfg = _get_secretary_config()
+        trading_cfg = cfg.get("trading") if isinstance(cfg.get("trading"), dict) else {}
+        desired_load_models = trading_cfg.get("load_models")
+        if desired_load_models is None:
+            desired_load_models = True
+        desired_load_models = bool(desired_load_models)
+        try:
+            setattr(_live_runner, "load_models", desired_load_models)
+        except Exception:
+            pass
+
+        try:
+            stg = getattr(_live_runner, "strategy", None)
+            if stg is not None and desired_load_models and (not bool(getattr(stg, "models_loaded", False))):
+                fn = getattr(stg, "_load_models", None)
+                if callable(fn):
+                    fn()
+        except Exception:
+            pass
+    except Exception:
+        pass
 
     try:
         cfg = _get_secretary_config()
@@ -2993,17 +4444,28 @@ async def get_live_status():
     initial_cash = getattr(_live_runner, "initial_cash", 500000.0)
     total_pnl = total_value - initial_cash
 
+    currency = str(getattr(_live_runner, "currency", "USD") or "USD")
+
     feed = _live_feed_status()
     
+    infer_mode = "REAL" if (bool(getattr(_live_runner, "load_models", False)) and bool(getattr(getattr(_live_runner, "strategy", None), "models_loaded", False))) else "HEURISTIC"
+
     return {
         "active": True,
         "tickers": _live_runner.strategy.tickers,
         "cash": cash,
+        "initial_cash": initial_cash,
+        "currency": currency,
         "total_value": total_value,
         "total_pnl": total_pnl,
         "positions": positions,
         "trade_count": len(_live_runner.trade_log),
         "mode": getattr(_live_runner, "trading_mode", "online"),
+
+        "load_models": bool(getattr(_live_runner, "load_models", False)),
+        "models_loaded": bool(getattr(getattr(_live_runner, "strategy", None), "models_loaded", False)),
+        "models_error": str(getattr(getattr(_live_runner, "strategy", None), "models_error", "") or ""),
+        "infer_mode": infer_mode,
 
         # Feed/source diagnostics
         "data_source": feed.get("data_source"),
@@ -3014,8 +4476,213 @@ async def get_live_status():
     }
 
 
+def _markets_tiles_get_cached(*, ttl_sec: float = 25.0) -> Dict[str, Any]:
+    import time
+
+    now = float(time.time())
+    try:
+        ts = float((_markets_tiles_cache or {}).get("ts") or 0.0)
+    except Exception:
+        ts = 0.0
+    if (_markets_tiles_cache.get("data") is not None) and (now - ts) < ttl_sec:
+        try:
+            return dict(_markets_tiles_cache.get("data") or {})
+        except Exception:
+            return _markets_tiles_cache.get("data") or {}
+
+    # Approximate Yahoo homepage tiles with curated symbol sets.
+    lists: Dict[str, list[str]] = {
+        "trending": ["NVDA", "TSLA", "AAPL", "MSFT", "AMD"],
+        "futures": ["ES=F", "NQ=F", "YM=F", "RTY=F"],
+        "currencies": ["EURUSD=X", "JPY=X", "GBPUSD=X", "AUDUSD=X", "NZDUSD=X"],
+        "crypto": ["BTC-USD", "ETH-USD", "XRP-USD", "BNB-USD", "SOL-USD"],
+        "etfs": ["SPY", "QQQ", "IWM", "DIA", "XLF"],
+        # Movers are placeholders (true screeners require paid endpoints); we still show a few symbols.
+        "stocks_gainers": ["NVDA", "AMD", "TSLA", "AAPL", "MSFT"],
+        "stocks_losers": ["INTC", "PYPL", "NKE", "DIS", "BABA"],
+        "stocks_most_actives": ["NVDA", "AAPL", "TSLA", "AMD", "INTC"],
+    }
+
+    def _quote_one(sym: str) -> Optional[Dict[str, Any]]:
+        try:
+            import yfinance as yf
+
+            tk = yf.Ticker(sym)
+            fi = getattr(tk, "fast_info", None)
+            last = None
+            prev = None
+            if isinstance(fi, dict):
+                last = fi.get("last_price")
+                prev = fi.get("previous_close")
+            if last is None or prev is None:
+                info = getattr(tk, "info", None)
+                if isinstance(info, dict):
+                    if last is None:
+                        last = info.get("regularMarketPrice")
+                    if prev is None:
+                        prev = info.get("regularMarketPreviousClose")
+            last_f = float(last) if last is not None else None
+            prev_f = float(prev) if prev is not None else None
+            if last_f is None:
+                return None
+            chg = None
+            pct = None
+            if prev_f not in (None, 0.0):
+                chg = last_f - prev_f
+                pct = (chg / prev_f) * 100.0
+            return {
+                "symbol": str(sym),
+                "last": last_f,
+                "change": chg,
+                "pct": pct,
+            }
+        except Exception:
+            return None
+
+    out: Dict[str, Any] = {"asof": datetime.now().isoformat(), "tiles": {}}
+    tiles: Dict[str, Any] = {}
+    for k, syms in lists.items():
+        rows: list[Dict[str, Any]] = []
+        for s in list(syms)[:10]:
+            q = _quote_one(s)
+            if q is not None:
+                rows.append(q)
+        tiles[k] = rows
+    out["tiles"] = tiles
+
+    _markets_tiles_cache["ts"] = now
+    _markets_tiles_cache["data"] = out
+    return out
+
+
+@app.get("/api/v1/markets/tiles")
+async def get_markets_tiles():
+    try:
+        return _markets_tiles_get_cached(ttl_sec=25.0)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"tiles error: {e}")
+
+
 class SetModeRequest(BaseModel):
     mode: str
+
+
+class LiveRestartRequest(BaseModel):
+    data_source: str = ""
+    load_models: Optional[bool] = None
+
+
+@app.post("/api/v1/live/reload_models")
+async def reload_live_models():
+    if _live_runner is None:
+        raise HTTPException(status_code=404, detail="No live trading session")
+
+    stg = getattr(_live_runner, "strategy", None)
+    if stg is None:
+        raise HTTPException(status_code=404, detail="No strategy")
+
+    changed = False
+    err = ""
+    need_reload = False
+    msg = ""
+    try:
+        p = REPO_ROOT / "data" / "finetune" / "evolution" / "active_trading_models.json"
+        if p.exists():
+            obj = json.loads(p.read_text(encoding="utf-8"))
+            if isinstance(obj, dict):
+                s = str(obj.get("active_moe_scalper") or "").strip()
+                a = str(obj.get("active_moe_analyst") or "").strip()
+                if s:
+                    try:
+                        if str(getattr(stg, "moe_scalper", "") or "") != s:
+                            setattr(stg, "moe_scalper", s)
+                            changed = True
+                    except Exception:
+                        pass
+                if a:
+                    try:
+                        if str(getattr(stg, "moe_analyst", "") or "") != a:
+                            setattr(stg, "moe_analyst", a)
+                            changed = True
+                    except Exception:
+                        pass
+
+        try:
+            need_reload = bool(changed) or (not bool(getattr(stg, "models_loaded", False)))
+        except Exception:
+            need_reload = True
+
+        if need_reload:
+            try:
+                setattr(_live_runner, "load_models", True)
+            except Exception:
+                pass
+
+            try:
+                import torch
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+
+            try:
+                setattr(stg, "model", None)
+            except Exception:
+                pass
+            try:
+                setattr(stg, "tokenizer", None)
+            except Exception:
+                pass
+            try:
+                setattr(stg, "models_loaded", False)
+            except Exception:
+                pass
+
+            fn = getattr(stg, "_load_models", None)
+            if callable(fn):
+                fn()
+            msg = "reloaded"
+        else:
+            msg = "noop"
+
+        try:
+            logs = getattr(_live_runner, "agent_logs", None)
+            if isinstance(logs, list):
+                t_str = datetime.now().strftime("%H:%M:%S")
+                logs.append(
+                    {
+                        "time": t_str,
+                        "type": "agent",
+                        "priority": 2,
+                        "message": f"[ReloadModels] changed={changed} | scalper={getattr(stg, 'moe_scalper', '')} | analyst={getattr(stg, 'moe_analyst', '')}",
+                    }
+                )
+        except Exception:
+            pass
+    except Exception as e:
+        err = str(e)
+
+    if err:
+        return {
+            "ok": False,
+            "changed": bool(changed),
+            "error": err,
+            "moe_scalper": str(getattr(stg, "moe_scalper", "") or ""),
+            "moe_analyst": str(getattr(stg, "moe_analyst", "") or ""),
+            "models_loaded": bool(getattr(stg, "models_loaded", False)),
+            "message": msg,
+            "need_reload": bool(need_reload),
+        }
+
+    return {
+        "ok": True,
+        "changed": bool(changed),
+        "moe_scalper": str(getattr(stg, "moe_scalper", "") or ""),
+        "moe_analyst": str(getattr(stg, "moe_analyst", "") or ""),
+        "models_loaded": bool(getattr(stg, "models_loaded", False)),
+        "message": msg,
+        "need_reload": bool(need_reload),
+    }
 
 
 @app.post("/api/v1/live/set_mode")
@@ -3039,6 +4706,232 @@ async def set_live_mode(req: SetModeRequest):
     return {"mode": mode, "message": f"Switched to {mode} mode"}
 
 
+@app.post("/api/v1/live/restart")
+async def restart_live(req: LiveRestartRequest):
+    if _live_runner is None:
+        raise HTTPException(status_code=404, detail="No live trading session")
+
+    src = str(req.data_source or "").strip().lower()
+    if src and src not in {"auto", "yfinance", "simulated"}:
+        raise HTTPException(status_code=400, detail="data_source must be auto/yfinance/simulated")
+
+    try:
+        _live_runner.stop_offline_playback()
+    except Exception:
+        pass
+
+    try:
+        df = getattr(_live_runner, "data_feed", None)
+        if df is not None:
+            try:
+                df.stop()
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+    prev_src = None
+    try:
+        prev_src = str(getattr(_live_runner, "data_source", "auto") or "auto")
+    except Exception:
+        prev_src = None
+
+    if src:
+        try:
+            setattr(_live_runner, "data_source", src)
+        except Exception:
+            pass
+
+    try:
+        cur_src = str(getattr(_live_runner, "data_source", "auto") or "auto")
+        if prev_src is not None and cur_src != prev_src:
+            fn = getattr(_live_runner, "reset_price_history", None)
+            if callable(fn):
+                fn(None)
+    except Exception:
+        pass
+
+    lm_req = req.load_models
+    if lm_req is not None:
+        try:
+            setattr(_live_runner, "load_models", bool(lm_req))
+        except Exception:
+            pass
+
+        try:
+            stg = getattr(_live_runner, "strategy", None)
+            if stg is not None:
+                if bool(lm_req) and (not bool(getattr(stg, "models_loaded", False))):
+                    fn = getattr(stg, "_load_models", None)
+                    if callable(fn):
+                        fn()
+                if (not bool(lm_req)) and bool(getattr(stg, "models_loaded", False)):
+                    try:
+                        setattr(stg, "model", None)
+                    except Exception:
+                        pass
+                    try:
+                        setattr(stg, "tokenizer", None)
+                    except Exception:
+                        pass
+                    try:
+                        setattr(stg, "models_loaded", False)
+                    except Exception:
+                        pass
+                    try:
+                        import torch
+                        if torch.cuda.is_available():
+                            torch.cuda.empty_cache()
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+
+    # Hot-swap MoE adapters from pointer file (if present) and reload models
+    try:
+        stg = getattr(_live_runner, "strategy", None)
+        if stg is not None:
+            p = REPO_ROOT / "data" / "finetune" / "evolution" / "active_trading_models.json"
+            if p.exists():
+                obj = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(obj, dict):
+                    s = str(obj.get("active_moe_scalper") or "").strip()
+                    a = str(obj.get("active_moe_analyst") or "").strip()
+                    changed = False
+                    if s:
+                        try:
+                            if str(getattr(stg, "moe_scalper", "") or "") != s:
+                                setattr(stg, "moe_scalper", s)
+                                changed = True
+                        except Exception:
+                            pass
+                    if a:
+                        try:
+                            if str(getattr(stg, "moe_analyst", "") or "") != a:
+                                setattr(stg, "moe_analyst", a)
+                                changed = True
+                        except Exception:
+                            pass
+
+                    if changed:
+                        try:
+                            setattr(_live_runner, "load_models", True)
+                        except Exception:
+                            pass
+
+                        try:
+                            import torch
+                            if torch.cuda.is_available():
+                                torch.cuda.empty_cache()
+                        except Exception:
+                            pass
+
+                        try:
+                            setattr(stg, "model", None)
+                        except Exception:
+                            pass
+                        try:
+                            setattr(stg, "tokenizer", None)
+                        except Exception:
+                            pass
+                        try:
+                            setattr(stg, "models_loaded", False)
+                        except Exception:
+                            pass
+
+                        fn = getattr(stg, "_load_models", None)
+                        if callable(fn):
+                            fn()
+
+                    try:
+                        logs = getattr(_live_runner, "agent_logs", None)
+                        if isinstance(logs, list):
+                            import datetime as _dt
+                            t_str = _dt.datetime.now().strftime("%H:%M:%S")
+                            logs.append(
+                                {
+                                    "time": t_str,
+                                    "type": "agent",
+                                    "priority": 2,
+                                    "message": f"[HotSwap] scalper={getattr(stg, 'moe_scalper', '')} | analyst={getattr(stg, 'moe_analyst', '')}",
+                                }
+                            )
+                    except Exception:
+                        pass
+    except Exception:
+        pass
+
+    try:
+        from src.trading.data_feed import create_data_feed
+
+        tickers = []
+        try:
+            tickers = list(getattr(_live_runner.strategy, "tickers", []) or [])
+        except Exception:
+            tickers = []
+
+        new_src = str(getattr(_live_runner, "data_source", "auto") or "auto")
+        new_df = create_data_feed(tickers, source=new_src, interval_sec=5.0)
+        actual_src = None
+        try:
+            actual_src = str(getattr(new_df, "source", "") or "").strip().lower() or None
+        except Exception:
+            actual_src = None
+        try:
+            new_df.subscribe(_live_runner._on_market_data)
+        except Exception:
+            pass
+        new_df.start()
+        try:
+            setattr(_live_runner, "data_feed", new_df)
+        except Exception:
+            pass
+
+        try:
+            if actual_src:
+                setattr(_live_runner, "data_source", actual_src)
+        except Exception:
+            pass
+
+        if (actual_src or str(new_src)).lower() == "yfinance":
+            try:
+                fn = getattr(_live_runner, "backfill_intraday", None)
+                if callable(fn):
+                    ok = await run_in_threadpool(lambda: fn(max_bars=600))
+                    try:
+                        logs = getattr(_live_runner, "agent_logs", None)
+                        if isinstance(logs, list):
+                            import datetime as _dt
+                            t_str = _dt.datetime.now().strftime("%H:%M:%S")
+                            bars_n = 0
+                            try:
+                                ph = getattr(_live_runner, "price_history", {})
+                                if isinstance(ph, dict):
+                                    for _tk, _bars in ph.items():
+                                        if isinstance(_bars, list):
+                                            bars_n += len(_bars)
+                            except Exception:
+                                bars_n = -1
+                            logs.append({
+                                "time": t_str,
+                                "type": "agent",
+                                "priority": 2,
+                                "message": f"[Backfill] yfinance intraday {'OK' if ok else 'FAIL'} | bars={bars_n}",
+                            })
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"restart failed: {e}")
+
+    try:
+        st = await get_live_status()
+        return {"ok": True, "status": st}
+    except Exception:
+        return {"ok": True}
+
+
 @app.get("/api/v1/live/chart/{ticker}")
 async def get_live_chart(ticker: str, limit: int = 100):
     """Get price history for live chart rendering"""
@@ -3047,14 +4940,43 @@ async def get_live_chart(ticker: str, limit: int = 100):
     
     ticker = ticker.upper()
     prices = _live_runner.get_chart_data(ticker)
-    
+
+    cleaned: list = []
+    try:
+        items = prices if isinstance(prices, list) else []
+        tmp = []
+        for p in items:
+            if not isinstance(p, dict):
+                continue
+            t = p.get("time")
+            if not t:
+                continue
+            try:
+                c = float(p.get("close") or 0.0)
+            except Exception:
+                c = 0.0
+            if c <= 0:
+                continue
+            tmp.append(p)
+        tmp.sort(key=lambda x: str(x.get("time") or ""))
+        seen = set()
+        for p in reversed(tmp):
+            ts = str(p.get("time") or "")
+            if not ts or ts in seen:
+                continue
+            seen.add(ts)
+            cleaned.append(p)
+        cleaned.reverse()
+    except Exception:
+        cleaned = prices if isinstance(prices, list) else []
+
     if limit > 0:
-        prices = prices[-limit:]
+        cleaned = cleaned[-limit:]
     
     return {
         "ticker": ticker,
-        "prices": prices,
-        "count": len(prices),
+        "prices": cleaned,
+        "count": len(cleaned),
     }
 
 
@@ -3152,15 +5074,82 @@ async def start_online_rl():
     rl_manager = getattr(_live_runner, "rl_manager", None)
     if rl_manager is None:
         raise HTTPException(status_code=500, detail="RL manager not initialized")
-    
-    # Enable online learning
-    rl_manager.enabled = True
-    rl_manager.learning_rate = 0.001
-    
+
+    try:
+        with _EVOLUTION_TRAIN_LOCK:
+            tp = _EVOLUTION_TRAIN_PROC
+        if tp is not None and tp.poll() is None:
+            raise HTTPException(status_code=409, detail="Ouroboros training is running")
+    except HTTPException:
+        raise
+    except Exception:
+        pass
+
+    global _SOVITS_RESUME_AFTER_RL, _SOVITS_RESTARTED_AFTER_RL
+    with _SOVITS_LOCK:
+        if not _SOVITS_RESUME_AFTER_RL and not _SOVITS_RESTARTED_AFTER_RL:
+            res = _stop_gpt_sovits_from_state()
+            if bool(res.get("stopped")):
+                _SOVITS_RESUME_AFTER_RL = True
+                _SOVITS_RESTARTED_AFTER_RL = False
+
+    try:
+        from src.llm.local_chat import unload_model
+        await run_in_threadpool(unload_model)
+    except Exception:
+        pass
+
+    try:
+        setattr(_live_runner, "load_models", True)
+    except Exception:
+        pass
+
+    try:
+        stg = getattr(_live_runner, "strategy", None)
+        if stg is not None and (not bool(getattr(stg, "models_loaded", False))):
+            fn = getattr(stg, "_load_models", None)
+            if callable(fn):
+                fn()
+    except Exception:
+        pass
+
+    try:
+        setattr(rl_manager, "enabled", True)
+    except Exception:
+        pass
+
+    try:
+        setattr(rl_manager, "enable_updates", True)
+    except Exception:
+        pass
+
+    try:
+        setattr(rl_manager, "learning_rate", 0.001)
+    except Exception:
+        pass
+
+    buf_size = 0
+    try:
+        b = getattr(rl_manager, "buffer", None)
+        buf_size = len(b) if b is not None else 0
+    except Exception:
+        buf_size = 0
+
+    metrics: Dict[str, Any] = {}
+    try:
+        m = rl_manager.get_metrics(window=100)
+        if isinstance(m, dict):
+            metrics = m
+    except Exception:
+        metrics = {}
+
     return {
         "status": "started",
-        "message": "Online RL enabled - learning from trades",
-        "buffer_size": len(rl_manager.buffer) if hasattr(rl_manager, "buffer") else 0,
+        "enabled": True,
+        "buffer_size": int(buf_size),
+        "updates": int(getattr(rl_manager, "update_count", 0) or 0),
+        "metrics": metrics,
+        "voice_stopped": bool(_SOVITS_RESUME_AFTER_RL),
     }
 
 
@@ -3172,9 +5161,19 @@ async def stop_online_rl():
     
     rl_manager = getattr(_live_runner, "rl_manager", None)
     if rl_manager:
-        rl_manager.enabled = False
-    
-    return {"status": "stopped", "message": "Online RL disabled"}
+        try:
+            setattr(rl_manager, "enabled", False)
+        except Exception:
+            pass
+
+    global _SOVITS_RESUME_AFTER_RL, _SOVITS_RESTARTED_AFTER_RL
+    with _SOVITS_LOCK:
+        if _SOVITS_RESUME_AFTER_RL and (not _SOVITS_RESTARTED_AFTER_RL):
+            _start_gpt_sovits_from_state()
+            _SOVITS_RESTARTED_AFTER_RL = True
+            _SOVITS_RESUME_AFTER_RL = False
+
+    return {"status": "stopped", "enabled": False}
 
 
 @app.get("/api/v1/live/rl/status")
@@ -3186,12 +5185,29 @@ async def get_rl_status():
     rl_manager = getattr(_live_runner, "rl_manager", None)
     if rl_manager is None:
         return {"active": False, "message": "RL manager not initialized"}
-    
+
+    buf_size = 0
+    try:
+        b = getattr(rl_manager, "buffer", None)
+        buf_size = len(b) if b is not None else 0
+    except Exception:
+        buf_size = 0
+
+    metrics: Dict[str, Any] = {}
+    try:
+        m = rl_manager.get_metrics(window=100)
+        if isinstance(m, dict):
+            metrics = m
+    except Exception:
+        metrics = {}
+
     return {
         "active": True,
-        "enabled": getattr(rl_manager, "enabled", False),
-        "buffer_size": len(rl_manager.buffer) if hasattr(rl_manager, "buffer") else 0,
-        "updates": getattr(rl_manager, "update_count", 0),
+        "enabled": bool(getattr(rl_manager, "enabled", False)),
+        "buffer_size": int(buf_size),
+        "updates": int(getattr(rl_manager, "update_count", 0) or 0),
+        "metrics": metrics,
+        "voice_stopped": bool(_SOVITS_RESUME_AFTER_RL),
     }
 
 

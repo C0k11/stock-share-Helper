@@ -30,6 +30,7 @@ class DataFeed:
         self._thread: Optional[threading.Thread] = None
         self._callbacks: List[Callable[[Dict], None]] = []
         self._last_prices: Dict[str, float] = {}
+        self.source: str = "unknown"
     
     def subscribe(self, callback: Callable[[Dict], None]) -> None:
         """Subscribe to market data updates"""
@@ -100,11 +101,8 @@ class YFinanceDataFeed(DataFeed):
                 except Exception:
                     pass
                 price = float(latest["Close"])
-                
-                # Skip if price unchanged
-                if ticker in self._last_prices and abs(price - self._last_prices[ticker]) < 0.01:
-                    continue
-                
+
+                # Track last price (used only for debug/diagnostics)
                 self._last_prices[ticker] = price
                 
                 data = {
@@ -184,7 +182,16 @@ def create_data_feed(
     
     if source == "yfinance" or (source == "auto" and HAS_YFINANCE):
         try:
+            interval_sec = float(interval_sec)
+        except Exception:
+            interval_sec = 5.0
+        interval_sec = max(interval_sec, 30.0)
+        try:
             feed = YFinanceDataFeed(tickers, interval_sec)
+            try:
+                feed.source = "yfinance"
+            except Exception:
+                pass
             print(f"[DataFeed] Using REAL market data (yfinance)")
             return feed
         except Exception as e:
@@ -192,4 +199,9 @@ def create_data_feed(
     
     # Fallback to simulated
     print("[DataFeed] WARNING: Using SIMULATED data (not real market!)")
-    return SimulatedDataFeed(tickers, interval_sec)
+    feed = SimulatedDataFeed(tickers, interval_sec)
+    try:
+        feed.source = "simulated"
+    except Exception:
+        pass
+    return feed
