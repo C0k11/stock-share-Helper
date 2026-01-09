@@ -118,7 +118,8 @@ def _read_secretary_llm_cfg(repo_root: Path) -> tuple[str, str]:
     base_model = str((trading_cfg or {}).get("base_model") or "").strip()
     secretary_adapter = str((trading_cfg or {}).get("moe_secretary") or "").strip()
     
-    if base_model and secretary_adapter:
+    if base_model:
+        # A2 Architecture: Use trading base model. Adapter might be empty (cold start).
         return base_model, secretary_adapter
 
     # Fallback to legacy llm config
