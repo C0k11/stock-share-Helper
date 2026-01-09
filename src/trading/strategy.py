@@ -2527,7 +2527,9 @@ Decide BUY/SELL/HOLD for next 5 days."""
         critic_json = None
         err = ""
         try:
-            raw = extract_json_text(str(critic_raw or "").strip())
+            s0 = str(critic_raw or "").strip()
+            s0 = s0.replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ")
+            raw = extract_json_text(s0)
             if raw is None:
                 err = "no json"
             else:
@@ -2536,6 +2538,8 @@ Decide BUY/SELL/HOLD for next 5 days."""
             err = str(e)
 
         if not isinstance(critic_json, dict):
+            if not str(err or "").strip():
+                err = "parse_failed"
             try:
                 raw_hint = str(critic_raw or "").replace("\n", " ").strip()
                 if len(raw_hint) > 240:
@@ -2578,7 +2582,9 @@ Decide BUY/SELL/HOLD for next 5 days."""
         judge_json = None
         jerr = ""
         try:
-            raw = extract_json_text(str(judge_raw or "").strip())
+            s0 = str(judge_raw or "").strip()
+            s0 = s0.replace("\r\n", "\n").replace("\r", "\n").replace("\n", " ")
+            raw = extract_json_text(s0)
             if raw is None:
                 jerr = "no json"
             else:
@@ -2587,6 +2593,8 @@ Decide BUY/SELL/HOLD for next 5 days."""
             jerr = str(e)
 
         if not isinstance(judge_json, dict):
+            if not str(jerr or "").strip():
+                jerr = "parse_failed"
             try:
                 raw_hint = str(judge_raw or "").replace("\n", " ").strip()
                 if len(raw_hint) > 240:
