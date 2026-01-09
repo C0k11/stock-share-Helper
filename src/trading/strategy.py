@@ -383,6 +383,7 @@ class MultiAgentStrategy:
         temperature: float = 0.7,
         max_new_tokens: int = 512,
         max_time_sec: Optional[float] = None,
+        lock_wait_sec: Optional[float] = None,
     ) -> str:
         """
         Generic thread-safe inference using the shared model.
@@ -409,6 +410,13 @@ class MultiAgentStrategy:
             lt = float(getattr(self, "_inference_lock_timeout_sec", 3.0) or 3.0)
             # Chat/generic requests should wait for the lock instead of failing immediately.
             wait_time = max(10.0, min(20.0, float(lt) * 2.0))
+            if lock_wait_sec is not None:
+                try:
+                    lw = float(lock_wait_sec)
+                except Exception:
+                    lw = None
+                if lw is not None and lw > 0:
+                    wait_time = lw
             acquired = bool(self._inference_lock.acquire(timeout=float(wait_time)))
         except Exception:
             acquired = False
@@ -2517,17 +2525,45 @@ Decide BUY/SELL/HOLD for next 5 days."""
 
         critic_sys = (
             "You are a strict trading decision critic.\n"
+            "Rules: return STRICT JSON only; no markdown; no extra text; no newlines.\n"
+            "Keep 'pro' and 'con' concise (<= 30 words each).\n"
             "Response Format (STRICT JSON ONLY): {\"accept\": true|false, \"suggested_decision\": \"BUY\"|\"SELL\"|\"HOLD\"|\"CLEAR\", \"pro\": \"...\", \"con\": \"...\", \"reasons\": [..3 strings..]}"
         )
         critic_user = "\n".join(lines)
 
         judge_sys = (
             "You are a strict trading decision judge.\n"
+            "Rules: return STRICT JSON only; no markdown; no extra text; no newlines.\n"
+            "Keep 'rationale' concise (<= 60 words).\n"
             "Response Format (STRICT JSON ONLY): {\"final_decision\": \"BUY\"|\"SELL\"|\"HOLD\"|\"CLEAR\", \"rationale\": \"...\"}"
         )
 
         adapter = "system2" if "system2" in self._adapters_loaded else "scalper"
-        critic_raw = self.generic_inference(user_msg=critic_user, system_prompt=critic_sys, adapter=adapter, temperature=0.0, max_new_tokens=768, max_time_sec=10.0)
+
+        def _infer_retry(user_msg: str, system_prompt: str, *, max_new_tokens: int, max_time_sec: float) -> str:
+            import time as _time
+
+            last = ""
+            for i in range(3):
+                last = self.generic_inference(
+                    user_msg=user_msg,
+                    system_prompt=system_prompt,
+                    adapter=adapter,
+                    temperature=0.0,
+                    max_new_tokens=int(max_new_tokens),
+                    max_time_sec=float(max_time_sec),
+                    lock_wait_sec=6.0,
+                )
+                s1 = str(last or "").strip().lower()
+                if s1 and "model busy" not in s1:
+                    return last
+                try:
+                    _time.sleep(0.6 + 0.4 * float(i))
+                except Exception:
+                    pass
+            return last
+
+        critic_raw = _infer_retry(critic_user, critic_sys, max_new_tokens=768, max_time_sec=10.0)
         critic_json = None
         err = ""
         try:
@@ -2582,7 +2618,7 @@ Decide BUY/SELL/HOLD for next 5 days."""
                 f"Critic JSON: {json.dumps(critic_json, ensure_ascii=False)}",
             ]
         )
-        judge_raw = self.generic_inference(user_msg=judge_user, system_prompt=judge_sys, adapter=adapter, temperature=0.0, max_new_tokens=512, max_time_sec=8.0)
+        judge_raw = _infer_retry(judge_user, judge_sys, max_new_tokens=512, max_time_sec=8.0)
         judge_json = None
         jerr = ""
         try:
