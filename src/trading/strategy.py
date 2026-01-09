@@ -1915,6 +1915,10 @@ class MultiAgentStrategy:
     def _moe_route(self, ticker: str, features: Dict) -> Tuple[str, Dict]:
         """MoE Router: Select expert based on market features"""
         vol = features.get("volatility_ann_pct", 20)
+        try:
+            vol_f = float(vol)
+        except Exception:
+            vol_f = 0.0
 
         news_score = 0.0
         try:
@@ -1924,7 +1928,13 @@ class MultiAgentStrategy:
             news_score = 0.0
         
         # Route to Analyst for high volatility or meaningful news signal
-        use_analyst = vol >= self.moe_vol_threshold
+        use_analyst = False
+        try:
+            thr = float(getattr(self, "moe_vol_threshold", 0.0) or 0.0)
+        except Exception:
+            thr = 0.0
+        if thr > 0.0 and vol_f >= thr:
+            use_analyst = True
         try:
             if bool(getattr(self, "moe_any_news", True)) and abs(float(news_score)) >= float(getattr(self, "moe_news_threshold", 0.8) or 0.8):
                 use_analyst = True
@@ -1932,7 +1942,7 @@ class MultiAgentStrategy:
             pass
         
         expert = "analyst" if use_analyst else "scalper"
-        meta = {"vol": vol, "expert": expert, "news_score": news_score}
+        meta = {"vol": vol_f, "expert": expert, "news_score": news_score}
         
         return expert, meta
 
