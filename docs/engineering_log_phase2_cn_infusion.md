@@ -402,6 +402,42 @@ Prompt 模板：
 
 
 
+7) Live 图表漂移 / yfinance 回填失败 / System2 JSON 截断 / Mari 跑题（2026-01-09）
+
+- 现象 A（图表漂移）：K 线停在 15:59/16:00，BUY/SELL marker 跑到最右侧（“未来空白处”）。
+  - 根因：yfinance 常见 15min delay，bar.time 落后于服务器记录的成交时间（`datetime.now().isoformat()`）。
+  - 修复：前端将 trade marker 时间 clamp 到最后一根 bar 的时间。
+  - 相关改动：`src/ui/desktop/web/dashboard.html`（commit `28b12e3`）。
+
+- 现象 B（yfinance intraday backfill FAIL）：启动后图上只有 1 个点 / 没线；日志出现 `[Backfill] yfinance intraday FAIL`。
+  - 根因 1：`yf.download(group_by='ticker')` 返回 MultiIndex columns，旧逻辑用 `hist.get(tk)` 抽子表失败。
+  - 根因 2：一次性拉全量 ticker + threads 并发，Yahoo 易返回空/限流。
+  - 修复：
+    - 支持 MultiIndex：优先使用 `hist[tk]`。
+    - `threads=False` 降低限流；成功阈值从 `bars>=20` 降为 `bars>=5`（先保证画出线）。
+    - DataFeed 支持 `symbols_per_tick` 轮询分批 + 缓存 `yf.Ticker`，减少请求频率。
+  - 相关改动：`src/trading/data_feed.py`、`scripts/run_live_paper_trading.py`（commit `a502ac8`, `28b12e3`）。
+
+- 现象 C（System2 parse_failed / model busy）：Critic 输出 JSON 半截（例如 `"con": "` 后断掉），或直接返回 `(model busy)`。
+  - 根因 1：`generic_inference` 默认 `max_time` 被压到 2.5s，容易被截断。
+  - 根因 2：推理锁竞争（scalper/analyst/system2/secretary 同抢 GPU），导致 lock held。
+  - 修复：
+    - `generic_inference` 新增 `max_time_sec`、`lock_wait_sec`，System2 单独加预算。
+    - System2 Critic/Judge 增加轻量重试（sleep + retry），并收紧 Prompt（STRICT JSON、无换行、pro/con/rationale 限长）。
+    - parse_failed 默认 `HOLD + REJECTED`，避免“系统2失败却放行交易”。
+  - 相关改动：`src/trading/strategy.py`（commit `28b12e3`, `0f14633`）。
+
+- 现象 D（Mari 对 PnL/持仓类问题答非所问）：例如问“PnL 情况/谁赚谁亏”，却回答“现在没有持仓”或跑题到泛叙述。
+  - 根因：
+    - 确定性兜底函数 `_live_rank_answer` 曾错误读取 `_live_feed_status().live_trading`（该字段不存在），导致永远认为 positions 为空。
+    - “大家最看好什么”这种问法缺少确定性路径，会走 LLM 自由发挥。
+  - 修复：
+    - `_live_rank_answer` 改为直接从 `_live_runner.broker.positions` + `price_history` 计算浮盈浮亏。
+    - 新增 `_live_consensus_answer`：从 `agent_logs` 的 `[Execution] SIGNAL` 统计净 BUY/SELL，回答“最看好/最不看好”。
+  - 相关改动：`src/api/main.py`（commit `d6edf9b`）。
+
+
+
 #### 受影响文件（本轮）
 
 
