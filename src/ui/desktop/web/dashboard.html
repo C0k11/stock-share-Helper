@@ -122,8 +122,8 @@
     </div>
   </div>
 
-  <!-- 8 Agent Panels -->
-  <div id="agentPanelsRow" class="card" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 12px;">
+  <!-- 9 Agent Panels -->
+  <div id="agentPanelsRow" class="card" style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; padding: 12px;">
     <div class="agent-panel" id="panel_planner">
       <div class="agent-title">Planner</div>
       <div class="agent-log" id="log_planner">--</div>
@@ -143,6 +143,10 @@
     <div class="agent-panel" id="panel_chartist">
       <div class="agent-title">Chartist (VLM)</div>
       <div class="agent-log" id="log_chartist">--</div>
+    </div>
+    <div class="agent-panel" id="panel_news">
+      <div class="agent-title">News</div>
+      <div class="agent-log" id="log_news">--</div>
     </div>
     <div class="agent-panel" id="panel_macro">
       <div class="agent-title">Macro Governor</div>
@@ -287,6 +291,11 @@
     let _ttsAudio = null;
     let _ttsAudioUrl = null;
     let _ttsVolume = 0.85;
+    let _ttsEnabled = false;
+    try {
+      const sp = new URLSearchParams(window.location.search || '');
+      _ttsEnabled = (String(sp.get('tts') || '').trim() === '1');
+    } catch (e) { _ttsEnabled = false; }
 
     function _sanitizeTtsText(s) {
       try {
@@ -593,7 +602,9 @@
 
         const reply = (data && (data.reply || data.message)) ? String(data.reply || data.message) : '(no reply)';
         _lastChatMessageId = (data && (data.message_id || data.id)) ? String(data.message_id || data.id) : null;
-        try { await playMariTts(reply); } catch (e) {}
+        if (_ttsEnabled) {
+          try { await playMariTts(reply); } catch (e) {}
+        }
         _chatLocal[pendingIdx] = { role: 'mari', time: new Date().toISOString(), text: reply, message_id: _lastChatMessageId, _rated: false };
         renderChat();
       } catch (e) {
@@ -1617,28 +1628,36 @@
         // Categorize logs into 8 agent panels
         const panels = {
           planner: [], gatekeeper: [], scalper: [], analyst: [],
-          chartist: [], macro: [], system2: [], execution: []
+          chartist: [], news: [], macro: [], system2: [], execution: []
         };
         
         logsForPanels.forEach(log => {
           const msg = (log.message || '').toLowerCase();
           const isBackfill = msg.includes('backfill');
+          const isSystem2 = (msg.includes('system 2') || msg.includes('debate') || msg.includes('judge'));
+
           // Match to appropriate panel - each log can go to multiple panels if relevant
           if (msg.includes('planner')) panels.planner.push(log);
           if (msg.includes('gatekeeper')) panels.gatekeeper.push(log);
           if (msg.includes('scalper')) panels.scalper.push(log);
           if (msg.includes('analyst') || msg.includes('dpo')) panels.analyst.push(log);
-          if (msg.includes('chartist') || msg.includes('vlm') || msg.includes('pattern')) panels.chartist.push(log);
-          if (msg.includes('macro') || msg.includes('governor')) panels.macro.push(log);
-          if (msg.includes('system 2') || msg.includes('debate') || msg.includes('judge')) panels.system2.push(log);
+          if (msg.includes('[news]') || msg.includes(' news ')) panels.news.push(log);
+          if (!isSystem2 && (msg.includes('macro') || msg.includes('governor'))) panels.macro.push(log);
+          if (isSystem2) panels.system2.push(log);
+
+          // Avoid leakage: System2 judge text often mentions "chartist"/"signal".
+          if (!isSystem2 && (msg.includes('chartist') || msg.includes('vlm') || msg.includes('pattern'))) {
+            panels.chartist.push(log);
+          }
+
+          // Execution should only capture actual execution lines, not generic "signal" words in reasoning.
           const isExec = (
             (!isBackfill && (msg.includes('[fill]') || msg.includes(' fill ') || msg.startsWith('fill '))) ||
-            msg.includes('execution') ||
+            msg.includes('[execution]') ||
             msg.includes(' order ') || msg.startsWith('order ') ||
-            msg.includes(' signal ') || msg.startsWith('signal ') ||
             log.type === 'fill'
           );
-          if (isExec) panels.execution.push(log);
+          if (!isSystem2 && isExec) panels.execution.push(log);
         });
         
         // Update each panel
@@ -1657,7 +1676,7 @@
         
         // Bottom terminal panel (all logs)
         const el = document.getElementById('agentLog');
-        const logsForTerminal = (logsNoMd.length ? logsNoMd : logs);
+        const logsForTerminal = logs;
         if (!logsForTerminal.length) {
           el.innerHTML = '<span style="color: #6b7280;">(Waiting for logs...)</span>';
         } else {

@@ -34,6 +34,7 @@ from openai import OpenAI
 from src.analysis.narrator import narrate_trade_context
 from src.memory.mari_memory import get_mari_memory, parse_memory_command
 from src.learning.recorder import recorder as evolution_recorder
+from src.trading.event import Event, EventType
 
 app = FastAPI(
     title="QuantAI API",
@@ -1701,6 +1702,34 @@ def _run_news_analysis_job(news_id: str) -> None:
         url = str(payload.get("url") or "").strip()
         source = str(payload.get("source") or "").strip()
 
+        cfg0 = _get_secretary_config()
+        trading_cfg0 = cfg0.get("trading") if isinstance(cfg0, dict) and isinstance(cfg0.get("trading"), dict) else {}
+        news_cfg0 = trading_cfg0.get("news") if isinstance(trading_cfg0.get("news"), dict) else {}
+        job_mode = str(news_cfg0.get("job_mode") or "simple").strip().lower() or "simple"
+
+        # Prefer 'news' adapter if loaded; otherwise fall back to analyst.
+        adapter_pref: Optional[str] = None
+        try:
+            stg = getattr(_live_runner, "strategy", None) if _live_runner is not None else None
+            loaded = getattr(stg, "_adapters_loaded", set()) if stg is not None else set()
+            if isinstance(loaded, set) and ("news" in loaded):
+                adapter_pref = "news"
+            elif isinstance(loaded, set) and ("analyst" in loaded):
+                adapter_pref = "analyst"
+        except Exception:
+            adapter_pref = None
+
+        try:
+            if _live_runner is not None and isinstance(getattr(_live_runner, "agent_logs", None), list):
+                _live_runner.agent_logs.append({
+                    "time": datetime.now().strftime("%H:%M:%S"),
+                    "type": "agent",
+                    "priority": 2,
+                    "message": f"[News] start {news_id} source={source}" + (f" url={url}" if url else ""),
+                })
+        except Exception:
+            pass
+
         _append_audit({
             "time": datetime.now().isoformat(),
             "type": "news.submit",
@@ -1717,14 +1746,19 @@ def _run_news_analysis_job(news_id: str) -> None:
                 page_txt = str(fetched.get("text") or "")
                 page_txt = _sanitize_web_text(page_txt, max_chars=6_000)
                 if page_txt:
-                    brief = _call_llm_direct(
-                        system_prompt="你是新闻阅读助手。请把网页内容压缩成要点摘要（最多10条，每条不超过25字）。只输出要点列表文本。",
-                        user_text=page_txt,
-                        temperature=0.0,
-                        max_tokens=256,
-                    )
-                    brief = (brief or "").strip() or page_txt[:1200]
-                    base_news = base_news + "\n\n[URL_CONTENT]\n" + brief
+                    # Keep raw (sanitized) content; let the news adapter decide what matters.
+                    base_news = base_news + "\n\n[URL_CONTENT]\n" + page_txt
+
+                    try:
+                        if _live_runner is not None and isinstance(getattr(_live_runner, "agent_logs", None), list):
+                            _live_runner.agent_logs.append({
+                                "time": datetime.now().strftime("%H:%M:%S"),
+                                "type": "agent",
+                                "priority": 2,
+                                "message": f"[News] fetched url content ({news_id})",
+                            })
+                    except Exception:
+                        pass
             except Exception as e:
                 _append_audit({
                     "time": datetime.now().isoformat(),
@@ -1736,50 +1770,51 @@ def _run_news_analysis_job(news_id: str) -> None:
         if source:
             base_news = base_news + "\n[Source] " + source
 
-        roles: Dict[str, str] = {
-            "macro": "你是宏观分析员。任务：判断该新闻对宏观/行业/风险偏好的影响。输出JSON：{verdict: ok|risky|uncertain, impact: string, reasons: [string], tickers: [string], actions: [string]}。只输出JSON。",
-            "risk": "你是风控分析员。任务：找出潜在风险、误读点、黑天鹅、确认信息缺口。输出JSON：{verdict: ok|risky|uncertain, risk_level: 1-5, reasons: [string], missing_info: [string], actions: [string]}。只输出JSON。",
-            "factcheck": "你是事实核查分析员。任务：识别可疑点、需要验证的事实、可能的谣言/误传。输出JSON：{verdict: ok|risky|uncertain, suspicious: [string], verification_steps: [string], confidence: 0-1}。只输出JSON。",
-            "sentiment": "你是情绪/舆情分析员。任务：判断市场情绪与可能的短期交易反应。输出JSON：{verdict: ok|risky|uncertain, sentiment: positive|neutral|negative, reasons: [string], actions: [string]}。只输出JSON。",
-        }
-
-        results: Dict[str, Any] = {}
-        for role, sp in roles.items():
-            # Use 'analyst' adapter for all specialized analysis roles (macro/risk/factcheck/sentiment)
-            # as it is DPO-trained for financial reasoning.
-            raw = _call_llm_direct(system_prompt=sp, user_text=base_news, temperature=0.2, max_tokens=256, adapter="analyst")
-            parsed: Any = None
-            if isinstance(raw, str) and raw.strip():
-                try:
-                    parsed = json.loads(raw)
-                except Exception:
-                    parsed = {"raw": raw}
-            else:
-                parsed = {"error": "no_response"}
-            results[role] = parsed
-            _append_audit({
-                "time": datetime.now().isoformat(),
-                "type": "agent.result",
-                "news_id": news_id,
-                "agent": role,
-                "result": parsed,
-            })
-
-        merge_prompt = (
-            "你是交易秘书的总结官。请基于4个分析员的JSON输出，给Sensei一段总结：\n"
-            "1) 结论(是否采纳/是否需要更多核查)\n"
-            "2) 关键理由(3-6条)\n"
-            "3) 对交易的可执行建议(0-5条)\n"
-            "要求：明确、可核查、不要编造。"
+        # Simple mode: one-pass structured analysis.
+        prompt_simple = (
+            "你是金融新闻分析员。请根据输入的新闻文本/网页内容，输出严格JSON："
+            "{verdict: ok|risky|uncertain, tickers:[string], news_sentiment: positive|neutral|negative, news_score:-1..1, confidence:0..1, key_points:[string], trade_actions:[string], summary:string}。"
+            "要求：不要编造事实；不确定就uncertain；summary<=200字；只输出JSON。"
         )
-        merge_input = json.dumps(results, ensure_ascii=False)
-        # Use 'secretary' adapter for the final summary to maintain persona
-        summary = _call_llm_direct(system_prompt=merge_prompt, user_text=merge_input, temperature=0.2, max_tokens=256, adapter="secretary") or ""
+
+        raw = _call_llm_direct(system_prompt=prompt_simple, user_text=base_news, temperature=0.2, max_tokens=420, adapter=adapter_pref)
+        parsed: Any = None
+        if isinstance(raw, str) and raw.strip():
+            try:
+                parsed = json.loads(raw)
+            except Exception:
+                parsed = {"raw": raw}
+        else:
+            parsed = {"error": "no_response"}
+
+        results: Dict[str, Any] = {"news": parsed}
+        summary = ""
+        try:
+            if isinstance(parsed, dict):
+                summary = str(parsed.get("summary") or "").strip()
+        except Exception:
+            summary = ""
+        if not summary:
+            summary = str(raw or "").strip()
+
+        try:
+            if _live_runner is not None and isinstance(getattr(_live_runner, "agent_logs", None), list):
+                s0 = str(summary or "").strip().replace("\n", " ")
+                if len(s0) > 260:
+                    s0 = s0[:257] + "..."
+                _live_runner.agent_logs.append({
+                    "time": datetime.now().strftime("%H:%M:%S"),
+                    "type": "agent",
+                    "priority": 2,
+                    "message": f"[News] {news_id} summary: {s0}",
+                })
+        except Exception:
+            pass
 
         try:
             mem = get_mari_memory()
             mem.remember(
-                content=f"[News:{news_id}] {text}\n\n[Agents]\n{json.dumps(results, ensure_ascii=False)}\n\n[Summary]\n{summary}",
+                content=f"[News:{news_id}] {text}\n\n[Result]\n{json.dumps(results, ensure_ascii=False)}\n\n[Summary]\n{summary}",
                 category="fact",
                 importance=3,
             )
@@ -1911,9 +1946,17 @@ def _execute_action(*, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
             return {"ok": False, "error": "rl manager not initialized"}
         strategy = getattr(_live_runner, "strategy", None)
         if strategy is not None:
-            strategy.load_models = True
-            if not strategy.models_loaded:
-                strategy.load_models()
+            try:
+                setattr(_live_runner, "load_models", True)
+            except Exception:
+                pass
+            try:
+                if not bool(getattr(strategy, "models_loaded", False)):
+                    fn = getattr(strategy, "load_models", None)
+                    if callable(fn):
+                        fn()
+            except Exception:
+                pass
         rl_manager.enabled = True
         rl_manager.enable_updates = True
         rl_manager.learning_rate = 0.001
@@ -1974,6 +2017,129 @@ def _execute_action(*, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
     return {"ok": False, "error": f"unknown action: {a}"}
 
 
+def _live_last_price(ticker: str) -> float:
+    try:
+        tk = str(ticker or "").upper().strip()
+    except Exception:
+        tk = ""
+    if not tk or _live_runner is None:
+        return 0.0
+    try:
+        ph = getattr(_live_runner, "price_history", {})
+        if isinstance(ph, dict) and tk in ph and ph[tk]:
+            return float(ph[tk][-1].get("close") or 0.0)
+    except Exception:
+        return 0.0
+    return 0.0
+
+
+def _parse_trade_command(text: str) -> Optional[Dict[str, Any]]:
+    s = str(text or "").strip()
+    if not s:
+        return None
+    tl = s.lower()
+
+    m = re.search(r"\b(buy|sell|short|cover|close)\s+([a-z]{1,6})\b", tl)
+    if m:
+        verb = str(m.group(1) or "").strip().lower()
+        tk = str(m.group(2) or "").strip().upper()
+        act = "BUY" if verb in {"buy", "cover"} else "SELL" if verb in {"sell", "short"} else "CLOSE"
+        return {"action": act, "ticker": tk, "raw": s}
+
+    m = re.search(r"(买入|买|做多|多)\s*([A-Za-z]{1,6})", s)
+    if m:
+        return {"action": "BUY", "ticker": str(m.group(2) or "").strip().upper(), "raw": s}
+    m = re.search(r"(卖出|卖|做空|空)\s*([A-Za-z]{1,6})", s)
+    if m:
+        return {"action": "SELL", "ticker": str(m.group(2) or "").strip().upper(), "raw": s}
+    m = re.search(r"(平仓|平掉|平)\s*([A-Za-z]{1,6})", s)
+    if m:
+        return {"action": "CLOSE", "ticker": str(m.group(2) or "").strip().upper(), "raw": s}
+
+    return None
+
+
+def _execute_live_order_from_chat(cmd: Dict[str, Any]) -> Dict[str, Any]:
+    if _live_runner is None:
+        return {"ok": False, "error": "no live session"}
+
+    tk = str(cmd.get("ticker") or "").strip().upper()
+    act = str(cmd.get("action") or "").strip().upper()
+    if not tk or act not in {"BUY", "SELL", "CLOSE"}:
+        return {"ok": False, "error": "invalid command"}
+
+    price = _live_last_price(tk)
+    if not (price > 0.0):
+        return {"ok": False, "error": f"no price for {tk}"}
+
+    shares = 75.0
+    try:
+        raw = str(cmd.get("raw") or "")
+        m = re.search(r"x\s*(\d+)", raw, flags=re.IGNORECASE)
+        if not m:
+            m = re.search(r"(\d+)\s*(股|shares)?", raw)
+        if m:
+            shares = float(m.group(1))
+    except Exception:
+        shares = 75.0
+    shares = float(max(1.0, min(shares, 100000.0)))
+
+    if act == "CLOSE":
+        pos = None
+        try:
+            pos = getattr(getattr(_live_runner, "broker", None), "positions", {}).get(tk)
+        except Exception:
+            pos = None
+        if pos is not None:
+            try:
+                sh = float(getattr(pos, "shares", 0.0) or 0.0)
+            except Exception:
+                sh = 0.0
+            if sh < 0:
+                act = "BUY"
+                shares = abs(float(sh))
+            elif sh > 0:
+                act = "SELL"
+                shares = abs(float(sh))
+            else:
+                return {"ok": False, "error": "no position to close"}
+        else:
+            return {"ok": False, "error": "no position to close"}
+
+    payload = {
+        "ticker": tk,
+        "action": act,
+        "price": float(price),
+        "shares": float(shares),
+        "expert": "chat",
+        "analysis": f"chat_command: {str(cmd.get('raw') or '').strip()}",
+        "timestamp": datetime.now().isoformat(),
+    }
+
+    eng = getattr(_live_runner, "engine", None)
+    if eng is None or not hasattr(eng, "push_event"):
+        return {"ok": False, "error": "live engine unavailable"}
+
+    try:
+        eng.push_event(Event(type=EventType.ORDER, timestamp=datetime.now(), payload=payload, priority=2))
+    except Exception as e:
+        return {"ok": False, "error": f"order push failed: {e}"}
+
+    try:
+        logs = getattr(_live_runner, "agent_logs", None)
+        if isinstance(logs, list):
+            logs.append({
+                "time": datetime.now().strftime("%H:%M:%S"),
+                "type": "fill",
+                "priority": 2,
+                "message": f"[Execution] ORDER {act} {tk} x{float(shares):g} @ ${float(price):.2f} (expert=chat)",
+            })
+    except Exception:
+        pass
+
+    return {"ok": True, "ticker": tk, "action": act, "shares": float(shares), "price": float(price)}
+
+
 @app.post("/api/v1/actions/execute", response_model=ActionResponse)
 async def execute_action(req: ActionRequest):
     res = _execute_action(action=req.action, params=req.params)
@@ -1986,6 +2152,14 @@ async def chat(req: ChatRequest):
     if not text:
         raise HTTPException(status_code=400, detail="message is required")
     ctx = req.context if isinstance(req.context, dict) else {}
+
+    trade_res: Optional[Dict[str, Any]] = None
+    try:
+        cmd = _parse_trade_command(text)
+        if isinstance(cmd, dict):
+            trade_res = _execute_live_order_from_chat(cmd)
+    except Exception:
+        trade_res = None
 
     # If Ouroboros training is running, do not start new local inference.
     try:
@@ -2005,6 +2179,16 @@ async def chat(req: ChatRequest):
     t0 = time.perf_counter()
     reply = await run_in_threadpool(_secretary_reply, text, ctx)
     dt_ms = int((time.perf_counter() - t0) * 1000.0)
+
+    try:
+        if isinstance(trade_res, dict) and bool(trade_res.get("ok")):
+            r0 = f"(已提交交易指令：{trade_res.get('action')} {trade_res.get('ticker')} x{float(trade_res.get('shares') or 0):g} @ ${float(trade_res.get('price') or 0.0):.2f})"
+            reply = (str(reply or "").rstrip() + "\n\n" + r0).strip()
+        elif isinstance(trade_res, dict) and trade_res.get("error"):
+            r0 = f"(交易指令未执行：{str(trade_res.get('error') or '').strip()})"
+            reply = (str(reply or "").rstrip() + "\n\n" + r0).strip()
+    except Exception:
+        pass
 
     # Deterministic UI chart switching: do not rely on LLM to emit actions.
     try:
@@ -2254,14 +2438,26 @@ def _pick_ref_audio_from_dirs(ref_dirs: List[str], *, max_files: int = 1800, ttl
                             continue
                         prompt = ""
                         try:
-                            txt1 = fp.with_name(fp.name + ".txt")
-                            txt2 = fp.with_suffix(".txt")
-                            if txt1.exists() and txt1.is_file():
-                                prompt = _read_ref_prompt_text(txt1)
-                            elif txt2.exists() and txt2.is_file():
-                                prompt = _read_ref_prompt_text(txt2)
+                            # GPT-SoVITS datasets often store transcripts in .lab files.
+                            # Support both xxx.wav.txt / xxx.txt and xxx.wav.lab / xxx.lab.
+                            cand = [
+                                fp.with_name(fp.name + ".txt"),
+                                fp.with_suffix(".txt"),
+                                fp.with_name(fp.name + ".lab"),
+                                fp.with_suffix(".lab"),
+                            ]
+                            for tp in cand:
+                                if tp.exists() and tp.is_file():
+                                    prompt = _read_ref_prompt_text(tp)
+                                    if prompt:
+                                        break
                         except Exception:
                             prompt = ""
+
+                        # Only keep refs that have a transcript prompt.
+                        # Using audio refs without prompt_text frequently causes garbled output.
+                        if not str(prompt or "").strip():
+                            continue
 
                         files.append({"audio": str(fp), "prompt_text": str(prompt or "")})
                         if len(files) >= int(max_files):
@@ -2304,6 +2500,12 @@ async def voice_tts(req: TtsRequest):
 
     cfg = _get_secretary_config()
     voice_cfg = cfg.get("voice") if isinstance(cfg.get("voice"), dict) else {}
+    try:
+        voice_enabled = bool((voice_cfg or {}).get("enabled", True))
+    except Exception:
+        voice_enabled = True
+    if not voice_enabled:
+        raise HTTPException(status_code=400, detail="voice disabled")
     backend = str((voice_cfg or {}).get("backend") or "").strip().lower() or "gpt_sovits"
     if backend != "gpt_sovits":
         raise HTTPException(status_code=400, detail=f"unsupported voice backend: {backend}")
@@ -2320,6 +2522,10 @@ async def voice_tts(req: TtsRequest):
 
     ref_dirs = (p0 or {}).get("ref_dirs") if isinstance((p0 or {}).get("ref_dirs"), list) else []
     try:
+        random_ref = bool((p0 or {}).get("random_ref")) if (p0 or {}).get("random_ref") is not None else bool((gs or {}).get("random_ref", True))
+    except Exception:
+        random_ref = True
+    try:
         max_ref_tries = int((gs or {}).get("max_ref_tries") or 6)
     except Exception:
         max_ref_tries = 6
@@ -2328,31 +2534,34 @@ async def voice_tts(req: TtsRequest):
     refer_wav_path = str((p0 or {}).get("refer_wav_path") or "").strip()
     picked_audio = None
     picked_prompt = None
-    for _ in range(int(max_ref_tries)):
-        picked = _pick_ref_audio_from_dirs(ref_dirs)
-        if isinstance(picked, dict):
-            a0 = str(picked.get("audio") or "").strip()
-            p0t = str(picked.get("prompt_text") or "").strip()
-            if a0 and Path(a0).exists():
-                # Only use random refs when we also have a transcript prompt.
-                # Using an audio ref without prompt_text often causes garbled output.
-                if not p0t:
-                    try:
-                        logger.info(f"[TTS] skip_ref_no_prompt audio={Path(a0).name}")
-                    except Exception:
-                        pass
-                    continue
-                picked_audio = a0
-                picked_prompt = p0t
-                break
-            continue
+    if bool(random_ref):
+        for _ in range(int(max_ref_tries)):
+            picked = _pick_ref_audio_from_dirs(ref_dirs)
+            if isinstance(picked, dict):
+                a0 = str(picked.get("audio") or "").strip()
+                p0t = str(picked.get("prompt_text") or "").strip()
+                if a0 and Path(a0).exists():
+                    # Only use random refs when we also have a transcript prompt.
+                    # Using an audio ref without prompt_text often causes garbled output.
+                    if not p0t:
+                        try:
+                            logger.info(f"[TTS] skip_ref_no_prompt audio={Path(a0).name}")
+                        except Exception:
+                            pass
+                        continue
+                    picked_audio = a0
+                    picked_prompt = p0t
+                    break
+                continue
     if picked_audio:
         refer_wav_path = str(picked_audio)
     prompt_text = str((p0 or {}).get("prompt_text") or "").strip()
     if picked_prompt:
         prompt_text = picked_prompt
     try:
-        logger.info(f"[TTS] preset={preset} ref={refer_wav_path} prompt_from_file={bool(picked_prompt)}")
+        logger.info(
+            f"[TTS] preset={preset} random_ref={bool(random_ref)} ref={refer_wav_path} prompt_from_file={bool(picked_prompt)}"
+        )
     except Exception:
         pass
     text_lang = str((p0 or {}).get("text_language") or (gs or {}).get("text_language") or "zh").strip() or "zh"

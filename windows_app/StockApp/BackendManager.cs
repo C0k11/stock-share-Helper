@@ -82,14 +82,24 @@ public sealed class BackendManager
         {
         }
 
-        // Start GPT-SoVITS if configured on this machine (do not kill if already running)
+        // Start GPT-SoVITS only when voice is enabled.
         try
         {
-            await EnsureSovitsAsync();
+            var voiceEnabled = DetectVoiceEnabled();
+            if (voiceEnabled)
+            {
+                try
+                {
+                    await EnsureSovitsAsync();
+                }
+                catch
+                {
+                    // Keep app usable even if voice service fails
+                }
+            }
         }
         catch
         {
-            // Keep app usable even if voice service fails
         }
 
         // If llm.mode=api, ensure Ollama is reachable before starting backend
@@ -301,6 +311,30 @@ public sealed class BackendManager
         }
 
         return "";
+    }
+
+    private bool DetectVoiceEnabled()
+    {
+        try
+        {
+            if (_repoRoot is null) return true;
+            var cfg = Path.Combine(_repoRoot, "configs", "secretary.yaml");
+            if (!File.Exists(cfg)) return true;
+
+            var raw = File.ReadAllText(cfg, Encoding.UTF8);
+            var m = Regex.Match(raw, "(?ms)^\\s*voice\\s*:\\s*.*?^\\s*enabled\\s*:\\s*\"?([A-Za-z0-9_-]+)\"?");
+            if (m.Success)
+            {
+                var v = m.Groups[1].Value.Trim().Trim('"').Trim();
+                if (string.Equals(v, "false", StringComparison.OrdinalIgnoreCase) || v == "0") return false;
+                if (string.Equals(v, "true", StringComparison.OrdinalIgnoreCase) || v == "1") return true;
+            }
+        }
+        catch
+        {
+        }
+
+        return true;
     }
 
     private bool DetectLlmLazyLoad()

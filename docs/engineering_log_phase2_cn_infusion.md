@@ -260,6 +260,172 @@ Prompt 模板：
 
 
 
+### 2026-01-09：默认关闭 Mari 语音（释放显存 / 稳定数据采集）
+
+
+
+动机：GPT-SoVITS/语音链路会增加系统复杂度且可能占用 GPU/显存；当前阶段以“稳定跑盘 + 稳定收集 RLHF 数据”为优先，先默认关闭语音。
+
+
+
+落地：
+
+
+
+- `configs/secretary.yaml`：新增 `voice.enabled: false` 作为总开关。
+
+- `src/api/main.py`：`/api/v1/voice/tts` 尊重 `voice.enabled`（禁用时直接拒绝请求）。
+
+- `src/ui/desktop/main.py`：桌面 UI 尊重 `voice.enabled`，禁用时不再启动 TTS 播放（仍显示文字气泡，仍可点赞/点踩/comment）。
+
+- `src/ui/desktop/web/dashboard.html`：默认不播放 TTS（可用 URL 参数 `?tts=1` 临时开启）。
+
+- `scripts/launch_desktop.ps1`：自动读取 `voice.enabled`，为 false 时跳过启动 GPT-SoVITS。
+
+- `windows_app/StockApp/BackendManager.cs`：启动后端前读取 `voice.enabled`，为 false 时跳过拉起 GPT-SoVITS。
+
+
+
+恢复语音：将 `configs/secretary.yaml` 中 `voice.enabled` 改为 `true`，并重启桌面端/后端。
+
+
+
+### 2026-01-09：实盘数据采集闭环（News + VLM + RL + 录制回放）
+
+
+
+本轮目标：让系统在真实盘/模拟盘中稳定运行，并把“行情/新闻/决策/成交/收益”沉淀为可回放、可训练、可审计的数据。
+
+
+
+#### 现象与根因
+
+
+
+1) Scalper/VLM 看起来“没工作”（面板空、只有 analyst 在跑）
+
+- 现象：日志出现 `backlog=81 -> degrade all_agents_mode to single expert`、`skip System2/VLM`；Scalper/VLM 面板几乎没有输出。
+- 根因 A：`md_pending` 只做 append（无去重），同一 ticker 的旧 tick 堆满 `md_pending_limit=80`，导致 backlog 长期居高。
+- 根因 B：性能保护阈值写死 `backlog>=10`，在 backlog 已经降到 tickers 数量级（~12）时仍误判为拥堵，导致 System2/VLM 被跳过、日志被丢弃。
+
+
+
+2) GPU 显存很高但 utilisation 很低
+
+- 现象：任务管理器显示 Dedicated GPU memory 占用高，但 GPU utilisation 只有 5%-8%。
+- 根因：模型权重与缓存常驻显存是正常现象；推理是间歇发生且任务管理器默认展示 3D 引擎（不等同于 CUDA/Compute）。
+
+
+
+3) Chartist (VLM) 没输出 / no_image
+
+- 现象：Chartist 面板空白，或出现 `no_image (ticker=AMZN)`。
+- 根因 A：Chartist 的关键日志为 priority=1，在引擎 queue 压力时 `_log()` 会丢弃 priority<=1，导致“看起来没执行”。
+- 根因 B：`_render_chartist_image` 只取最近 60 bars 但固定 `mav=(20,50,200)`，在 bars 不足时 `mplfinance` 渲染异常导致返回 None。
+
+
+
+4) Scalper 推理经常超时回退 heuristic
+
+- 现象：`[InferTimeout] ... budget=1.20s -> fallback heuristic`，随后又出现 `[InferGen] dt=1.38s`。
+- 根因：tick 推理预算过紧（1.2s），生成偶发超过预算导致本 tick 回退。
+
+
+
+5) “按回放时间对齐新闻”与“避免未来函数”
+
+- 需求：回放 2025-10..2026-01 时，新闻需按 bar.time 获取历史新闻，避免拿到当前实时 RSS 造成数据泄漏。
+
+
+
+#### 修复方案与落地
+
+
+
+1) News 接入与统一处理（自动抓取 + 手动提交）
+
+- 新增 Google News RSS，与 Yahoo RSS 合并去重。
+- tickers 改为从 `configs/secretary.yaml` 读取（不再写死）。
+- 引入 `moe_news` adapter：新闻结构化优先使用 `news` adapter，不可用则 fallback `analyst`。
+- `submit_news` 改为单次 LLM JSON 输出（不再多角色两段链路），并将进度输出到 Dashboard News 面板。
+
+
+
+2) 新闻时间对齐（wall clock vs market time）
+
+- `trading.news.time_mode: wall|market`
+  - wall：实时盘使用 RSS。
+  - market：回放盘按 bar.time 缓存 `TICKER|YYYY-MM-DD`，可启用历史新闻源。
+- 增加 GDELT 作为历史新闻源（无需 key），避免回放使用当前新闻。
+
+
+
+3) 回放数据源升级：录制 session -> 回放复现
+
+- Live 跑盘期间生成 `data/paper_trading/recordings/session_*.jsonl`：
+  - `market_data`（bar/time/ohlcv）
+  - `news_signal`（按 ticker|date 去重）
+  - `signal/order/fill` 事件（可对齐复现）
+- Offline playback 支持读取 jsonl 录制文件，并通过 `strategy.inject_news_signal()` 注入新闻信号，避免回放时再次外部抓取。
+
+
+
+4) RL 数据采集验证与落盘
+
+- `/api/v1/actions/execute` 的 `start_rl` 将 `rl_manager.enabled=true`。
+- Experience 与 DPO outcome 落盘：
+  - `data/rl_experiences/experiences.jsonl`
+  - `data/dpo_preferences/completed_decisions.jsonl`
+- 验证示例：lines=5269（2026-01-09 04:14 写入）。
+
+
+
+5) 性能与可观测性修复
+
+- `md_pending` 按 ticker 去重，只保留每个 ticker 最新 bar，避免 backlog 常驻高位。
+- perf gating 阈值改为可配置（默认 40）：
+  - `trading.perf.backlog_degrade_threshold`
+  - `trading.perf.backlog_skip_system2_vlm_threshold`
+  - `trading.perf.backlog_drop_logs_threshold`
+- Chartist 可观测性增强：
+  - Chartist pattern 日志提升到 priority=2
+  - 增加节流日志：idle/not_ready/no_image/render_fail
+
+
+
+6) 推理预算可配置（减少 InferTimeout）
+
+- 新增 `trading.infer`：
+  - `tick_infer_budget_sec`
+  - `gen_max_time_sec`
+- 默认 2.0s，提高 scalper/analyst 的推理稳定性。
+
+
+
+#### 受影响文件（本轮）
+
+
+
+- `configs/secretary.yaml`
+- `scripts/run_live_paper_trading.py`
+- `src/trading/strategy.py`
+- `src/api/main.py`
+- `src/ui/desktop/web/dashboard.html`
+- `src/rl/online_learning.py`
+
+
+
+#### 验证清单
+
+
+
+1) Dashboard：Scalper/VLM/News 面板均有输出；不再长期出现 backlog=81。
+2) Chartist：出现 `Chartist (VLM): ... pattern ...` 或明确的 `idle/not_ready/no_image/render_fail`（不再空白）。
+3) RL：`data/rl_experiences/experiences.jsonl` 行数持续增长。
+4) Replay：设置 `trading.offline_playback_file` 指向 `session_*.jsonl`，回放可复现实验且新闻不泄漏。
+
+
+
 ### 2026-01-06：Desktop Secretary 稳定性 + 可执行性 + 上下文兜底（启动/UI/图表/对话）
 
 

@@ -319,7 +319,8 @@ class OnlineLearningManager:
         pnl: float,
         drawdown_pct: float,
         hold_bars: int,
-        exit_reason: str
+        exit_reason: str,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> None:
         """Called when a trade is closed"""
         if not bool(getattr(self, "enabled", False)):
@@ -336,17 +337,23 @@ class OnlineLearningManager:
         )
         
         # Store experience
+        md: Dict[str, Any] = {
+            "trade_id": trade_id,
+            "pnl": pnl,
+            "hold_bars": hold_bars,
+            "exit_reason": exit_reason,
+            "reward_components": components,
+        }
+        try:
+            if isinstance(metadata, dict) and metadata:
+                md.update(metadata)
+        except Exception:
+            pass
         self.experience_buffer.add(
             state=state,
             action=action,
             reward=reward,
-            metadata={
-                "trade_id": trade_id,
-                "pnl": pnl,
-                "hold_bars": hold_bars,
-                "exit_reason": exit_reason,
-                "reward_components": components
-            }
+            metadata=md,
         )
         
         # Log outcome for DPO

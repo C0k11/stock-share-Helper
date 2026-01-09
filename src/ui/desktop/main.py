@@ -302,13 +302,27 @@ class TTSThread(QThread):
                 if fp.suffix.lower() not in audio_exts:
                     continue
 
-                txt1 = fp.with_name(fp.name + ".txt")
-                txt2 = fp.with_name(fp.stem + ".txt")
                 prompt = ""
-                if txt1.exists() and txt1.is_file():
-                    prompt = TTSThread._read_text_file(txt1)
-                elif txt2.exists() and txt2.is_file():
-                    prompt = TTSThread._read_text_file(txt2)
+                try:
+                    # GPT-SoVITS datasets often store transcripts in .lab files.
+                    # Support both xxx.wav.txt / xxx.txt and xxx.wav.lab / xxx.lab.
+                    cand = [
+                        fp.with_name(fp.name + ".txt"),
+                        fp.with_suffix(".txt"),
+                        fp.with_name(fp.name + ".lab"),
+                        fp.with_suffix(".lab"),
+                    ]
+                    for tp in cand:
+                        if tp.exists() and tp.is_file():
+                            prompt = TTSThread._read_text_file(tp)
+                            if prompt:
+                                break
+                except Exception:
+                    prompt = ""
+
+                # Only keep refs that have a transcript prompt.
+                if not str(prompt or "").strip():
+                    continue
 
                 items.append({"audio": str(fp), "prompt_text": str(prompt)})
 
@@ -387,6 +401,11 @@ class TTSThread(QThread):
         if not isinstance(ref_dirs, list):
             ref_dirs = []
 
+        try:
+            random_ref = bool((preset_obj or {}).get("random_ref")) if (preset_obj or {}).get("random_ref") is not None else bool(self.gpt_sovits.get("random_ref", True))
+        except Exception:
+            random_ref = True
+
         if not api_base:
             return "GPT-SoVITS Error: api_base missing"
 
@@ -394,7 +413,7 @@ class TTSThread(QThread):
         timeout_sec = int(self.gpt_sovits.get("timeout_sec") or 120)
         max_ref_tries = int(self.gpt_sovits.get("max_ref_tries") or 6)
 
-        pool = self._load_ref_pool(ref_dirs) if ref_dirs else []
+        pool = self._load_ref_pool(ref_dirs) if (bool(random_ref) and ref_dirs) else []
         tried: set[str] = set()
         last_err: Optional[str] = None
 
@@ -538,6 +557,7 @@ class MainWindow(QMainWindow):
         self._control_tower_url = str(control_tower_url)
         self._tts_voice = "zh-CN-XiaoxiaoNeural"
         self._tts_backend = "edge"
+        self._voice_enabled = True
         self._gpt_sovits_cfg: dict = {}
         self._auto_execute_actions = False
         self._show_action_notes = False
@@ -550,6 +570,10 @@ class MainWindow(QMainWindow):
                 cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
                 if isinstance(cfg, dict):
                     voice_cfg = cfg.get("voice") if isinstance(cfg.get("voice"), dict) else {}
+                    try:
+                        self._voice_enabled = bool((voice_cfg or {}).get("enabled", True))
+                    except Exception:
+                        self._voice_enabled = True
                     v = str((voice_cfg or {}).get("tts_voice") or "").strip()
                     if v:
                         self._tts_voice = v
@@ -1313,6 +1337,20 @@ class MainWindow(QMainWindow):
         except Exception:
             pass
 
+        if not bool(getattr(self, "_voice_enabled", True)):
+            try:
+                label = self._append_chat(role="assistant", text=greeting)
+                safe = greeting.replace("\\", "\\\\").replace("'", "\\'").replace("\n", " ")
+                self.avatar_view.page().runJavaScript(f"window.showBubble('{safe}');")
+                self.is_talking = False
+                try:
+                    self.mouth_timer.stop()
+                except Exception:
+                    pass
+            except Exception:
+                pass
+            return
+
         preset = self._pick_tts_preset(greeting)
         self.tts_thread = TTSThread(
             greeting,
@@ -1726,6 +1764,27 @@ class MainWindow(QMainWindow):
                 self._stop_current_tts()
             except Exception:
                 pass
+
+            if not bool(getattr(self, "_voice_enabled", True)):
+                _reveal(start_talking=False)
+                try:
+                    self.is_talking = False
+                    try:
+                        self.mouth_timer.stop()
+                    except Exception:
+                        pass
+                except Exception:
+                    pass
+                try:
+                    self.input_box.setEnabled(True)
+                except Exception:
+                    pass
+                try:
+                    if hasattr(self, "_send_btn") and self._send_btn is not None:
+                        self._send_btn.setEnabled(True)
+                except Exception:
+                    pass
+                return
 
             preset = self._pick_tts_preset(reply_text)
             self.tts_thread = TTSThread(

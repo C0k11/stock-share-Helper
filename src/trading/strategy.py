@@ -16,6 +16,10 @@ import math
 import os
 import sys
 import threading
+import time
+import urllib.parse
+import urllib.request
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -56,17 +60,27 @@ class MultiAgentStrategy:
         moe_analyst: str = DEFAULT_ANALYST_ADAPTER,
         moe_secretary: str = "",
         moe_system2: str = "",
+        moe_news: str = "",
         load_4bit: bool = True,
         llm_max_context: Optional[int] = None,
         llm_max_new_tokens: int = 256,
         chartist_vlm_cfg: Optional[Dict[str, Any]] = None,
+        news_cfg: Optional[Dict[str, Any]] = None,
+        perf_cfg: Optional[Dict[str, Any]] = None,
         planner_policy: str = "rule",
         planner_sft_model_path: str = "models/planner_sft_v1.pt",
         gatekeeper_model_path: str = "models/rl_gatekeeper_v2.pt",
         gatekeeper_threshold: float = 0.0,
+        system2_lenient: bool = False,
+        sim_aggressive_entry: bool = False,
     ) -> None:
         self.engine = engine
-        self.tickers = ["NVDA", "TSLA", "AAPL", "MSFT", "AMD"]
+        try:
+            tks = [str(x or "").upper().strip() for x in (tickers or [])]
+            tks = [x for x in tks if x]
+        except Exception:
+            tks = []
+        self.tickers = tks if tks else ["NVDA", "TSLA", "AAPL", "MSFT", "AMD"]
         
         # Model state
         self.models_loaded = False
@@ -103,6 +117,7 @@ class MultiAgentStrategy:
         self.moe_analyst = moe_analyst
         self.moe_secretary = str(moe_secretary or "").strip()
         self.moe_system2 = str(moe_system2 or "").strip()
+        self.moe_news = str(moe_news or "").strip()
         self.load_4bit = load_4bit
 
         try:
@@ -121,6 +136,26 @@ class MultiAgentStrategy:
         self._chartist_vlm_processor: Any = None
         self._chartist_vlm_error: str = ""
 
+        self._news_cfg: Dict[str, Any] = dict(news_cfg or {})
+        self._news_cache: Dict[str, Dict[str, Any]] = {}
+        self._news_last_fetch_ts: Dict[str, float] = {}
+        self._news_executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=1)
+        self._news_inflight: Dict[str, Any] = {}
+
+        self._perf_cfg: Dict[str, Any] = dict(perf_cfg or {})
+        try:
+            self._perf_backlog_degrade_threshold = int(self._perf_cfg.get("backlog_degrade_threshold", 40))
+        except Exception:
+            self._perf_backlog_degrade_threshold = 40
+        try:
+            self._perf_backlog_skip_system2_vlm_threshold = int(self._perf_cfg.get("backlog_skip_system2_vlm_threshold", 40))
+        except Exception:
+            self._perf_backlog_skip_system2_vlm_threshold = 40
+        try:
+            self._perf_backlog_drop_logs_threshold = int(self._perf_cfg.get("backlog_drop_logs_threshold", 40))
+        except Exception:
+            self._perf_backlog_drop_logs_threshold = 40
+
         self.all_agents_mode: bool = False
         self.committee_policy: str = "conservative"
         
@@ -136,6 +171,19 @@ class MultiAgentStrategy:
         # System 2 debate settings
         self.system2_enabled = True
         self.system2_buy_only = True
+
+        self.system2_lenient = bool(system2_lenient)
+        self.sim_aggressive_entry = bool(sim_aggressive_entry)
+
+        self._heuristic_only_until_ts: float = 0.0
+        self._slow_infer_warn_sec: float = 25.0
+        self._slow_infer_fuse_sec: float = 90.0
+        self._gen_max_time_sec: float = 12.0
+        self._tick_infer_budget_sec: float = 1.2
+
+        self._infer_executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=1)
+        self._infer_future: Any = None
+        self._infer_inflight_since_ts: float = 0.0
         
         # Chartist overlay
         self.chart_confidence_threshold = 0.7
@@ -200,6 +248,7 @@ class MultiAgentStrategy:
             analyst_path = _resolve_adapter_path(self.moe_analyst)
             secretary_path = _resolve_adapter_path(self.moe_secretary) if self.moe_secretary else ""
             system2_path = _resolve_adapter_path(self.moe_system2) if self.moe_system2 else ""
+            news_path = _resolve_adapter_path(self.moe_news) if self.moe_news else ""
 
             adapters: Dict[str, str] = {}
             if Path(scalper_path).exists():
@@ -210,6 +259,8 @@ class MultiAgentStrategy:
                 adapters["secretary"] = secretary_path
             if system2_path and Path(system2_path).exists():
                 adapters["system2"] = system2_path
+            if news_path and Path(news_path).exists():
+                adapters["news"] = news_path
 
             try:
                 self._adapters_loaded = set(adapters.keys())
@@ -239,6 +290,11 @@ class MultiAgentStrategy:
 
             try:
                 self._log_vram(prefix="[VRAM] after_moe_load")
+            except Exception:
+                pass
+
+            try:
+                self._warmup_kv_cache()
             except Exception:
                 pass
 
@@ -294,7 +350,19 @@ class MultiAgentStrategy:
             else:
                 target_adapter = ""
 
-        with self._inference_lock:
+        acquired = False
+        try:
+            acquired = bool(self._inference_lock.acquire(blocking=False))
+        except Exception:
+            acquired = False
+        if not acquired:
+            try:
+                self._log("Inference busy: skip generic_inference (lock held)", priority=2)
+            except Exception:
+                pass
+            return "(model busy)"
+
+        try:
             try:
                 import torch
                 from contextlib import nullcontext
@@ -325,14 +393,33 @@ class MultiAgentStrategy:
                         mn = int(getattr(self, "llm_max_new_tokens", 256) or 256)
 
                     with torch.no_grad():
-                        gen_ids = self.model.generate(
-                            **inputs,
-                            max_new_tokens=mn,
-                            temperature=temperature,
-                            do_sample=(temperature > 0),
-                            top_p=0.9,
-                            pad_token_id=self.tokenizer.eos_token_id,
-                        )
+                        try:
+                            mt = float(getattr(self, "_gen_max_time_sec", 12.0) or 12.0)
+                            try:
+                                mt = min(mt, 2.5)
+                            except Exception:
+                                pass
+                            gen_ids = self.model.generate(
+                                **inputs,
+                                max_new_tokens=mn,
+                                temperature=temperature,
+                                do_sample=(temperature > 0),
+                                top_p=0.9,
+                                max_time=mt,
+                                pad_token_id=self.tokenizer.eos_token_id,
+                            )
+                        except TypeError as e:
+                            if "max_time" in str(e):
+                                gen_ids = self.model.generate(
+                                    **inputs,
+                                    max_new_tokens=mn,
+                                    temperature=temperature,
+                                    do_sample=(temperature > 0),
+                                    top_p=0.9,
+                                    pad_token_id=self.tokenizer.eos_token_id,
+                                )
+                            else:
+                                raise
                     
                     output = self.tokenizer.decode(gen_ids[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
 
@@ -355,6 +442,12 @@ class MultiAgentStrategy:
                     pass
                 return ""
 
+        finally:
+            try:
+                self._inference_lock.release()
+            except Exception:
+                pass
+
     def _log_vram(self, *, prefix: str) -> None:
         try:
             import torch
@@ -372,6 +465,31 @@ class MultiAgentStrategy:
             )
         except Exception as e:
             self._log(f"{prefix} vram_log_failed: {e}", priority=2)
+
+    def _warmup_kv_cache(self) -> None:
+        try:
+            if (not self.models_loaded) or (self.model is None) or (self.tokenizer is None):
+                return
+            adapters = list(getattr(self, "_adapters_loaded", []) or [])
+            if not adapters:
+                return
+            for ad in adapters:
+                try:
+                    self.generic_inference(
+                        user_msg="warmup",
+                        system_prompt="You are warming up the model. Reply with a single token.",
+                        adapter=str(ad),
+                        temperature=0.0,
+                        max_new_tokens=4,
+                    )
+                except Exception:
+                    continue
+            try:
+                self._log_vram(prefix="[VRAM] after_warmup")
+            except Exception:
+                pass
+        except Exception:
+            return
 
     def _maybe_load_chartist_vlm(self) -> None:
         cfg = self._chartist_vlm_cfg if isinstance(self._chartist_vlm_cfg, dict) else {}
@@ -424,6 +542,17 @@ class MultiAgentStrategy:
 
             model_obj = Qwen2_5_VLForConditionalGeneration.from_pretrained(mname, **load_kwargs)
             model_obj.eval()
+
+            adapter_path = str(cfg.get("adapter") or cfg.get("adapter_path") or "").strip()
+            if adapter_path:
+                try:
+                    from peft import PeftModel
+
+                    model_obj = PeftModel.from_pretrained(model_obj, adapter_path, is_trainable=False)
+                    model_obj.eval()
+                    self._log(f"Chartist VLM adapter loaded: {Path(adapter_path).name}", priority=2)
+                except Exception as e:
+                    self._log(f"Chartist VLM adapter load failed: {e}", priority=2)
 
             self._chartist_vlm_processor = proc
             self._chartist_vlm_model = model_obj
@@ -498,6 +627,24 @@ class MultiAgentStrategy:
         if df.empty:
             return None
 
+        try:
+            df = df[~df.index.duplicated(keep="last")]
+            df = df.sort_index()
+        except Exception:
+            pass
+
+        mav = None
+        try:
+            n = int(len(df))
+            if n >= 200:
+                mav = (20, 50, 200)
+            elif n >= 50:
+                mav = (20, 50)
+            elif n >= 20:
+                mav = (20,)
+        except Exception:
+            mav = None
+
         buf = io.BytesIO()
         try:
             mpf.plot(
@@ -505,10 +652,18 @@ class MultiAgentStrategy:
                 type="candle",
                 volume=True,
                 style="yahoo",
-                mav=(20, 50, 200),
+                mav=mav,
                 savefig=dict(fname=buf, dpi=110, bbox_inches="tight"),
             )
-        except Exception:
+        except Exception as e:
+            try:
+                now2 = time.time()
+                last2 = float(getattr(self, "_chartist_render_fail_last_ts", 0.0) or 0.0)
+                if (now2 - last2) >= 30.0:
+                    setattr(self, "_chartist_render_fail_last_ts", now2)
+                    self._log(f"Chartist (VLM): render_fail (ticker={str(ticker).upper()} err={e})", priority=2)
+            except Exception:
+                pass
             return None
 
         try:
@@ -619,6 +774,39 @@ class MultiAgentStrategy:
         
         # Calculate technical features
         features = self._compute_features(ticker)
+
+        # News signal (optionally aligned to market time for offline playback)
+        asof_dt: Optional[datetime] = None
+        try:
+            t0 = market_data.get("time")
+            if isinstance(t0, datetime):
+                asof_dt = t0
+            elif isinstance(t0, (int, float)):
+                asof_dt = datetime.fromtimestamp(float(t0))
+            elif isinstance(t0, str) and t0.strip():
+                try:
+                    asof_dt = datetime.fromisoformat(t0.strip())
+                except Exception:
+                    asof_dt = None
+        except Exception:
+            asof_dt = None
+
+        try:
+            news_sig = self._get_news_signal(ticker, asof_time=asof_dt)
+            if isinstance(news_sig, dict) and news_sig:
+                features["news"] = dict(news_sig)
+                sig = features.get("signal") if isinstance(features.get("signal"), dict) else {}
+                sig["news_score"] = float(news_sig.get("news_score") or 0.0)
+                sig["news_count"] = float(news_sig.get("news_count") or 0.0)
+                features["signal"] = sig
+        except Exception:
+            pass
+
+        backlog_hint = 0
+        try:
+            backlog_hint = int(getattr(self, "_md_backlog_hint", 0) or 0)
+        except Exception:
+            backlog_hint = 0
         
         # --- 1. Planner: Market Regime Assessment ---
         self._log(f"Planner scanning {ticker}...", priority=2)
@@ -653,15 +841,22 @@ class MultiAgentStrategy:
         self._log(f"MoE Router: {ticker} -> [{expert}] (vol={router_meta.get('vol', 0):.1f}%)", priority=2)
 
         # --- 4. Expert Inference ---
-        if self.all_agents_mode:
+        degraded_all_agents = False
+        try:
+            th = int(getattr(self, "_perf_backlog_degrade_threshold", 40) or 40)
+            degraded_all_agents = bool(self.all_agents_mode) and backlog_hint >= th
+        except Exception:
+            degraded_all_agents = False
+
+        if self.all_agents_mode and (not degraded_all_agents):
             dec_scalper = self._expert_infer(ticker, features, "scalper")
             dec_analyst = self._expert_infer(ticker, features, "analyst")
             act_s = str(dec_scalper.get("decision", "HOLD") or "HOLD").upper()
             act_a = str(dec_analyst.get("decision", "HOLD") or "HOLD").upper()
             ana_s = str(dec_scalper.get("analysis", "") or "")
             ana_a = str(dec_analyst.get("analysis", "") or "")
-            self._log(f"[scalper] {ticker}: {act_s} - {ana_s[:240]}", priority=1)
-            self._log(f"[analyst] {ticker}: {act_a} - {ana_a[:240]}", priority=1)
+            self._log(f"[scalper] {ticker}: {act_s} - {ana_s[:4000]}", priority=1)
+            self._log(f"[analyst] {ticker}: {act_a} - {ana_a[:4000]}", priority=1)
 
             action = "HOLD"
             analysis = ""
@@ -679,13 +874,18 @@ class MultiAgentStrategy:
             else:
                 if act_s == act_a and act_s in ("BUY", "SELL"):
                     action = act_s
-                    analysis = f"committee agree: {ana_s[:240]}"
+                    analysis = f"committee agree: {ana_s[:4000]}"
                 else:
                     action = "HOLD"
                     analysis = "committee: disagree_or_hold"
 
             expert = "committee"
         else:
+            if self.all_agents_mode and degraded_all_agents:
+                try:
+                    self._log(f"[Perf] backlog={backlog_hint} -> degrade all_agents_mode to single expert", priority=2)
+                except Exception:
+                    pass
             decision = self._expert_infer(ticker, features, expert)
             action = decision.get("decision", "HOLD").upper()
             analysis = decision.get("analysis", "")
@@ -694,8 +894,9 @@ class MultiAgentStrategy:
         trace_ids: list[str] = []
         
         if action == "HOLD":
-            self._log(f"[{expert}] {ticker}: HOLD - {analysis[:50]}", priority=1)
+            self._log(f"[{expert}] {ticker}: HOLD - {str(analysis or '')[:4000]}", priority=1)
 
+            n0: Optional[int] = None
             try:
                 n0 = int(self._hold_diag.get(ticker, 0) or 0) + 1
                 self._hold_diag[ticker] = n0
@@ -705,22 +906,32 @@ class MultiAgentStrategy:
                     except Exception:
                         pass
                     try:
-                        chart_score = self._chartist_overlay(ticker, "HOLD")
-                        chart_view = "supports" if chart_score > 0 else ("opposes" if chart_score < 0 else "neutral")
-                        self._log(f"Chartist (VLM): {ticker} pattern {chart_view} (score={int(chart_score)})", priority=2)
-                    except Exception as e:
-                        self._log(f"Chartist (VLM): error: {e}", priority=2)
-                    try:
                         macro_gear, macro_label = self._macro_governor_assess()
                         self._log(f"Macro Governor: regime={macro_label} (gear={macro_gear})", priority=2)
                     except Exception as e:
                         self._log(f"Macro Governor: error: {e}", priority=2)
             except Exception:
                 pass
-            return None
+
+            forced: Optional[str] = None
+            if bool(getattr(self, "sim_aggressive_entry", False)) and n0 and (n0 % 2 == 0):
+                try:
+                    br = getattr(self.engine, "broker", None)
+                    pos = None
+                    if br is not None and isinstance(getattr(br, "positions", None), dict):
+                        pos = br.positions.get(str(ticker).upper())
+                    forced = "SELL" if pos is not None else "BUY"
+                    action = forced
+                    analysis = f"sim_aggressive_entry: forced {forced} after HOLD"
+                    self._log(f"[Sim] {ticker}: override HOLD -> {forced} (sim_aggressive_entry)", priority=2)
+                except Exception:
+                    forced = None
+
+            if forced is None:
+                return None
 
         try:
-            print(f"\n[{expert}] proposal: {action} {ticker} :: {str(analysis or '')[:160]}")
+            print(f"\n[{expert}] proposal: {action} {ticker} :: {str(analysis or '')[:800]}")
         except Exception:
             pass
 
@@ -798,20 +1009,66 @@ class MultiAgentStrategy:
                 trace_ids = []
         
         if expert == "scalper":
-            self._log(f"Scalper: {ticker} {action} - {analysis[:40]}", priority=1)
+            self._log(f"Scalper: {ticker} {action} - {str(analysis or '')[:4000]}", priority=1)
         else:
-            self._log(f"Analyst (DPO): {ticker} {action} - {analysis[:40]}", priority=1)
+            self._log(f"Analyst (DPO): {ticker} {action} - {str(analysis or '')[:4000]}", priority=1)
         confidence = 0.75
+
+        chart_score: Optional[int] = None
+
+        news_score: Optional[float] = None
+        news_sentiment: Optional[str] = None
+        news_summary: Optional[str] = None
+        try:
+            ns = features.get("news") if isinstance(features.get("news"), dict) else {}
+            news_score = float(ns.get("news_score")) if ("news_score" in ns) else None
+            news_sentiment = str(ns.get("news_sentiment") or "").strip() or None
+            news_summary = str(ns.get("news_summary") or "").strip() or None
+        except Exception:
+            news_score = None
+            news_sentiment = None
+            news_summary = None
         
         # --- 5. System 2 Debate (if enabled) ---
         if self.system2_enabled:
             if (not self.system2_buy_only) or (action in {"BUY", "SELL"}):
+                try:
+                    th = int(getattr(self, "_perf_backlog_skip_system2_vlm_threshold", 40) or 40)
+                    if backlog_hint >= th:
+                        self._log(f"[Perf] backlog={backlog_hint} -> skip System2/VLM", priority=2)
+                        self.system2_enabled = bool(self.system2_enabled)
+                        chart_score = 0
+                        approved = True
+                        final_action = action
+                        reason = f"perf_skip(backlog={backlog_hint})"
+                        if final_action in {"BUY", "SELL"}:
+                            self._log(f"System 2 (Judge): LENIENT_BYPASS - {reason}", priority=2)
+                            self._log(f"System 2 (Judge): APPROVED (conf={confidence:.2f})", priority=2)
+                        else:
+                            self._log(f"System 2 Debate: idle (perf_skip)", priority=2)
+                        signal = {
+                            "ticker": ticker,
+                            "action": action,
+                            "price": price,
+                            "shares": self._calculate_position_size(ticker, price, confidence),
+                            "expert": expert,
+                            "confidence": confidence,
+                            "analysis": analysis,
+                            "timestamp": datetime.now().isoformat(),
+                            "trace_id": trace_id,
+                            "trace_ids": trace_ids,
+                            "chart_score": chart_score,
+                        }
+                        return signal
+                except Exception:
+                    pass
                 self._log("System 2 Debate: initiated...", priority=2)
                 
                 # Chartist Overlay
-                chart_score = self._chartist_overlay(ticker, action)
+                chart_score = int(self._chartist_overlay(ticker, action))
                 chart_view = "supports" if chart_score > 0 else ("opposes" if chart_score < 0 else "neutral")
-                self._log(f"Chartist (VLM): {ticker} pattern {chart_view} (score={int(chart_score)})", priority=1)
+                # Use priority=2 to avoid being dropped under engine queue pressure.
+                self._log(f"Chartist (VLM): {ticker} pattern {chart_view} (score={int(chart_score)})", priority=2)
                 
                 # Macro Governor
                 macro_gear, macro_label = self._macro_governor_assess()
@@ -838,8 +1095,11 @@ class MultiAgentStrategy:
                     action = final_action
 
                 if (not bool(approved)) or (str(final_action) == "HOLD"):
-                    self._log(f"System 2 (Judge): BLOCKED - {reason}", priority=2)
-                    return None
+                    if bool(getattr(self, "system2_lenient", False)):
+                        self._log(f"System 2 (Judge): LENIENT_BYPASS - {reason}", priority=2)
+                    else:
+                        self._log(f"System 2 (Judge): BLOCKED - {reason}", priority=2)
+                        return None
 
                 try:
                     evolution_recorder.record(
@@ -877,8 +1137,392 @@ class MultiAgentStrategy:
             "timestamp": datetime.now().isoformat(),
             "trace_id": trace_id,
             "trace_ids": trace_ids,
+            "chart_score": chart_score,
+            "news_score": news_score,
+            "news_sentiment": news_sentiment,
+            "news_summary": news_summary,
         }
         return signal
+
+    def _get_news_signal(self, ticker: str, *, asof_time: Optional[datetime] = None) -> Dict[str, Any]:
+        cfg = self._news_cfg if isinstance(self._news_cfg, dict) else {}
+        if not bool(cfg.get("enabled", False)):
+            return {}
+
+        tk = str(ticker or "").upper().strip()
+        if not tk:
+            return {}
+
+        # time_mode:
+        # - wall: use wall clock for refresh and cache per ticker
+        # - market: use bar time for refresh and cache per ticker+date (for offline playback)
+        time_mode = "wall"
+        try:
+            time_mode = str(cfg.get("time_mode") or "wall").strip().lower() or "wall"
+        except Exception:
+            time_mode = "wall"
+
+        cache_key = tk
+        asof_date = ""
+        if time_mode == "market" and isinstance(asof_time, datetime):
+            try:
+                asof_date = asof_time.strftime("%Y-%m-%d")
+                cache_key = f"{tk}|{asof_date}"
+            except Exception:
+                cache_key = tk
+
+        now = time.time()
+        refresh_sec = 300.0
+        try:
+            refresh_sec = float(cfg.get("refresh_sec") or 300.0)
+        except Exception:
+            refresh_sec = 300.0
+        refresh_sec = max(30.0, min(refresh_sec, 3600.0))
+
+        last_ts = float(self._news_last_fetch_ts.get(cache_key, 0.0) or 0.0)
+        if (now - last_ts) >= refresh_sec:
+            try:
+                fut = self._news_inflight.get(cache_key)
+                if fut is None:
+                    self._news_inflight[cache_key] = self._news_executor.submit(self._refresh_news, tk, asof_time, cache_key)
+            except Exception:
+                pass
+
+        # Harvest finished futures (non-blocking)
+        try:
+            fut0 = self._news_inflight.get(cache_key)
+            if fut0 is not None and bool(getattr(fut0, "done", lambda: False)()):
+                try:
+                    fut0.result(timeout=0.0)
+                except Exception:
+                    pass
+                try:
+                    self._news_inflight.pop(cache_key, None)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
+        cached = self._news_cache.get(cache_key)
+        if not isinstance(cached, dict):
+            return {}
+        out = cached.get("signal")
+        return dict(out) if isinstance(out, dict) else {}
+
+    def _refresh_news(self, ticker: str, asof_time: Optional[datetime] = None, cache_key: Optional[str] = None) -> None:
+        tk = str(ticker or "").upper().strip()
+        if not tk:
+            return
+
+        ck = str(cache_key or "").strip() or tk
+
+        cfg = self._news_cfg if isinstance(self._news_cfg, dict) else {}
+        limit = 12
+        try:
+            limit = int(cfg.get("limit") or 12)
+        except Exception:
+            limit = 12
+        limit = max(3, min(limit, 40))
+
+        items: List[Dict[str, Any]] = []
+        time_mode = "wall"
+        try:
+            time_mode = str(cfg.get("time_mode") or "wall").strip().lower() or "wall"
+        except Exception:
+            time_mode = "wall"
+
+        historical_enabled = False
+        try:
+            historical_enabled = bool(cfg.get("historical_enabled", False))
+        except Exception:
+            historical_enabled = False
+
+        historical_source = "gdelt"
+        try:
+            historical_source = str(cfg.get("historical_source") or "gdelt").strip().lower() or "gdelt"
+        except Exception:
+            historical_source = "gdelt"
+
+        if time_mode == "market" and historical_enabled and isinstance(asof_time, datetime) and historical_source == "gdelt":
+            try:
+                items = self._fetch_news_gdelt(tk, asof_time=asof_time, limit=limit)
+            except Exception as e:
+                try:
+                    self._log(f"[News] gdelt fetch failed {tk}: {e}", priority=2)
+                except Exception:
+                    pass
+                items = []
+        else:
+            rss_yahoo = f"https://feeds.finance.yahoo.com/rss/2.0/headline?s={tk}&region=US&lang=en-US"
+            q = urllib.parse.quote_plus(f"{tk} stock")
+            rss_google = f"https://news.google.com/rss/search?q={q}&hl=en-US&gl=US&ceid=US:en"
+            try:
+                from src.data.fetcher import DataFetcher
+            except Exception:
+                return
+
+            try:
+                df = DataFetcher(source=str(cfg.get("source") or "yfinance").strip() or "yfinance")
+                srcs: List[str] = []
+                try:
+                    if bool(cfg.get("yahoo_enabled", True)):
+                        srcs.append(rss_yahoo)
+                except Exception:
+                    srcs.append(rss_yahoo)
+                try:
+                    if bool(cfg.get("google_enabled", False)):
+                        srcs.append(rss_google)
+                except Exception:
+                    pass
+                if not srcs:
+                    srcs = [rss_yahoo]
+                items = df.fetch_news(keywords=None, sources=srcs, limit=limit) or []
+            except Exception as e:
+                try:
+                    self._log(f"[News] fetch failed {tk}: {e}", priority=2)
+                except Exception:
+                    pass
+                items = []
+
+        # If fetch returns nothing, keep previous cached signal to avoid flapping.
+        try:
+            if not items and ck in self._news_cache and isinstance(self._news_cache.get(ck), dict):
+                self._news_last_fetch_ts[ck] = time.time()
+                return
+        except Exception:
+            pass
+
+        # Optionally run LLM-based parsing. Prefer 'news' adapter, fall back to 'analyst'.
+        llm_enabled = False
+        llm_adapter: Optional[str] = None
+        try:
+            llm_enabled = bool(cfg.get("llm_enabled", False))
+        except Exception:
+            llm_enabled = False
+        try:
+            loaded = getattr(self, "_adapters_loaded", set()) or set()
+            if "news" in loaded:
+                llm_adapter = "news"
+            elif "analyst" in loaded:
+                llm_adapter = "analyst"
+            else:
+                llm_adapter = None
+        except Exception:
+            llm_adapter = None
+
+        if llm_enabled and (llm_adapter is not None):
+            try:
+                titles = []
+                for it in list(items)[:limit]:
+                    if not isinstance(it, dict):
+                        continue
+                    t0 = str(it.get("title") or "").strip()
+                    if t0:
+                        titles.append(t0)
+                blob = "\n".join([f"- {t}" for t in titles[:12]])
+                sp1 = "你是金融新闻分析员。根据标题列表，输出JSON：{\"news_sentiment\": \"positive|neutral|negative\", \"news_score\": -1..1, \"confidence\": 0..1, \"summary\": \"...\"}。只输出JSON。"
+                raw1 = self.generic_inference(user_msg=blob, system_prompt=sp1, adapter=llm_adapter, temperature=0.0, max_new_tokens=180)
+                obj = repair_and_parse_json(extract_json_text(str(raw1 or ""))) if str(raw1 or "").strip() else None
+                if isinstance(obj, dict) and ("news_score" in obj or "news_sentiment" in obj):
+                    try:
+                        avg_score = float(obj.get("news_score") or 0.0)
+                    except Exception:
+                        avg_score = 0.0
+                    sentiment = str(obj.get("news_sentiment") or "neutral").strip().lower() or "neutral"
+                    summary = str(obj.get("summary") or "").strip()
+                    if len(summary) > 240:
+                        summary = summary[:237] + "..."
+                    src_label = "yahoo+google" if (bool(cfg.get("google_enabled", False))) else "yahoo_rss"
+                    try:
+                        if time_mode == "market" and historical_enabled and isinstance(asof_time, datetime):
+                            src_label = "gdelt"
+                    except Exception:
+                        pass
+
+                    sig = {
+                        "news_count": int(len(items) or 0),
+                        "news_score": float(avg_score),
+                        "news_sentiment": sentiment,
+                        "news_confidence": float(obj.get("confidence") or 0.0),
+                        "news_summary": summary,
+                        "news_source": src_label,
+                        "asof": datetime.now().isoformat(),
+                    }
+                    try:
+                        if time_mode == "market" and isinstance(asof_time, datetime):
+                            sig["asof"] = asof_time.isoformat()
+                    except Exception:
+                        pass
+                    self._news_cache[ck] = {"items": items[:limit], "signal": sig}
+                    self._news_last_fetch_ts[ck] = time.time()
+                    try:
+                        self._log(f"[News] {tk} sentiment={sentiment} score={avg_score:.2f} n={len(items) or 0} :: {summary}", priority=2)
+                    except Exception:
+                        pass
+                    return
+            except Exception:
+                pass
+
+        parsed = []
+        try:
+            from src.llm.news_parser import RuleBasedNewsParser
+
+            parser = RuleBasedNewsParser()
+            for it in items:
+                if not isinstance(it, dict):
+                    continue
+                title = str(it.get("title") or "").strip()
+                content = str(it.get("content") or "").strip()
+                if not title and not content:
+                    continue
+                pn = parser.parse(title=title, content=content)
+                parsed.append(pn)
+        except Exception:
+            parsed = []
+
+        score = 0.0
+        conf_sum = 0.0
+        n = 0
+        titles = []
+        for i, pn in enumerate(parsed[:limit]):
+            try:
+                s = str(getattr(pn, "sentiment", "neutral") or "neutral").strip().lower()
+                conf = float(getattr(pn, "confidence", 0.5) or 0.5)
+                if s == "positive":
+                    score += 1.0 * conf
+                elif s == "negative":
+                    score += -1.0 * conf
+                conf_sum += conf
+                n += 1
+                t0 = str(getattr(pn, "title", "") or "").strip()
+                if t0:
+                    titles.append(t0)
+            except Exception:
+                continue
+
+        avg_score = (score / conf_sum) if (conf_sum > 1e-9) else 0.0
+        sentiment = "neutral"
+        if avg_score >= 0.2:
+            sentiment = "positive"
+        elif avg_score <= -0.2:
+            sentiment = "negative"
+
+        summary = " | ".join(titles[:3]).strip()
+        if len(summary) > 240:
+            summary = summary[:237] + "..."
+
+        sig = {
+            "news_count": int(len(items) or 0),
+            "news_score": float(avg_score),
+            "news_sentiment": sentiment,
+            "news_confidence": float(conf_sum / n) if n > 0 else 0.0,
+            "news_summary": summary,
+            "news_source": "yahoo+google" if (bool(cfg.get("google_enabled", False))) else "yahoo_rss",
+            "asof": datetime.now().isoformat(),
+        }
+
+        try:
+            if time_mode == "market" and isinstance(asof_time, datetime):
+                sig["asof"] = asof_time.isoformat()
+        except Exception:
+            pass
+
+        self._news_cache[ck] = {"items": items[:limit], "signal": sig}
+        self._news_last_fetch_ts[ck] = time.time()
+        try:
+            self._log(f"[News] {tk} sentiment={sentiment} score={avg_score:.2f} n={len(items) or 0} :: {summary}", priority=2)
+        except Exception:
+            pass
+
+    def _fetch_news_gdelt(self, ticker: str, *, asof_time: datetime, limit: int) -> List[Dict[str, Any]]:
+        tk = str(ticker or "").upper().strip()
+        if not tk:
+            return []
+
+        try:
+            maxrec = int(limit) if limit is not None else 12
+        except Exception:
+            maxrec = 12
+        maxrec = max(3, min(maxrec, 40))
+
+        # GDELT expects UTC-ish yyyymmddHHMMSS. We align to the day boundary of asof_time.
+        try:
+            day0 = asof_time.strftime("%Y%m%d")
+        except Exception:
+            day0 = datetime.now().strftime("%Y%m%d")
+        startdt = f"{day0}000000"
+        enddt = f"{day0}235959"
+
+        q = urllib.parse.quote_plus(f"{tk} stock")
+        url = (
+            "https://api.gdeltproject.org/api/v2/doc/doc?query="
+            + q
+            + f"&mode=ArtList&format=json&startdatetime={startdt}&enddatetime={enddt}&maxrecords={maxrec}"
+        )
+
+        req0 = urllib.request.Request(url, headers={"User-Agent": "StockAppNews/0.1"})
+        with urllib.request.urlopen(req0, timeout=12) as resp:
+            raw = resp.read(2_000_000)
+        try:
+            js = json.loads(raw.decode("utf-8", errors="ignore"))
+        except Exception:
+            js = {}
+
+        arts = []
+        try:
+            arts = js.get("articles") if isinstance(js, dict) else []
+        except Exception:
+            arts = []
+
+        out: List[Dict[str, Any]] = []
+        if not isinstance(arts, list):
+            return out
+        for a in arts[:maxrec]:
+            if not isinstance(a, dict):
+                continue
+            title = str(a.get("title") or "").strip()
+            link = str(a.get("url") or "").strip()
+            seen = str(a.get("seendate") or "").strip()
+            if not title:
+                continue
+            out.append({"title": title, "content": title, "link": link, "published": seen, "source": "gdelt"})
+        return out
+
+    def inject_news_signal(self, ticker: str, signal: Dict[str, Any]) -> None:
+        """Inject a precomputed news signal into cache (used by offline replay recordings)."""
+        tk = str(ticker or "").upper().strip()
+        if not tk or not isinstance(signal, dict):
+            return
+
+        cfg = self._news_cfg if isinstance(self._news_cfg, dict) else {}
+        time_mode = "wall"
+        try:
+            time_mode = str(cfg.get("time_mode") or "wall").strip().lower() or "wall"
+        except Exception:
+            time_mode = "wall"
+
+        ck = tk
+        if time_mode == "market":
+            try:
+                asof_s = str(signal.get("asof") or "").strip()
+                asof_dt = datetime.fromisoformat(asof_s) if asof_s else None
+                if isinstance(asof_dt, datetime):
+                    ck = f"{tk}|{asof_dt.strftime('%Y-%m-%d')}"
+            except Exception:
+                ck = tk
+
+        try:
+            self._news_cache[ck] = {"items": [], "signal": dict(signal)}
+            self._news_last_fetch_ts[ck] = time.time()
+        except Exception:
+            return
+
+        try:
+            sent = str(signal.get("news_sentiment") or "").strip().lower()
+            sc = float(signal.get("news_score") or 0.0)
+            self._log(f"[News] inject {ck} sentiment={sent} score={sc:.2f}", priority=2)
+        except Exception:
+            pass
 
     def _flatten_gate_features(self, features: Dict[str, Any]) -> Dict[str, float]:
         out: Dict[str, float] = {}
@@ -1078,18 +1722,34 @@ class MultiAgentStrategy:
     def _moe_route(self, ticker: str, features: Dict) -> Tuple[str, Dict]:
         """MoE Router: Select expert based on market features"""
         vol = features.get("volatility_ann_pct", 20)
+
+        news_score = 0.0
+        try:
+            sig = features.get("signal") if isinstance(features.get("signal"), dict) else {}
+            news_score = float(sig.get("news_score") or 0.0)
+        except Exception:
+            news_score = 0.0
         
-        # Route to Analyst for high volatility or news events
-        # Route to Scalper for calm markets
+        # Route to Analyst for high volatility or meaningful news signal
         use_analyst = vol >= self.moe_vol_threshold
+        try:
+            if bool(getattr(self, "moe_any_news", True)) and abs(float(news_score)) >= float(getattr(self, "moe_news_threshold", 0.8) or 0.8):
+                use_analyst = True
+        except Exception:
+            pass
         
         expert = "analyst" if use_analyst else "scalper"
-        meta = {"vol": vol, "expert": expert}
+        meta = {"vol": vol, "expert": expert, "news_score": news_score}
         
         return expert, meta
 
     def _expert_infer(self, ticker: str, features: Dict, expert: str) -> Dict:
         """Expert inference (model or heuristic)"""
+        try:
+            if float(getattr(self, "_heuristic_only_until_ts", 0.0) or 0.0) > time.time():
+                return self._heuristic_infer(ticker, features, expert)
+        except Exception:
+            pass
         if self.models_loaded and self.model is not None:
             try:
                 if hasattr(self, "_adapters_loaded") and isinstance(self._adapters_loaded, set) and expert not in self._adapters_loaded:
@@ -1130,6 +1790,13 @@ class MultiAgentStrategy:
         """Real model inference using MoE"""
         # Set adapter based on expert
         adapter_name = "analyst" if expert == "analyst" else "scalper"
+
+        t0_all = time.perf_counter()
+        try:
+            dev = str(getattr(self.model, "device", "")) if self.model is not None else ""
+            self._log(f"[{expert}] [InferStart] {ticker} adapter={adapter_name} device={dev}", priority=2)
+        except Exception:
+            pass
         
         # Build prompt (simplified)
         tech = features.get("technical", {})
@@ -1144,52 +1811,175 @@ Decide BUY/SELL/HOLD for next 5 days."""
             {"role": "system", "content": "Output JSON: {\"decision\": \"BUY|SELL|HOLD\", \"analysis\": \"brief reason\"}"},
             {"role": "user", "content": prompt}
         ]
-        
-        raw = ""
-        with self._inference_lock:
+
+        # If a previous inference task finished, clear inflight.
+        try:
+            if self._infer_future is not None and bool(getattr(self._infer_future, "done", lambda: False)()):
+                self._infer_future = None
+                self._infer_inflight_since_ts = 0.0
+        except Exception:
+            pass
+
+        # If a worker inference is still running (possibly hung), do not block engine thread.
+        try:
+            if self._infer_future is not None:
+                self._log(f"[{expert}] Inference busy: use heuristic for {ticker} (worker inflight)", priority=2)
+                return self._heuristic_infer(ticker, features, expert)
+        except Exception:
+            pass
+
+        def _run_generate_raw() -> str:
+            acquired2 = False
+            try:
+                acquired2 = bool(self._inference_lock.acquire(timeout=0.1))
+            except Exception:
+                acquired2 = False
+            if not acquired2:
+                return ""
             try:
                 import torch
                 from contextlib import nullcontext
-                
-                # Ensure adapter is active
-                # Note: on_bar calls this, and on_bar is generally sequential, but chat can interrupt.
-                # The lock prevents race conditions on model state (adapters).
+
                 adapter_ctx = nullcontext()
                 if adapter_name in self._adapters_loaded:
                     self.model.set_adapter(adapter_name)
                 else:
-                    # Fallback to base or scalper if analyst missing
                     if "scalper" in self._adapters_loaded:
                         self.model.set_adapter("scalper")
                     elif hasattr(self.model, "disable_adapter"):
                         adapter_ctx = self.model.disable_adapter()
 
                 with adapter_ctx:
-                    text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-                    tk_kwargs: Dict[str, Any] = {"return_tensors": "pt"}
+                    t0_tok = time.perf_counter()
+                    text0 = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                    tk_kwargs2: Dict[str, Any] = {"return_tensors": "pt"}
                     if int(getattr(self, "llm_max_context", 0) or 0) > 0:
-                        tk_kwargs.update({"truncation": True, "max_length": int(self.llm_max_context)})
-                    inputs = self.tokenizer([text], **tk_kwargs).to(self.model.device)
+                        tk_kwargs2.update({"truncation": True, "max_length": int(self.llm_max_context)})
+                    inputs0 = self.tokenizer([text0], **tk_kwargs2).to(self.model.device)
 
-                    mn = int(getattr(self, "llm_max_new_tokens", 256) or 256)
-                    mn = max(32, min(mn, 512))
-                    
+                    try:
+                        dt_tok = time.perf_counter() - t0_tok
+                        plen = int(getattr(getattr(inputs0, "input_ids", None), "shape", [0, 0])[1])
+                        self._log(f"[{expert}] [InferTok] {ticker} prompt_tokens={plen} dt={dt_tok:.2f}s", priority=2)
+                    except Exception:
+                        pass
+
+                    mn0 = int(getattr(self, "llm_max_new_tokens", 256) or 256)
+                    mn0 = max(32, min(mn0, 512))
+
+                    try:
+                        budget2 = float(getattr(self, "_tick_infer_budget_sec", 1.2) or 1.2)
+                        budget2 = max(0.2, min(budget2, 6.0))
+                        if budget2 <= 1.5:
+                            mn0 = min(mn0, 96)
+                        elif budget2 <= 2.5:
+                            mn0 = min(mn0, 160)
+                    except Exception:
+                        budget2 = float(getattr(self, "_tick_infer_budget_sec", 1.2) or 1.2)
+
+                    kw = {
+                        "max_new_tokens": mn0,
+                        "temperature": 0.1,
+                        "do_sample": False,
+                        "pad_token_id": self.tokenizer.eos_token_id,
+                    }
+                    # max_time may not be supported on some transformers versions.
+                    mt = float(getattr(self, "_gen_max_time_sec", 12.0) or 12.0)
+                    try:
+                        mt = min(mt, float(budget2))
+                    except Exception:
+                        pass
+                    kw["max_time"] = mt
+
                     with torch.no_grad():
-                        gen_ids = self.model.generate(**inputs, max_new_tokens=mn, temperature=0.1)
-                    
-                    output = self.tokenizer.decode(gen_ids[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
-                    raw = str(output or "").strip()
-                
-                # Restore default (usually scalper) if we changed it? 
-                # on_bar might make multiple calls. 
-                # But generic_inference restores default. 
-                # It is safer to leave it or restore to scalper.
-                if "scalper" in self._adapters_loaded:
-                    self.model.set_adapter("scalper")
+                        try:
+                            t0_gen = time.perf_counter()
+                            gen_ids0 = self.model.generate(**inputs0, **kw)
+                            try:
+                                dt_gen = time.perf_counter() - t0_gen
+                                self._log(f"[{expert}] [InferGen] {ticker} max_new_tokens={mn0} dt={dt_gen:.2f}s", priority=2)
+                            except Exception:
+                                pass
+                        except TypeError as e:
+                            if "max_time" in str(e):
+                                try:
+                                    kw.pop("max_time", None)
+                                    try:
+                                        # Older transformers: max_time unsupported -> keep generation bounded by tokens.
+                                        if float(budget2) <= 1.5:
+                                            kw["max_new_tokens"] = min(int(kw.get("max_new_tokens") or 96), 96)
+                                        elif float(budget2) <= 2.5:
+                                            kw["max_new_tokens"] = min(int(kw.get("max_new_tokens") or 160), 160)
+                                    except Exception:
+                                        pass
+                                    t0_gen = time.perf_counter()
+                                    gen_ids0 = self.model.generate(**inputs0, **kw)
+                                    try:
+                                        dt_gen = time.perf_counter() - t0_gen
+                                        self._log(f"[{expert}] [InferGen] {ticker} max_new_tokens={mn0} dt={dt_gen:.2f}s (no max_time)", priority=2)
+                                    except Exception:
+                                        pass
+                                except Exception:
+                                    raise
+                            else:
+                                raise
 
-            except Exception as e:
-                self._log(f"Model inference failed: {e}", priority=2)
-                return {}
+                    out0 = self.tokenizer.decode(gen_ids0[0][inputs0.input_ids.shape[1]:], skip_special_tokens=True)
+                    return str(out0 or "").strip()
+            finally:
+                try:
+                    if "scalper" in self._adapters_loaded and self.model is not None:
+                        self.model.set_adapter("scalper")
+                except Exception:
+                    pass
+                try:
+                    self._inference_lock.release()
+                except Exception:
+                    pass
+        
+        raw = ""
+        try:
+            self._infer_inflight_since_ts = time.time()
+            self._infer_future = self._infer_executor.submit(_run_generate_raw)
+            budget = float(getattr(self, "_tick_infer_budget_sec", 1.2) or 1.2)
+            budget = max(0.2, min(budget, 6.0))
+            raw = str(self._infer_future.result(timeout=budget) or "")
+            self._infer_future = None
+            self._infer_inflight_since_ts = 0.0
+        except FuturesTimeout:
+            try:
+                self._log(f"[{expert}] [InferTimeout] {ticker} -> fallback heuristic (budget={budget:.2f}s)", priority=2)
+            except Exception:
+                pass
+            try:
+                self._heuristic_only_until_ts = time.time() + float(getattr(self, "_slow_infer_fuse_sec", 90.0) or 90.0)
+            except Exception:
+                pass
+            # keep _infer_future as inflight; do not block
+            return self._heuristic_infer(ticker, features, expert)
+        except Exception as e:
+            try:
+                self._log(f"[{expert}] Model inference failed: {e}", priority=2)
+            except Exception:
+                pass
+            self._infer_future = None
+            self._infer_inflight_since_ts = 0.0
+            return {}
+
+        if not str(raw or "").strip():
+            try:
+                self._log(f"[{expert}] [InferEmpty] {ticker} -> fallback heuristic", priority=2)
+            except Exception:
+                pass
+            return self._heuristic_infer(ticker, features, expert)
+
+        try:
+            dt_all = time.perf_counter() - t0_all
+            if dt_all >= float(getattr(self, "_slow_infer_warn_sec", 25.0) or 25.0):
+                self._log(f"[{expert}] [InferSlow] {ticker} dt={dt_all:.2f}s -> enable heuristic-only for {self._slow_infer_fuse_sec:.0f}s", priority=2)
+                self._heuristic_only_until_ts = time.time() + float(getattr(self, "_slow_infer_fuse_sec", 90.0) or 90.0)
+        except Exception:
+            pass
 
         # Common: models wrap JSON in ```json ... ```
         # Common: models wrap JSON in ```json ... ```
@@ -1247,8 +2037,8 @@ Decide BUY/SELL/HOLD for next 5 days."""
             decision = "HOLD"
 
         tail = raw.replace("\n", " ").strip()
-        if len(tail) > 220:
-            tail = tail[:217] + "..."
+        if len(tail) > 1600:
+            tail = tail[:1597] + "..."
         return {"decision": decision, "analysis": f"Unparsed model output: {tail}"}
 
     def _chartist_overlay(self, ticker: str, proposed_action: str) -> int:
@@ -1263,6 +2053,14 @@ Decide BUY/SELL/HOLD for next 5 days."""
             if self._chartist_vlm_model is not None and self._chartist_vlm_processor is not None:
                 img = self._render_chartist_image(str(ticker or "").upper())
                 if img is None:
+                    try:
+                        now2 = time.time()
+                        last2 = float(getattr(self, "_chartist_noimg_last_ts", 0.0) or 0.0)
+                        if (now2 - last2) >= 30.0:
+                            setattr(self, "_chartist_noimg_last_ts", now2)
+                            self._log(f"Chartist (VLM): no_image (ticker={str(ticker).upper()})", priority=2)
+                    except Exception:
+                        pass
                     return 0
 
                 prompt_yaml = str(cfg.get("prompt_yaml") or "").strip()
@@ -1311,7 +2109,14 @@ Decide BUY/SELL/HOLD for next 5 days."""
                     else:
                         inputs = proc(text=[str(up)], images=[img], padding=True, return_tensors="pt")
 
-                    inputs = {k: v.to(model_obj.device) if hasattr(v, "to") else v for k, v in inputs.items()}
+                    dev = getattr(model_obj, "device", None)
+                    if dev is None:
+                        try:
+                            dev = next(model_obj.parameters()).device
+                        except Exception:
+                            dev = None
+                    if dev is not None:
+                        inputs = {k: v.to(dev) if hasattr(v, "to") else v for k, v in inputs.items()}
                     gen_kwargs: Dict[str, Any] = {"max_new_tokens": int(cfg.get("max_new_tokens") or 256)}
                     temperature = float(cfg.get("temperature") or 0.2)
                     if temperature > 0:
@@ -1345,6 +2150,16 @@ Decide BUY/SELL/HOLD for next 5 days."""
                 except Exception:
                     conf = 0.0
                 thr = float(cfg.get("confidence_threshold") or 0.7)
+                try:
+                    reason = str(obj.get("reasoning") or obj.get("analysis") or obj.get("reason") or "").replace("\n", " ").strip()
+                    if len(reason) > 220:
+                        reason = reason[:217] + "..."
+                    self._log(
+                        f"Chartist (VLM): {str(ticker).upper()} signal={sig or '?'} conf={conf:.2f} thr={thr:.2f} reason={reason}",
+                        priority=2,
+                    )
+                except Exception:
+                    pass
                 if conf <= thr:
                     return 0
 
@@ -1362,6 +2177,20 @@ Decide BUY/SELL/HOLD for next 5 days."""
                         return -1
                     return 0
                 return 0
+
+            # Enabled but not ready (load failed or processor missing)
+            try:
+                now2 = time.time()
+                last2 = float(getattr(self, "_chartist_notready_last_ts", 0.0) or 0.0)
+                if (now2 - last2) >= 60.0:
+                    setattr(self, "_chartist_notready_last_ts", now2)
+                    err = str(getattr(self, "_chartist_vlm_error", "") or "").strip()
+                    if err:
+                        self._log(f"Chartist (VLM): not_ready (error={err})", priority=2)
+                    else:
+                        self._log("Chartist (VLM): not_ready", priority=2)
+            except Exception:
+                pass
 
         return 0
 
@@ -1513,6 +2342,27 @@ Decide BUY/SELL/HOLD for next 5 days."""
 
     def _log(self, message: str, priority: int = 0) -> None:
         """Send log event to Mari"""
-        self.engine.push_event(
-            Event(EventType.LOG, datetime.now(), message, priority)
-        )
+        try:
+            q = getattr(self.engine, "events", None)
+            qsz = int(q.qsize()) if (q is not None and hasattr(q, "qsize")) else 0
+        except Exception:
+            qsz = 0
+        try:
+            backlog_hint = int(getattr(self, "_md_backlog_hint", 0) or 0)
+        except Exception:
+            backlog_hint = 0
+
+        try:
+            th = int(getattr(self, "_perf_backlog_drop_logs_threshold", 40) or 40)
+            if (priority <= 1) and ((qsz >= 12) or (backlog_hint >= th)):
+                return
+        except Exception:
+            pass
+
+        try:
+            if (priority <= 0) and (qsz >= 6):
+                return
+        except Exception:
+            pass
+
+        self.engine.push_event(Event(EventType.LOG, datetime.now(), message, priority))

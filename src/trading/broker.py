@@ -25,6 +25,12 @@ class PaperBroker:
         self.orders: list[dict] = []
 
     def place_order(self, signal: dict) -> None:
+        def _rej(msg: str) -> None:
+            try:
+                self.engine.push_event(Event(type=EventType.LOG, timestamp=datetime.now(), payload=str(msg), priority=2))
+            except Exception:
+                return
+
         ticker = str(signal.get("ticker") or "").upper().strip()
         action = str(signal.get("action") or "").upper().strip()
         price = float(signal.get("price") or 0.0)
@@ -45,7 +51,12 @@ class PaperBroker:
 
         expert = str(signal.get("expert") or "").strip()
         analysis = str(signal.get("analysis") or "")
+        chart_score = signal.get("chart_score")
+        news_score = signal.get("news_score")
+        news_sentiment = signal.get("news_sentiment")
+        news_summary = signal.get("news_summary")
         if not ticker or not action or price <= 0 or shares == 0:
+            _rej(f"[Broker] ignore invalid order: action={action} ticker={ticker} price={price} shares={shares}")
             return
 
         commission = float(signal.get("commission") or 0.0)
@@ -54,53 +65,113 @@ class PaperBroker:
         if action == "BUY":
             total_cost = notional + commission
             if total_cost > self.cash:
+                _rej(f"[Broker] reject BUY {ticker} x{shares:g} @ {price:.2f}: cash={self.cash:.2f} need={total_cost:.2f}")
                 return
-            self.cash -= total_cost
             pos = self.positions.get(ticker)
-            if pos is None:
-                self.positions[ticker] = Position(ticker=ticker, shares=shares, avg_price=price, trace_ids=list(trace_ids))
-            else:
-                new_shares = pos.shares + shares
-                if new_shares == 0:
+            if pos is not None and float(pos.shares) < 0:
+                # Cover short first
+                cover_shares = min(abs(float(pos.shares)), abs(shares))
+                total_cost = (price * cover_shares) + commission
+                if total_cost > self.cash:
+                    _rej(f"[Broker] reject COVER {ticker} x{cover_shares:g} @ {price:.2f}: cash={self.cash:.2f} need={total_cost:.2f}")
+                    return
+                entry_price = float(pos.avg_price)
+                self.cash -= total_cost
+                remaining = float(pos.shares) + float(cover_shares)
+                if remaining >= 0:
                     self.positions.pop(ticker, None)
                 else:
-                    pos.avg_price = (pos.avg_price * pos.shares + price * shares) / new_shares
-                    pos.shares = new_shares
-                    try:
-                        for rid in list(trace_ids):
-                            if rid and rid not in pos.trace_ids:
-                                pos.trace_ids.append(rid)
-                    except Exception:
-                        pass
+                    pos.shares = float(remaining)
+
+                try:
+                    if getattr(pos, "trace_ids", None):
+                        realized = (entry_price - price) * float(cover_shares) - float(commission)
+                        for rid in list(pos.trace_ids):
+                            if not rid:
+                                continue
+                            evolution_recorder.log_outcome(
+                                ref_id=str(rid),
+                                outcome=float(realized),
+                                comment=f"realized_pnl={realized:.4f} entry={entry_price:.4f} cover={price:.4f} shares={cover_shares:.4f}",
+                            )
+                except Exception:
+                    pass
+
+                extra = float(abs(shares) - cover_shares)
+                if extra > 0:
+                    # Flip to long with remaining buy size
+                    total_cost2 = (price * extra)
+                    if (total_cost2) > self.cash:
+                        _rej(f"[Broker] reject FLIP->LONG {ticker} x{extra:g} @ {price:.2f}: cash={self.cash:.2f} need={total_cost2:.2f}")
+                        return
+                    self.cash -= total_cost2
+                    self.positions[ticker] = Position(ticker=ticker, shares=extra, avg_price=price, trace_ids=list(trace_ids))
+            else:
+                self.cash -= total_cost
+                if pos is None:
+                    self.positions[ticker] = Position(ticker=ticker, shares=shares, avg_price=price, trace_ids=list(trace_ids))
+                else:
+                    new_shares = pos.shares + shares
+                    if new_shares == 0:
+                        self.positions.pop(ticker, None)
+                    else:
+                        pos.avg_price = (pos.avg_price * pos.shares + price * shares) / new_shares
+                        pos.shares = new_shares
+                        try:
+                            for rid in list(trace_ids):
+                                if rid and rid not in pos.trace_ids:
+                                    pos.trace_ids.append(rid)
+                        except Exception:
+                            pass
 
         elif action == "SELL":
             pos = self.positions.get(ticker)
-            if pos is None or pos.shares <= 0:
-                return
-            sell_shares = min(pos.shares, abs(shares))
-            entry_price = float(pos.avg_price)
-            proceeds = price * sell_shares - commission
-            self.cash += proceeds
-            remaining = pos.shares - sell_shares
-            if remaining <= 0:
-                self.positions.pop(ticker, None)
+            if pos is None:
+                sell_shares = abs(shares)
+                proceeds = price * sell_shares - commission
+                self.cash += proceeds
+                self.positions[ticker] = Position(ticker=ticker, shares=-float(sell_shares), avg_price=price, trace_ids=list(trace_ids))
+            elif float(pos.shares) <= 0:
+                sell_shares = abs(shares)
+                proceeds = price * sell_shares - commission
+                self.cash += proceeds
+                prev_abs = abs(float(pos.shares))
+                new_abs = prev_abs + float(sell_shares)
+                if new_abs > 0:
+                    pos.avg_price = (float(pos.avg_price) * prev_abs + price * float(sell_shares)) / new_abs
+                pos.shares = -float(new_abs)
+                try:
+                    for rid in list(trace_ids):
+                        if rid and rid not in pos.trace_ids:
+                            pos.trace_ids.append(rid)
+                except Exception:
+                    pass
             else:
-                pos.shares = remaining
+                sell_shares = min(float(pos.shares), abs(shares))
+                entry_price = float(pos.avg_price)
+                proceeds = price * sell_shares - commission
+                self.cash += proceeds
+                remaining = float(pos.shares) - float(sell_shares)
+                if remaining <= 0:
+                    self.positions.pop(ticker, None)
+                else:
+                    pos.shares = float(remaining)
 
-            try:
-                if getattr(pos, "trace_ids", None):
-                    realized = (price - entry_price) * float(sell_shares) - float(commission)
-                    for rid in list(pos.trace_ids):
-                        if not rid:
-                            continue
-                        evolution_recorder.log_outcome(
-                            ref_id=str(rid),
-                            outcome=float(realized),
-                            comment=f"realized_pnl={realized:.4f} entry={entry_price:.4f} exit={price:.4f} shares={sell_shares:.4f}",
-                        )
-            except Exception:
-                pass
+                try:
+                    if getattr(pos, "trace_ids", None):
+                        realized = (price - entry_price) * float(sell_shares) - float(commission)
+                        for rid in list(pos.trace_ids):
+                            if not rid:
+                                continue
+                            evolution_recorder.log_outcome(
+                                ref_id=str(rid),
+                                outcome=float(realized),
+                                comment=f"realized_pnl={realized:.4f} entry={entry_price:.4f} exit={price:.4f} shares={sell_shares:.4f}",
+                            )
+                except Exception:
+                    pass
         else:
+            _rej(f"[Broker] ignore unsupported action: {action}")
             return
 
         self.orders.append({"ticker": ticker, "action": action, "price": price, "shares": shares, "trace_id": trace_id})
@@ -116,5 +187,9 @@ class PaperBroker:
             "trace_ids": trace_ids,
             "expert": expert,
             "analysis": analysis,
+            "chart_score": chart_score,
+            "news_score": news_score,
+            "news_sentiment": news_sentiment,
+            "news_summary": news_summary,
         }
         self.engine.push_event(Event(type=EventType.FILL, timestamp=datetime.now(), payload=fill))
