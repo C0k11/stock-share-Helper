@@ -838,29 +838,61 @@ def _live_rank_answer(user_text: str, ctx: Dict[str, Any]) -> str:
     if _live_runner is None:
         return "Sensei, 当前没有正在运行的实盘/模拟盘会话，我拿不到实时仓位数据呢…"
 
-    st = _live_feed_status()
-    lt = st.get("live_trading") if isinstance(st.get("live_trading"), dict) else {}
-    positions = lt.get("positions") if isinstance(lt.get("positions"), list) else []
+    positions = {}
+    try:
+        positions = getattr(getattr(_live_runner, "broker", None), "positions", {})
+        if not isinstance(positions, dict):
+            positions = {}
+    except Exception:
+        positions = {}
     if not positions:
         return "Sensei, 现在没有持仓，所以谈不上谁赚得最多/亏得最多。"
 
-    def _to_f(x: Any) -> float:
+    rows: list[dict] = []
+    for ticker, pos in positions.items():
+        tk = str(ticker).upper().strip()
+        if not tk:
+            continue
         try:
-            return float(x)
+            shares = float(getattr(pos, "shares", 0.0) or 0.0)
+            avg = float(getattr(pos, "avg_price", 0.0) or 0.0)
         except Exception:
-            return 0.0
+            continue
+        if shares == 0:
+            continue
+        current = avg
+        try:
+            ph = getattr(_live_runner, "price_history", {})
+            if isinstance(ph, dict) and tk in ph and ph[tk]:
+                current = float(ph[tk][-1].get("close", avg) or avg)
+        except Exception:
+            current = avg
+        pnl = (current - avg) * shares
+        rows.append({"ticker": tk, "shares": shares, "unrealized_pnl": pnl})
 
-    best = max(positions, key=lambda p: _to_f(p.get("unrealized_pnl")))
-    worst = min(positions, key=lambda p: _to_f(p.get("unrealized_pnl")))
-    biggest = max(positions, key=lambda p: _to_f(p.get("shares")))
+    if not rows:
+        return "Sensei, 现在没有持仓，所以谈不上谁赚得最多/亏得最多。"
+
+    best = max(rows, key=lambda p: float(p.get("unrealized_pnl") or 0.0))
+    worst = min(rows, key=lambda p: float(p.get("unrealized_pnl") or 0.0))
+    biggest = max(rows, key=lambda p: abs(float(p.get("shares") or 0.0)))
 
     b_tk = str(best.get("ticker") or "")
     w_tk = str(worst.get("ticker") or "")
     g_tk = str(biggest.get("ticker") or "")
 
-    b_pnl = _to_f(best.get("unrealized_pnl"))
-    w_pnl = _to_f(worst.get("unrealized_pnl"))
-    g_sh = int(_to_f(biggest.get("shares")))
+    try:
+        b_pnl = float(best.get("unrealized_pnl") or 0.0)
+    except Exception:
+        b_pnl = 0.0
+    try:
+        w_pnl = float(worst.get("unrealized_pnl") or 0.0)
+    except Exception:
+        w_pnl = 0.0
+    try:
+        g_sh = int(abs(float(biggest.get("shares") or 0.0)))
+    except Exception:
+        g_sh = 0
 
     wants_best = _is_profit_rank_question(user_text)
     wants_worst = _is_loss_rank_question(user_text)
@@ -893,6 +925,105 @@ def _live_rank_answer(user_text: str, ctx: Dict[str, Any]) -> str:
             extra = "我已经把这件事交给分析员和交易员去跑了（如果需要追踪编号我再补给您）。"
 
     return (f"Sensei，我理解您是想先要一个明确结论，然后顺手把它变成今天的执行措施。{primary}{extra}").strip()
+
+
+def _is_consensus_question(text: str) -> bool:
+    t = str(text or "")
+    tl = t.lower()
+    keys = [
+        "最看好",
+        "看好什么",
+        "最有希望",
+        "最强",
+        "best idea",
+        "most bullish",
+        "most confident",
+        "最不看好",
+        "不看好什么",
+        "最差",
+        "最弱",
+        "most bearish",
+    ]
+    return any((k in t) or (k in tl) for k in keys)
+
+
+def _live_consensus_answer(user_text: str, ctx: Dict[str, Any]) -> str:
+    if _live_runner is None:
+        return "Sensei, 当前没有正在运行的实盘/模拟盘会话，我拿不到实时信号统计呢…"
+
+    want_bear = ("不看好" in str(user_text)) or ("bear" in str(user_text).lower()) or ("最差" in str(user_text)) or ("最弱" in str(user_text))
+
+    logs = []
+    try:
+        logs = list(getattr(_live_runner, "agent_logs", []) or [])
+        if not isinstance(logs, list):
+            logs = []
+    except Exception:
+        logs = []
+
+    counts: Dict[str, Dict[str, int]] = {}
+    pat = None
+    try:
+        pat = re.compile(r"\[Execution\]\s+SIGNAL\s+(BUY|SELL)\s+([A-Za-z\.]+)")
+    except Exception:
+        pat = None
+
+    for it in list(logs)[-250:]:
+        try:
+            msg = str((it or {}).get("message") or "")
+        except Exception:
+            msg = ""
+        if not msg:
+            continue
+        m = None
+        try:
+            if pat is not None:
+                m = pat.search(msg)
+        except Exception:
+            m = None
+        if not m:
+            continue
+        act = str(m.group(1) or "").upper()
+        tk = str(m.group(2) or "").upper().strip()
+        if not tk:
+            continue
+        if tk not in counts:
+            counts[tk] = {"BUY": 0, "SELL": 0}
+        if act in {"BUY", "SELL"}:
+            counts[tk][act] = int(counts[tk][act]) + 1
+
+    if not counts:
+        return "Sensei, 我这边暂时没抓到足够的近期 SIGNAL 记录（可能刚启动或日志被清空）。"
+
+    def _score(v: Dict[str, int]) -> int:
+        return int(v.get("BUY", 0)) - int(v.get("SELL", 0))
+
+    ranked = sorted(list(counts.items()), key=lambda kv: _score(kv[1]), reverse=(not want_bear))
+    top = ranked[0]
+    top_tk = str(top[0])
+    top_score = _score(top[1])
+
+    lines: List[str] = []
+    if want_bear:
+        lines.append(f"Sensei, 按最近 SIGNAL 统计，系统当前最不看好的是 {top_tk}（净 SELL 次数={abs(top_score)}）。")
+    else:
+        lines.append(f"Sensei, 按最近 SIGNAL 统计，系统当前最看好的是 {top_tk}（净 BUY 次数={abs(top_score)}）。")
+
+    lines.append("Top 3：")
+    for tk, v in ranked[:3]:
+        sc = _score(v)
+        lines.append(f"- {str(tk)}: BUY={int(v.get('BUY', 0))} SELL={int(v.get('SELL', 0))} net={sc:+d}")
+
+    if _is_task_dispatch_request(user_text):
+        task_text = f"针对 {top_tk}：解释为什么系统近期偏向{('SELL' if want_bear else 'BUY')}（引用 System2/Macro/Vol/News/Chartist 的可得信息），并给出今天的风控清单（简短可执行）。"
+        try:
+            task_id = _enqueue_task(text=task_text, ticker=str(top_tk).strip() or None, ctx=ctx)
+            _remember_last_task(ctx, task_id)
+            lines.append(f"\n我已经把这件事交给分析员和交易员去跑了，任务编号是 {task_id}（把编号发我就能追结果）。")
+        except Exception:
+            lines.append("\n我已经把这件事交给分析员和交易员去跑了（如果需要追踪编号我再补给您）。")
+
+    return "\n".join(lines).strip()
 
 
 def _is_task_dispatch_request(text: str) -> bool:
