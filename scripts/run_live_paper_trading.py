@@ -1350,6 +1350,46 @@ class LivePaperTradingRunner:
             self._restore_price_history()
         except Exception:
             pass
+
+        try:
+            if bool(getattr(self, "load_models", False)):
+                stg = getattr(self, "strategy", None)
+                if stg is not None:
+                    if not bool(getattr(stg, "models_loaded", False)):
+                        fn = getattr(stg, "load_models", None)
+                        if callable(fn):
+                            fn()
+                    fn2 = getattr(stg, "_warmup_kv_cache", None)
+                    if callable(fn2):
+                        try:
+                            t_str = datetime.now().strftime("%H:%M:%S")
+                            self.agent_logs.append({
+                                "time": t_str,
+                                "type": "agent",
+                                "priority": 2,
+                                "message": "[Warmup] start",
+                            })
+                            if len(self.agent_logs) > 500:
+                                self.agent_logs = self.agent_logs[-300:]
+                        except Exception:
+                            pass
+
+                        fn2()
+
+                        try:
+                            t_str = datetime.now().strftime("%H:%M:%S")
+                            self.agent_logs.append({
+                                "time": t_str,
+                                "type": "agent",
+                                "priority": 2,
+                                "message": "[Warmup] done",
+                            })
+                            if len(self.agent_logs) > 500:
+                                self.agent_logs = self.agent_logs[-300:]
+                        except Exception:
+                            pass
+        except Exception:
+            pass
         
         # Initialize data feed
         self.data_feed = create_data_feed(
