@@ -165,6 +165,18 @@ class MultiAgentStrategy:
         self.moe_any_news = True
         self.moe_news_threshold = 0.8
         self.moe_vol_threshold = 60.0  # annualized vol %
+        try:
+            self.moe_any_news = bool(self._news_cfg.get("moe_any_news", self.moe_any_news))
+        except Exception:
+            pass
+        try:
+            self.moe_news_threshold = float(self._news_cfg.get("moe_news_threshold", self.moe_news_threshold))
+        except Exception:
+            pass
+        try:
+            self.moe_vol_threshold = float(self._news_cfg.get("moe_vol_threshold", self.moe_vol_threshold))
+        except Exception:
+            pass
         
         # Risk parameters
         self.max_drawdown_pct = -8.0
@@ -1070,9 +1082,9 @@ class MultiAgentStrategy:
                 trace_ids = []
         
         if expert == "scalper":
-            self._log(f"Scalper: {ticker} {action} - {str(analysis or '')[:4000]}", priority=1)
+            self._log(f"Scalper: {ticker} {action} - {str(analysis or '')[:4000]}", priority=2)
         else:
-            self._log(f"Analyst (DPO): {ticker} {action} - {str(analysis or '')[:4000]}", priority=1)
+            self._log(f"Analyst (DPO): {ticker} {action} - {str(analysis or '')[:4000]}", priority=2)
         confidence = 0.75
 
         chart_score: Optional[int] = None
@@ -1093,43 +1105,23 @@ class MultiAgentStrategy:
         # --- 5. System 2 Debate (if enabled) ---
         if self.system2_enabled:
             if (not self.system2_buy_only) or (action in {"BUY", "SELL"}):
+                skip_vlm = False
                 try:
                     th = int(getattr(self, "_perf_backlog_skip_system2_vlm_threshold", 40) or 40)
                     if backlog_hint >= th:
-                        self._log(f"[Perf] backlog={backlog_hint} -> skip System2/VLM", priority=2)
-                        self.system2_enabled = bool(self.system2_enabled)
-                        chart_score = 0
-                        approved = True
-                        final_action = action
-                        reason = f"perf_skip(backlog={backlog_hint})"
-                        if final_action in {"BUY", "SELL"}:
-                            self._log(f"System 2 (Judge): LENIENT_BYPASS - {reason}", priority=2)
-                            self._log(f"System 2 (Judge): APPROVED (conf={confidence:.2f})", priority=2)
-                        else:
-                            self._log(f"System 2 Debate: idle (perf_skip)", priority=2)
-                        signal = {
-                            "ticker": ticker,
-                            "action": action,
-                            "price": price,
-                            "shares": self._calculate_position_size(ticker, price, confidence),
-                            "expert": expert,
-                            "confidence": confidence,
-                            "analysis": analysis,
-                            "timestamp": datetime.now().isoformat(),
-                            "trace_id": trace_id,
-                            "trace_ids": trace_ids,
-                            "chart_score": chart_score,
-                        }
-                        return signal
+                        self._log(f"[Perf] backlog={backlog_hint} -> skip VLM (System2 continues)", priority=2)
+                        skip_vlm = True
                 except Exception:
                     pass
                 self._log("System 2 Debate: initiated...", priority=2)
                 
                 # Chartist Overlay
-                chart_score = int(self._chartist_overlay(ticker, action))
-                chart_view = "supports" if chart_score > 0 else ("opposes" if chart_score < 0 else "neutral")
-                # Use priority=2 to avoid being dropped under engine queue pressure.
-                self._log(f"Chartist (VLM): {ticker} pattern {chart_view} (score={int(chart_score)})", priority=2)
+                if skip_vlm:
+                    chart_score = 0
+                else:
+                    chart_score = int(self._chartist_overlay(ticker, action))
+                    chart_view = "supports" if chart_score > 0 else ("opposes" if chart_score < 0 else "neutral")
+                    self._log(f"Chartist (VLM): {ticker} pattern {chart_view} (score={int(chart_score)})", priority=2)
                 
                 # Macro Governor
                 macro_gear, macro_label = self._macro_governor_assess()
@@ -1382,7 +1374,7 @@ class MultiAgentStrategy:
                         titles.append(t0)
                 blob = "\n".join([f"- {t}" for t in titles[:12]])
                 sp1 = "你是金融新闻分析员。根据标题列表，输出JSON：{\"news_sentiment\": \"positive|neutral|negative\", \"news_score\": -1..1, \"confidence\": 0..1, \"summary\": \"...\"}。只输出JSON。"
-                raw1 = self.generic_inference(user_msg=blob, system_prompt=sp1, adapter=llm_adapter, temperature=0.0, max_new_tokens=180)
+                raw1 = self._fast_generic_inference(user_msg=blob, system_prompt=sp1, adapter=llm_adapter, temperature=0.0, max_new_tokens=180)
                 obj = repair_and_parse_json(extract_json_text(str(raw1 or ""))) if str(raw1 or "").strip() else None
                 if isinstance(obj, dict) and ("news_score" in obj or "news_sentiment" in obj):
                     try:
@@ -1421,6 +1413,129 @@ class MultiAgentStrategy:
                     except Exception:
                         pass
                     return
+            except Exception:
+                pass
+
+    def _fast_generic_inference(
+        self,
+        user_msg: str,
+        system_prompt: str = "",
+        adapter: Optional[str] = None,
+        temperature: float = 0.0,
+        max_new_tokens: int = 256,
+    ) -> str:
+        if (not self.models_loaded) or (self.model is None) or (self.tokenizer is None):
+            return ""
+
+        target_adapter = str(adapter or "").strip()
+        if target_adapter and target_adapter not in self._adapters_loaded:
+            if "secretary" in self._adapters_loaded:
+                target_adapter = "secretary"
+            else:
+                target_adapter = ""
+
+        acquired = False
+        try:
+            acquired = bool(self._inference_lock.acquire(blocking=False))
+        except Exception:
+            acquired = False
+        if not acquired:
+            return ""
+
+        model0 = None
+        try:
+            self._inference_lock_owner = "fast_generic_inference"
+            self._inference_lock_hold_since_ts = time.time()
+
+            import torch
+            from contextlib import nullcontext
+
+            adapter_ctx = nullcontext()
+            model0 = getattr(self, "model", None)
+            tok0 = getattr(self, "tokenizer", None)
+            if model0 is None or tok0 is None:
+                return ""
+
+            if target_adapter:
+                model0.set_adapter(target_adapter)
+            else:
+                if hasattr(model0, "disable_adapter"):
+                    adapter_ctx = model0.disable_adapter()
+
+            with adapter_ctx:
+                messages = []
+                if system_prompt:
+                    messages.append({"role": "system", "content": system_prompt})
+                messages.append({"role": "user", "content": user_msg})
+
+                text = tok0.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                tk_kwargs: Dict[str, Any] = {"return_tensors": "pt"}
+                if int(getattr(self, "llm_max_context", 0) or 0) > 0:
+                    tk_kwargs.update({"truncation": True, "max_length": int(self.llm_max_context)})
+                inputs = tok0([text], **tk_kwargs).to(model0.device)
+
+                mn = int(max_new_tokens or 0)
+                if mn <= 0:
+                    mn = 64
+
+                mt = float(getattr(self, "_gen_max_time_sec", 12.0) or 12.0)
+                try:
+                    mt = min(mt, 1.8)
+                except Exception:
+                    pass
+
+                with torch.no_grad():
+                    try:
+                        gen_ids = model0.generate(
+                            **inputs,
+                            max_new_tokens=int(mn),
+                            temperature=float(temperature),
+                            do_sample=(float(temperature) > 0),
+                            top_p=0.9,
+                            max_time=float(mt),
+                            pad_token_id=tok0.eos_token_id,
+                        )
+                    except TypeError as e:
+                        if "max_time" in str(e):
+                            gen_ids = model0.generate(
+                                **inputs,
+                                max_new_tokens=int(mn),
+                                temperature=float(temperature),
+                                do_sample=(float(temperature) > 0),
+                                top_p=0.9,
+                                pad_token_id=tok0.eos_token_id,
+                            )
+                        else:
+                            raise
+
+                try:
+                    out = tok0.decode(gen_ids[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+                except Exception:
+                    out = ""
+
+            default = "scalper" if "scalper" in self._adapters_loaded else (list(self._adapters_loaded)[0] if self._adapters_loaded else None)
+            if default:
+                try:
+                    model0.set_adapter(default)
+                except Exception:
+                    pass
+            return str(out or "").strip()
+        except Exception:
+            try:
+                default = "scalper" if "scalper" in self._adapters_loaded else (list(self._adapters_loaded)[0] if self._adapters_loaded else None)
+                if default and model0 is not None:
+                    model0.set_adapter(default)
+            except Exception:
+                pass
+            return ""
+        finally:
+            try:
+                self._inference_lock_owner = ""
+                self._inference_lock_hold_since_ts = 0.0
+            except Exception:
+                pass
+            try:
+                self._inference_lock.release()
             except Exception:
                 pass
 
@@ -2403,6 +2518,18 @@ Decide BUY/SELL/HOLD for next 5 days."""
         if not isinstance(critic_json, dict):
             return True, action_up, f"critic_parse_failed: {err}".strip()
 
+        try:
+            acc = bool(critic_json.get("accept", True))
+            sug = str(critic_json.get("suggested_decision") or "").strip().upper()
+            rs = critic_json.get("reasons")
+            if not isinstance(rs, list):
+                rs = []
+            rs2 = [str(x or "").strip() for x in rs if str(x or "").strip()]
+            msg = f"System 2 (Critic): accept={acc} suggested={sug} reasons={rs2[:3]}"
+            self._log(msg[:1200], priority=2)
+        except Exception:
+            pass
+
         judge_user = "\n".join(
             [
                 f"Ticker: {str(ticker).upper()}",
@@ -2427,6 +2554,11 @@ Decide BUY/SELL/HOLD for next 5 days."""
 
         final_dec = str(judge_json.get("final_decision") or "").strip().upper()
         rationale = str(judge_json.get("rationale") or "").strip()
+        try:
+            msg = f"System 2 (Judge): final={final_dec} rationale={rationale}"
+            self._log(msg[:1600], priority=2)
+        except Exception:
+            pass
         if final_dec in {"CLEAR", "HOLD"}:
             return False, "HOLD", rationale or "system2_hold"
         if final_dec in {"BUY", "SELL"}:
