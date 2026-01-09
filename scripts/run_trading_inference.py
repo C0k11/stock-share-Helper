@@ -863,12 +863,9 @@ def load_model(base_model_id: str, adapter_path: str, load_4bit: bool) -> Tuple[
         try:
             frac_raw = str(__import__("os").environ.get("TRADING_MAX_MEMORY_FRAC", "") or "").strip()
             if frac_raw:
-                frac = float(frac_raw)
-                if frac > 0 and frac <= 1.0:
-                    total = int(torch.cuda.get_device_properties(0).total_memory)
-                    gib = int((total * frac) / (1024 ** 3))
-                    gib = max(1, gib - 1)
-                    model_kwargs["max_memory"] = {0: f"{gib}GiB"}
+                # When forcing single-device placement (device_map={"":0}), avoid
+                # max_memory-based dispatch which may trigger meta-tensor init paths.
+                pass
         except Exception:
             pass
     else:
@@ -944,12 +941,9 @@ def load_model_moe(
         try:
             frac_raw = str(__import__("os").environ.get("TRADING_MAX_MEMORY_FRAC", "") or "").strip()
             if frac_raw:
-                frac = float(frac_raw)
-                if frac > 0 and frac <= 1.0:
-                    total = int(torch.cuda.get_device_properties(0).total_memory)
-                    gib = int((total * frac) / (1024 ** 3))
-                    gib = max(1, gib - 1)
-                    model_kwargs["max_memory"] = {0: f"{gib}GiB"}
+                # When forcing single-device placement (device_map={"":0}), avoid
+                # max_memory-based dispatch which may trigger meta-tensor init paths.
+                pass
         except Exception:
             pass
     else:
