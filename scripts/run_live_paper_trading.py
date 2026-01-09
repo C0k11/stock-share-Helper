@@ -88,11 +88,16 @@ class MariVoice:
         self.tts_queue: list[str] = []
         self.llm_queue: list[tuple[str, bool]] = []
         self.lock = threading.Lock()
-        self.running = True
         self.max_queue_size = 3
         
         self.cfg = _load_secretary_config()
         voice_cfg = self.cfg.get("voice", {})
+        try:
+            self.enabled = bool((voice_cfg or {}).get("enabled", False))
+        except Exception:
+            self.enabled = False
+
+        self.running = bool(self.enabled)
         self.gpt_sovits_cfg = voice_cfg.get("gpt_sovits", {})
         self.api_base = self.gpt_sovits_cfg.get("api_base", "http://127.0.0.1:9880")
         
@@ -115,25 +120,28 @@ class MariVoice:
         # Chat history for display
         self.chat_log: List[Dict] = []
         
-        if HAS_PYGAME:
+        if self.enabled and HAS_PYGAME:
             pygame.mixer.init()
         
-        # Load Mari's voice model (async) to avoid blocking API startup.
-        try:
-            t = threading.Thread(target=self._load_mari_model, daemon=True)
-            t.start()
-        except Exception:
-            pass
-        
-        # Start workers
-        self.llm_thread = threading.Thread(target=self._llm_worker, daemon=True)
-        self.llm_thread.start()
-        
-        self.tts_thread = threading.Thread(target=self._tts_worker, daemon=True)
-        self.tts_thread.start()
+        if self.enabled:
+            # Load Mari's voice model (async) to avoid blocking API startup.
+            try:
+                t = threading.Thread(target=self._load_mari_model, daemon=True)
+                t.start()
+            except Exception:
+                pass
+            
+            # Start workers
+            self.llm_thread = threading.Thread(target=self._llm_worker, daemon=True)
+            self.llm_thread.start()
+            
+            self.tts_thread = threading.Thread(target=self._tts_worker, daemon=True)
+            self.tts_thread.start()
 
     def _load_mari_model(self) -> None:
         """Load Mari's trained GPT-SoVITS weights"""
+        if not bool(getattr(self, "enabled", False)):
+            return
         if not HAS_REQUESTS:
             return
         
@@ -212,6 +220,8 @@ class MariVoice:
 
     def speak(self, text: str, use_llm: bool = True) -> None:
         """Enqueue text for processing (LLM -> TTS)"""
+        if not bool(getattr(self, "enabled", False)):
+            return
         with self.lock:
             # Drop old if full to keep up with live events
             if len(self.llm_queue) >= self.max_queue_size:
@@ -300,7 +310,7 @@ class MariVoice:
 
     def stop(self) -> None:
         self.running = False
-        if HAS_PYGAME:
+        if bool(getattr(self, "enabled", False)) and HAS_PYGAME:
             pygame.mixer.quit()
 
 

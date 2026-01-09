@@ -227,7 +227,7 @@
           <input id="chatInput" placeholder="Ask Mari... (e.g., 我现在持仓多少？)" />
           <button id="chatSend" onclick="sendChat()" style="background: rgba(37,99,235,0.92);">Send</button>
         </div>
-        <div class="feedback-row" style="margin-top: 8px;">
+        <div class="feedback-row hidden" style="margin-top: 8px;">
           <span class="small" style="min-width: 68px;">Voice</span>
           <input id="ttsVol" type="range" min="0" max="100" step="1" value="85" style="flex: 1;" />
           <span class="small" id="ttsVolVal" style="min-width: 46px; text-align: right;">85%</span>
@@ -294,10 +294,6 @@
     let _ttsAudioUrl = null;
     let _ttsVolume = 0.85;
     let _ttsEnabled = false;
-    try {
-      const sp = new URLSearchParams(window.location.search || '');
-      _ttsEnabled = (String(sp.get('tts') || '').trim() === '1');
-    } catch (e) { _ttsEnabled = false; }
 
     function _sanitizeTtsText(s) {
       try {
@@ -466,6 +462,7 @@
 
     async function playMariTts(text) {
       try {
+        if (!_ttsEnabled) return false;
         const t = _sanitizeTtsText(text);
         if (!t) return;
         try {

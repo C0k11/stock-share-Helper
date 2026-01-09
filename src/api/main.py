@@ -2487,6 +2487,7 @@ async def voice_tts(req: TtsRequest):
     Uses secretary.yaml voice.gpt_sovits preset configuration.
     Returns audio bytes (wav or other audio/*).
     """
+    raise HTTPException(status_code=404, detail="TTS disabled")
     text = str(req.text or "").strip()
     if not text:
         raise HTTPException(status_code=400, detail="text is required")

@@ -557,7 +557,7 @@ class MainWindow(QMainWindow):
         self._control_tower_url = str(control_tower_url)
         self._tts_voice = "zh-CN-XiaoxiaoNeural"
         self._tts_backend = "edge"
-        self._voice_enabled = True
+        self._voice_enabled = False
         self._gpt_sovits_cfg: dict = {}
         self._auto_execute_actions = False
         self._show_action_notes = False
@@ -571,9 +571,9 @@ class MainWindow(QMainWindow):
                 if isinstance(cfg, dict):
                     voice_cfg = cfg.get("voice") if isinstance(cfg.get("voice"), dict) else {}
                     try:
-                        self._voice_enabled = bool((voice_cfg or {}).get("enabled", True))
+                        self._voice_enabled = False
                     except Exception:
-                        self._voice_enabled = True
+                        self._voice_enabled = False
                     v = str((voice_cfg or {}).get("tts_voice") or "").strip()
                     if v:
                         self._tts_voice = v
