@@ -1175,7 +1175,7 @@ class MultiAgentStrategy:
                 except Exception:
                     pass
                 
-                self._log(f"System 2 (Judge): APPROVED (conf={confidence:.2f})", priority=2)
+                self._log(f"System 2 (Judge): APPROVED (conf={confidence:.2f}) reason={reason}", priority=2)
         
         
         # --- 6. Generate Signal ---
@@ -2510,7 +2510,7 @@ Decide BUY/SELL/HOLD for next 5 days."""
         )
 
         adapter = "system2" if "system2" in self._adapters_loaded else "scalper"
-        critic_raw = self.generic_inference(user_msg=critic_user, system_prompt=critic_sys, adapter=adapter, temperature=0.0, max_new_tokens=256)
+        critic_raw = self.generic_inference(user_msg=critic_user, system_prompt=critic_sys, adapter=adapter, temperature=0.0, max_new_tokens=512)
         critic_json = None
         err = ""
         try:
@@ -2523,6 +2523,13 @@ Decide BUY/SELL/HOLD for next 5 days."""
             err = str(e)
 
         if not isinstance(critic_json, dict):
+            try:
+                raw_hint = str(critic_raw or "").replace("\n", " ").strip()
+                if len(raw_hint) > 240:
+                    raw_hint = raw_hint[:237] + "..."
+                self._log(f"System 2 (Critic): parse_failed err={err} raw={raw_hint}", priority=2)
+            except Exception:
+                pass
             return True, action_up, f"critic_parse_failed: {err}".strip()
 
         try:
@@ -2544,7 +2551,7 @@ Decide BUY/SELL/HOLD for next 5 days."""
                 f"Critic JSON: {json.dumps(critic_json, ensure_ascii=False)}",
             ]
         )
-        judge_raw = self.generic_inference(user_msg=judge_user, system_prompt=judge_sys, adapter=adapter, temperature=0.0, max_new_tokens=192)
+        judge_raw = self.generic_inference(user_msg=judge_user, system_prompt=judge_sys, adapter=adapter, temperature=0.0, max_new_tokens=384)
         judge_json = None
         jerr = ""
         try:
@@ -2557,6 +2564,13 @@ Decide BUY/SELL/HOLD for next 5 days."""
             jerr = str(e)
 
         if not isinstance(judge_json, dict):
+            try:
+                raw_hint = str(judge_raw or "").replace("\n", " ").strip()
+                if len(raw_hint) > 240:
+                    raw_hint = raw_hint[:237] + "..."
+                self._log(f"System 2 (Judge): parse_failed err={jerr} raw={raw_hint}", priority=2)
+            except Exception:
+                pass
             return True, action_up, f"judge_parse_failed: {jerr}".strip()
 
         final_dec = str(judge_json.get("final_decision") or "").strip().upper()
