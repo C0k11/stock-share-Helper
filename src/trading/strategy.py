@@ -1814,6 +1814,11 @@ class MultiAgentStrategy:
             # Approx bars/year: 252 trading days * 390 minutes/day
             bars_per_year = 252.0 * 390.0
             vol_ann = std * math.sqrt(bars_per_year) * 100.0
+            try:
+                # Guardrail: simulated/random-walk bars can explode annualized vol early.
+                vol_ann = min(float(vol_ann), 300.0)
+            except Exception:
+                pass
             if not (vol_ann > 0.0):
                 vol_ann = 20.0
         else:

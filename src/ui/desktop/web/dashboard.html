@@ -1641,7 +1641,7 @@
           if (msg.includes('gatekeeper')) panels.gatekeeper.push(log);
           if (msg.includes('scalper')) panels.scalper.push(log);
           if (msg.includes('analyst') || msg.includes('dpo')) panels.analyst.push(log);
-          if (msg.includes('[news]') || msg.includes(' news ')) panels.news.push(log);
+          if (msg.includes('[news]')) panels.news.push(log);
           if (!isSystem2 && (msg.includes('macro') || msg.includes('governor'))) panels.macro.push(log);
           if (isSystem2) panels.system2.push(log);
 
