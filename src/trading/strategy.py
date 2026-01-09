@@ -1867,11 +1867,15 @@ Decide BUY/SELL/HOLD for next 5 days."""
                         pass
 
                     mn0 = int(getattr(self, "llm_max_new_tokens", 256) or 256)
-                    mn0 = max(32, min(mn0, 512))
+                    cap_tokens = int(getattr(self, "_max_new_tokens_cap", 512) or 512)
+                    cap_tokens = max(64, cap_tokens)
+                    mn0 = max(32, min(mn0, cap_tokens))
 
                     try:
                         budget2 = float(getattr(self, "_tick_infer_budget_sec", 1.2) or 1.2)
-                        budget2 = max(0.2, min(budget2, 6.0))
+                        cap_budget2 = float(getattr(self, "_tick_infer_budget_cap_sec", 6.0) or 6.0)
+                        cap_budget2 = max(0.5, cap_budget2)
+                        budget2 = max(0.2, min(budget2, cap_budget2))
                         if budget2 <= 1.5:
                             mn0 = min(mn0, 96)
                         elif budget2 <= 2.5:
@@ -1892,6 +1896,12 @@ Decide BUY/SELL/HOLD for next 5 days."""
                             mt = float(getattr(self, "_gen_max_time_sec_scalper", mt) or mt)
                         elif str(expert or "").strip().lower() == "analyst":
                             mt = float(getattr(self, "_gen_max_time_sec_analyst", mt) or mt)
+                    except Exception:
+                        pass
+                    try:
+                        mt_cap = float(getattr(self, "_gen_max_time_cap_sec", 12.0) or 12.0)
+                        mt_cap = max(0.5, mt_cap)
+                        mt = min(mt, mt_cap)
                     except Exception:
                         pass
                     try:
@@ -1951,7 +1961,9 @@ Decide BUY/SELL/HOLD for next 5 days."""
             self._infer_inflight_since_ts = time.time()
             self._infer_future = self._infer_executor.submit(_run_generate_raw)
             budget = float(getattr(self, "_tick_infer_budget_sec", 1.2) or 1.2)
-            budget = max(0.2, min(budget, 6.0))
+            cap_budget = float(getattr(self, "_tick_infer_budget_cap_sec", 6.0) or 6.0)
+            cap_budget = max(0.5, cap_budget)
+            budget = max(0.2, min(budget, cap_budget))
             raw = str(self._infer_future.result(timeout=budget) or "")
             self._infer_future = None
             self._infer_inflight_since_ts = 0.0
