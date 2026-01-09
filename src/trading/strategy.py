@@ -2301,9 +2301,11 @@ Decide BUY/SELL/HOLD for next 5 days."""
         elif "hold" in tl or "观望" in tl or "保持" in tl:
             decision = "HOLD"
 
-        tail = raw.replace("\n", " ").strip()
-        if len(tail) > 1600:
-            tail = tail[:1597] + "..."
+        try:
+            tail = raw.replace("\n", " ").strip()
+        except Exception:
+            tail = raw
+
         return {"decision": decision, "analysis": f"Unparsed model output: {tail}"}
 
     def _chartist_overlay(self, ticker: str, proposed_action: str) -> int:
