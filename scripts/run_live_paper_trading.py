@@ -495,6 +495,10 @@ class LivePaperTradingRunner:
                     setattr(self.strategy, "_tick_infer_budget_sec", float(infer_cfg.get("tick_infer_budget_sec")))
                 if infer_cfg.get("gen_max_time_sec") is not None:
                     setattr(self.strategy, "_gen_max_time_sec", float(infer_cfg.get("gen_max_time_sec")))
+                if infer_cfg.get("scalper_gen_max_time_sec") is not None:
+                    setattr(self.strategy, "_gen_max_time_sec_scalper", float(infer_cfg.get("scalper_gen_max_time_sec")))
+                if infer_cfg.get("analyst_gen_max_time_sec") is not None:
+                    setattr(self.strategy, "_gen_max_time_sec_analyst", float(infer_cfg.get("analyst_gen_max_time_sec")))
         except Exception:
             pass
         try:

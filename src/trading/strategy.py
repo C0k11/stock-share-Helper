@@ -1888,6 +1888,13 @@ Decide BUY/SELL/HOLD for next 5 days."""
                     # max_time may not be supported on some transformers versions.
                     mt = float(getattr(self, "_gen_max_time_sec", 12.0) or 12.0)
                     try:
+                        if str(expert or "").strip().lower() == "scalper":
+                            mt = float(getattr(self, "_gen_max_time_sec_scalper", mt) or mt)
+                        elif str(expert or "").strip().lower() == "analyst":
+                            mt = float(getattr(self, "_gen_max_time_sec_analyst", mt) or mt)
+                    except Exception:
+                        pass
+                    try:
                         mt = min(mt, float(budget2))
                     except Exception:
                         pass
