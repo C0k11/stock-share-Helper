@@ -647,14 +647,16 @@ class MultiAgentStrategy:
 
         buf = io.BytesIO()
         try:
-            mpf.plot(
-                df,
-                type="candle",
-                volume=True,
-                style="yahoo",
-                mav=mav,
-                savefig=dict(fname=buf, dpi=110, bbox_inches="tight"),
-            )
+            plot_kwargs: Dict[str, Any] = {
+                "type": "candle",
+                "volume": True,
+                "style": "yahoo",
+                "savefig": dict(fname=buf, dpi=110, bbox_inches="tight"),
+            }
+            if mav is not None:
+                plot_kwargs["mav"] = mav
+
+            mpf.plot(df, **plot_kwargs)
         except Exception as e:
             try:
                 now2 = time.time()
