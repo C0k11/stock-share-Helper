@@ -1904,10 +1904,6 @@ Decide BUY/SELL/HOLD for next 5 days."""
                         mt = min(mt, mt_cap)
                     except Exception:
                         pass
-                    try:
-                        mt = min(mt, float(budget2))
-                    except Exception:
-                        pass
                     kw["max_time"] = mt
 
                     with torch.no_grad():
@@ -1959,11 +1955,36 @@ Decide BUY/SELL/HOLD for next 5 days."""
         raw = ""
         try:
             self._infer_inflight_since_ts = time.time()
+
+            # Ensure the outer future timeout is not shorter than the configured max_time,
+            # otherwise we may fallback heuristic while the worker continues generating.
+            mt_wait = None
+            try:
+                mt_wait = float(getattr(self, "_gen_max_time_sec", 12.0) or 12.0)
+                if str(expert or "").strip().lower() == "scalper":
+                    mt_wait = float(getattr(self, "_gen_max_time_sec_scalper", mt_wait) or mt_wait)
+                elif str(expert or "").strip().lower() == "analyst":
+                    mt_wait = float(getattr(self, "_gen_max_time_sec_analyst", mt_wait) or mt_wait)
+                mt_cap2 = float(getattr(self, "_gen_max_time_cap_sec", 12.0) or 12.0)
+                mt_cap2 = max(0.5, mt_cap2)
+                mt_wait = min(float(mt_wait), float(mt_cap2))
+            except Exception:
+                mt_wait = None
+
             self._infer_future = self._infer_executor.submit(_run_generate_raw)
             budget = float(getattr(self, "_tick_infer_budget_sec", 1.2) or 1.2)
             cap_budget = float(getattr(self, "_tick_infer_budget_cap_sec", 6.0) or 6.0)
             cap_budget = max(0.5, cap_budget)
             budget = max(0.2, min(budget, cap_budget))
+
+            try:
+                if mt_wait is not None:
+                    # small slack to allow decode/post-processing
+                    budget = max(float(budget), float(mt_wait) + 0.2)
+                    budget = min(float(budget), float(cap_budget))
+            except Exception:
+                pass
+
             raw = str(self._infer_future.result(timeout=budget) or "")
             self._infer_future = None
             self._infer_inflight_since_ts = 0.0
