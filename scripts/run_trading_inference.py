@@ -882,6 +882,12 @@ def load_model(base_model_id: str, adapter_path: str, load_4bit: bool) -> Tuple[
             bnb_4bit_compute_dtype=compute_dtype,
         )
 
+    try:
+        if torch.cuda.is_available():
+            model_kwargs.setdefault("attn_implementation", "sdpa")
+    except Exception:
+        pass
+
     model = AutoModelForCausalLM.from_pretrained(base_model_id, **model_kwargs)
 
     if adapter_path:
@@ -933,6 +939,25 @@ def load_model_moe(
     }
 
     if torch.cuda.is_available():
+        try:
+            torch.backends.cuda.matmul.allow_tf32 = True
+        except Exception:
+            pass
+        try:
+            torch.backends.cudnn.allow_tf32 = True
+        except Exception:
+            pass
+        try:
+            torch.set_float32_matmul_precision("high")
+        except Exception:
+            pass
+        try:
+            torch.backends.cuda.enable_flash_sdp(True)
+            torch.backends.cuda.enable_mem_efficient_sdp(True)
+            torch.backends.cuda.enable_math_sdp(True)
+        except Exception:
+            pass
+
         # Force single-device placement for compatibility with PEFT multi-adapter loading.
         # device_map='auto' can create meta tensors and then .to() crashes.
         model_kwargs["device_map"] = {"": 0}
@@ -959,6 +984,12 @@ def load_model_moe(
             bnb_4bit_use_double_quant=True,
             bnb_4bit_compute_dtype=compute_dtype,
         )
+
+    try:
+        if torch.cuda.is_available():
+            model_kwargs.setdefault("attn_implementation", "sdpa")
+    except Exception:
+        pass
 
     base_model = AutoModelForCausalLM.from_pretrained(base_model_id, **model_kwargs)
 
