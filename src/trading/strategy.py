@@ -2306,7 +2306,7 @@ Decide BUY/SELL/HOLD for next 5 days."""
         except Exception:
             tail = raw
 
-        return {"decision": decision, "analysis": f"Unparsed model output: {tail}"}
+        return {"decision": decision, "analysis": str(tail or "").strip()}
 
     def _chartist_overlay(self, ticker: str, proposed_action: str) -> int:
         """Chartist overlay: visual pattern analysis score"""
