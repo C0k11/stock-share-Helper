@@ -5268,6 +5268,43 @@ async def restart_live(req: LiveRestartRequest):
         pass
 
     try:
+        stg = getattr(_live_runner, "strategy", None)
+        if stg is not None and bool(getattr(_live_runner, "load_models", False)) and bool(getattr(stg, "models_loaded", False)):
+            fn2 = getattr(stg, "_warmup_kv_cache", None)
+            if callable(fn2):
+                try:
+                    logs = getattr(_live_runner, "agent_logs", None)
+                    if isinstance(logs, list):
+                        import datetime as _dt
+                        t_str = _dt.datetime.now().strftime("%H:%M:%S")
+                        logs.append({
+                            "time": t_str,
+                            "type": "agent",
+                            "priority": 2,
+                            "message": "[Warmup] start",
+                        })
+                except Exception:
+                    pass
+
+                fn2()
+
+                try:
+                    logs = getattr(_live_runner, "agent_logs", None)
+                    if isinstance(logs, list):
+                        import datetime as _dt
+                        t_str = _dt.datetime.now().strftime("%H:%M:%S")
+                        logs.append({
+                            "time": t_str,
+                            "type": "agent",
+                            "priority": 2,
+                            "message": "[Warmup] done",
+                        })
+                except Exception:
+                    pass
+    except Exception:
+        pass
+
+    try:
         from src.trading.data_feed import create_data_feed
 
         tickers = []
