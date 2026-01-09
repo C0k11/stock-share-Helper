@@ -91,6 +91,8 @@ class MultiAgentStrategy:
         self.planner = None
         self.gatekeeper = None
         self._inference_lock = threading.Lock()
+        self._inference_lock_owner: str = ""
+        self._inference_lock_hold_since_ts: float = 0.0
 
         self.planner_policy = str(planner_policy or "rule").strip().lower()
         self.planner_sft_model_path = str(planner_sft_model_path or "").strip()
@@ -364,6 +366,11 @@ class MultiAgentStrategy:
 
         try:
             try:
+                self._inference_lock_owner = "generic_inference"
+                self._inference_lock_hold_since_ts = time.time()
+            except Exception:
+                pass
+            try:
                 import torch
                 from contextlib import nullcontext
 
@@ -443,6 +450,11 @@ class MultiAgentStrategy:
                 return ""
 
         finally:
+            try:
+                self._inference_lock_owner = ""
+                self._inference_lock_hold_since_ts = 0.0
+            except Exception:
+                pass
             try:
                 self._inference_lock.release()
             except Exception:
@@ -1833,12 +1845,31 @@ Decide BUY/SELL/HOLD for next 5 days."""
         def _run_generate_raw() -> str:
             acquired2 = False
             try:
-                acquired2 = bool(self._inference_lock.acquire(timeout=0.1))
+                lt = float(getattr(self, "_inference_lock_timeout_sec", 1.0) or 1.0)
+                lt = max(0.1, min(lt, 5.0))
+                acquired2 = bool(self._inference_lock.acquire(timeout=float(lt)))
             except Exception:
                 acquired2 = False
             if not acquired2:
+                try:
+                    owner = str(getattr(self, "_inference_lock_owner", "") or "")
+                    held = 0.0
+                    try:
+                        ts0 = float(getattr(self, "_inference_lock_hold_since_ts", 0.0) or 0.0)
+                        if ts0 > 0:
+                            held = float(time.time() - ts0)
+                    except Exception:
+                        held = 0.0
+                    self._log(f"[{expert}] [InferLockBusy] {ticker} owner={owner} held={held:.2f}s", priority=2)
+                except Exception:
+                    pass
                 return ""
             try:
+                try:
+                    self._inference_lock_owner = f"model_infer:{expert}:{str(ticker or '').upper()}"
+                    self._inference_lock_hold_since_ts = time.time()
+                except Exception:
+                    pass
                 import torch
                 from contextlib import nullcontext
 
@@ -1942,6 +1973,11 @@ Decide BUY/SELL/HOLD for next 5 days."""
                     out0 = self.tokenizer.decode(gen_ids0[0][inputs0.input_ids.shape[1]:], skip_special_tokens=True)
                     return str(out0 or "").strip()
             finally:
+                try:
+                    self._inference_lock_owner = ""
+                    self._inference_lock_hold_since_ts = 0.0
+                except Exception:
+                    pass
                 try:
                     if "scalper" in self._adapters_loaded and self.model is not None:
                         self.model.set_adapter("scalper")

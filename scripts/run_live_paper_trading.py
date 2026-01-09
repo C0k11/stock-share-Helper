@@ -505,6 +505,8 @@ class LivePaperTradingRunner:
                     setattr(self.strategy, "_gen_max_time_cap_sec", float(infer_cfg.get("gen_max_time_cap_sec")))
                 if infer_cfg.get("max_new_tokens_cap") is not None:
                     setattr(self.strategy, "_max_new_tokens_cap", int(infer_cfg.get("max_new_tokens_cap")))
+                if infer_cfg.get("inference_lock_timeout_sec") is not None:
+                    setattr(self.strategy, "_inference_lock_timeout_sec", float(infer_cfg.get("inference_lock_timeout_sec")))
         except Exception:
             pass
         try:
