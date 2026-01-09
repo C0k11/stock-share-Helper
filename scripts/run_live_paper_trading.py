@@ -1473,6 +1473,22 @@ class LivePaperTradingRunner:
         self.data_feed.start()
 
         try:
+            t_str = datetime.now().strftime("%H:%M:%S")
+            src = str(getattr(self.data_feed, "source", "") or "")
+            itv = float(getattr(self.data_feed, "interval_sec", 0.0) or 0.0)
+            spt = int(getattr(self.data_feed, "_symbols_per_tick", 0) or 0)
+            self.agent_logs.append({
+                "time": t_str,
+                "type": "agent",
+                "priority": 2,
+                "message": f"[DataFeed] source={src} interval_sec={itv:.1f} symbols_per_tick={spt}",
+            })
+            if len(self.agent_logs) > 500:
+                self.agent_logs = self.agent_logs[-300:]
+        except Exception:
+            pass
+
+        try:
             ds = str(getattr(self, "data_source", "auto") or "auto").lower()
         except Exception:
             ds = "auto"

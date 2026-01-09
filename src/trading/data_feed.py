@@ -77,16 +77,49 @@ class DataFeed:
 class YFinanceDataFeed(DataFeed):
     """Real-time data feed using yfinance (15-min delayed)"""
     
-    def __init__(self, tickers: List[str], interval_sec: float = 10.0):
+    def __init__(self, tickers: List[str], interval_sec: float = 10.0, symbols_per_tick: int = 0):
         super().__init__(tickers, interval_sec)
         if not HAS_YFINANCE:
             raise ImportError("yfinance not installed. Run: pip install yfinance")
+
+        try:
+            spt = int(symbols_per_tick or 0)
+        except Exception:
+            spt = 0
+        self._symbols_per_tick = max(0, spt)
+        self._rr_index = 0
+        self._tk_cache: Dict[str, Any] = {}
     
     def _fetch_and_publish(self) -> None:
         """Fetch latest quotes from yfinance"""
-        for ticker in self.tickers:
+        tickers = list(self.tickers)
+        if not tickers:
+            return
+
+        n = int(getattr(self, "_symbols_per_tick", 0) or 0)
+        if n <= 0 or n >= len(tickers):
+            batch = tickers
+        else:
+            start = int(getattr(self, "_rr_index", 0) or 0) % len(tickers)
+            batch = [tickers[(start + i) % len(tickers)] for i in range(n)]
             try:
-                tk = yf.Ticker(ticker)
+                self._rr_index = (start + n) % len(tickers)
+            except Exception:
+                self._rr_index = 0
+
+        for ticker in batch:
+            try:
+                tk = None
+                try:
+                    tk = self._tk_cache.get(ticker)
+                except Exception:
+                    tk = None
+                if tk is None:
+                    tk = yf.Ticker(ticker)
+                    try:
+                        self._tk_cache[ticker] = tk
+                    except Exception:
+                        pass
                 # Get latest 1-day data with 1-minute interval
                 hist = tk.history(period="1d", interval="1m")
                 
@@ -209,9 +242,9 @@ def create_data_feed(
             interval_sec = float(interval_sec)
         except Exception:
             interval_sec = 5.0
-        interval_sec = max(interval_sec, 30.0)
+        interval_sec = max(interval_sec, 15.0)
         try:
-            feed = YFinanceDataFeed(tickers, interval_sec)
+            feed = YFinanceDataFeed(tickers, interval_sec, symbols_per_tick=symbols_per_tick)
             try:
                 feed.source = "yfinance"
             except Exception:
