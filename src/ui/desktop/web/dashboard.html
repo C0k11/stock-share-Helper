@@ -125,7 +125,7 @@
   <!-- 8 Agent Panels -->
   <div id="agentPanelsRow" class="card" style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; padding: 12px;">
     <div class="agent-panel" id="panel_planner">
-      <div class="agent-title">Secretary Mari (Planner)</div>
+      <div class="agent-title">Planner</div>
       <div class="agent-log" id="log_planner">--</div>
     </div>
     <div class="agent-panel" id="panel_gatekeeper">
@@ -404,6 +404,10 @@
 
     async function rateMsg(idx, score) {
       try {
+        try {
+          const el = document.getElementById('fbStatus');
+          if (el) el.textContent = 'Sending feedback...';
+        } catch (e0) {}
         const i = Number(idx);
         if (!isFinite(i) || i < 0 || i >= _chatLocal.length) return;
         const m = _chatLocal[i] || {};
@@ -424,9 +428,23 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ message_id: mid, score: Number(score), comment: String(comment || '') })
         });
-        if (!resp.ok) throw new Error('HTTP ' + resp.status);
+        if (!resp.ok) {
+          let msg = 'HTTP ' + resp.status;
+          try {
+            const ct = resp.headers.get('content-type') || '';
+            if (ct.includes('application/json')) {
+              const j = await resp.json();
+              msg = (j && (j.detail || j.error)) ? String(j.detail || j.error) : msg;
+            }
+          } catch (e) {}
+          throw new Error(msg);
+        }
         _chatLocal[i]._rated = true;
         renderChat();
+        try {
+          const el = document.getElementById('fbStatus');
+          if (el) el.textContent = (Number(score) === 1) ? 'Thanks!' : 'Got it.';
+        } catch (e4) {}
       } catch (e) {
         try {
           const el = document.getElementById('fbStatus');
@@ -603,7 +621,7 @@
     async function sendFeedback(score) {
       try {
         const el = document.getElementById('fbStatus');
-        if (el) el.textContent = '';
+        if (el) el.textContent = 'Sending feedback...';
         const mid = _lastChatMessageId;
         if (!mid) {
           if (el) el.textContent = 'No message to rate yet';
@@ -623,13 +641,21 @@
           body: JSON.stringify({ message_id: mid, score: Number(score), comment: String(comment || '') })
         });
         if (!resp.ok) {
-          if (el) el.textContent = 'Feedback failed';
+          let msg = 'HTTP ' + resp.status;
+          try {
+            const ct = resp.headers.get('content-type') || '';
+            if (ct.includes('application/json')) {
+              const j = await resp.json();
+              msg = (j && (j.detail || j.error)) ? String(j.detail || j.error) : msg;
+            }
+          } catch (e) {}
+          if (el) el.textContent = 'Feedback failed: ' + msg;
           return;
         }
         if (el) el.textContent = (Number(score) === 1) ? 'Thanks!' : 'Got it.';
       } catch (e) {
         const el = document.getElementById('fbStatus');
-        if (el) el.textContent = 'Feedback error';
+        if (el) el.textContent = 'Feedback error: ' + (e && e.message ? e.message : String(e));
       }
     }
 

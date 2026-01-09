@@ -13,6 +13,7 @@ import ipaddress
 import socket
 import urllib.request
 import urllib.parse
+import urllib.error
 from datetime import date, datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -1912,7 +1913,7 @@ def _execute_action(*, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         if strategy is not None:
             strategy.load_models = True
             if not strategy.models_loaded:
-                strategy._load_models()
+                strategy.load_models()
         rl_manager.enabled = True
         rl_manager.enable_updates = True
         rl_manager.learning_rate = 0.001
@@ -2123,14 +2124,14 @@ async def chat(req: ChatRequest):
             pass
 
         msg_id = evolution_recorder.record(
-            agent_id="planner",
+            agent_id="secretary",
             context=json.dumps(
                 {
                     "client": str(ctx.get("client") or ""),
                     "session_id": str(ctx.get("session_id") or ""),
                     "message": text,
                     "task_id": tid,
-                    "trainer": "planner_olrl",
+                    "trainer": "secretary_chat",
                     "shared_urls": shared_urls,
                 },
                 ensure_ascii=False,
@@ -2149,6 +2150,10 @@ async def feedback(req: FeedbackRequest):
     score = int(req.score)
     if score not in (1, -1):
         raise HTTPException(status_code=400, detail="score must be 1 or -1")
+    try:
+        logger.info(f"[Feedback] ref_id={str(req.message_id)[:12]} score={score} comment_len={len(str(req.comment or ''))}")
+    except Exception:
+        pass
     try:
         evolution_recorder.log_feedback(ref_id=str(req.message_id), score=score, comment=str(req.comment or ""))
     except Exception as e:
@@ -2190,7 +2195,7 @@ async def warmup_local_llm():
             stg = _live_runner.strategy
             if not stg.models_loaded:
                 # Trigger load in threadpool to avoid blocking
-                await run_in_threadpool(stg._load_models)
+                await run_in_threadpool(stg.load_models)
             
             return {
                 "ok": True, 
@@ -2205,6 +2210,8 @@ async def warmup_local_llm():
 
 
 _REF_WAV_CACHE: Dict[str, Dict[str, Any]] = {}
+
+_SOVITS_WEIGHTS_CACHE: Dict[str, Any] = {"gpt": "", "sovits": "", "ts": 0.0}
 
 
 def _read_ref_prompt_text(path: Path) -> str:
@@ -2327,8 +2334,16 @@ async def voice_tts(req: TtsRequest):
             a0 = str(picked.get("audio") or "").strip()
             p0t = str(picked.get("prompt_text") or "").strip()
             if a0 and Path(a0).exists():
+                # Only use random refs when we also have a transcript prompt.
+                # Using an audio ref without prompt_text often causes garbled output.
+                if not p0t:
+                    try:
+                        logger.info(f"[TTS] skip_ref_no_prompt audio={Path(a0).name}")
+                    except Exception:
+                        pass
+                    continue
                 picked_audio = a0
-                picked_prompt = p0t or None
+                picked_prompt = p0t
                 break
             continue
     if picked_audio:
@@ -2340,42 +2355,172 @@ async def voice_tts(req: TtsRequest):
         logger.info(f"[TTS] preset={preset} ref={refer_wav_path} prompt_from_file={bool(picked_prompt)}")
     except Exception:
         pass
-    text_lang = str((gs or {}).get("text_language") or "zh").strip() or "zh"
-    prompt_lang = str((gs or {}).get("prompt_language") or "ja").strip() or "ja"
+    text_lang = str((p0 or {}).get("text_language") or (gs or {}).get("text_language") or "zh").strip() or "zh"
+    prompt_lang = str((p0 or {}).get("prompt_language") or (gs or {}).get("prompt_language") or "ja").strip() or "ja"
     gpt_path = str((gs or {}).get("gpt_path") or "").strip()
     sovits_path = str((gs or {}).get("sovits_path") or "").strip()
     timeout_sec = float((gs or {}).get("timeout_sec") or 120)
+
+    # Ensure correct voice weights are loaded (avoids using default voice -> unclear speech)
+    try:
+        now = time.time()
+        cache_ttl = 30.0
+        need_reload = False
+        try:
+            if (gpt_path and (gpt_path != str(_SOVITS_WEIGHTS_CACHE.get("gpt") or ""))) or (
+                sovits_path and (sovits_path != str(_SOVITS_WEIGHTS_CACHE.get("sovits") or ""))
+            ):
+                need_reload = True
+            if (now - float(_SOVITS_WEIGHTS_CACHE.get("ts") or 0.0)) > cache_ttl:
+                need_reload = True
+        except Exception:
+            need_reload = True
+
+        if need_reload and api_base:
+            # Use dedicated endpoints if available
+            try:
+                if gpt_path:
+                    ok0 = False
+                    u0 = api_base.rstrip("/") + "/set_gpt_weights?" + urllib.parse.urlencode({"weights_path": gpt_path})
+                    try:
+                        with urllib.request.urlopen(u0, timeout=float(timeout_sec)) as _:
+                            ok0 = True
+                    except Exception:
+                        ok0 = False
+                    if not ok0:
+                        try:
+                            raw = json.dumps({"weights_path": gpt_path}, ensure_ascii=False).encode("utf-8")
+                            req0 = urllib.request.Request(
+                                api_base.rstrip("/") + "/set_gpt_weights",
+                                data=raw,
+                                headers={"Content-Type": "application/json"},
+                                method="POST",
+                            )
+                            with urllib.request.urlopen(req0, timeout=float(timeout_sec)) as _:
+                                ok0 = True
+                        except Exception:
+                            ok0 = False
+                if sovits_path:
+                    ok1 = False
+                    u1 = api_base.rstrip("/") + "/set_sovits_weights?" + urllib.parse.urlencode({"weights_path": sovits_path})
+                    try:
+                        with urllib.request.urlopen(u1, timeout=float(timeout_sec)) as _:
+                            ok1 = True
+                    except Exception:
+                        ok1 = False
+                    if not ok1:
+                        try:
+                            raw = json.dumps({"weights_path": sovits_path}, ensure_ascii=False).encode("utf-8")
+                            req1 = urllib.request.Request(
+                                api_base.rstrip("/") + "/set_sovits_weights",
+                                data=raw,
+                                headers={"Content-Type": "application/json"},
+                                method="POST",
+                            )
+                            with urllib.request.urlopen(req1, timeout=float(timeout_sec)) as _:
+                                ok1 = True
+                        except Exception:
+                            ok1 = False
+
+                _SOVITS_WEIGHTS_CACHE["gpt"] = gpt_path
+                _SOVITS_WEIGHTS_CACHE["sovits"] = sovits_path
+                _SOVITS_WEIGHTS_CACHE["ts"] = now
+                try:
+                    logger.info(f"[TTS] loaded weights gpt={Path(gpt_path).name if gpt_path else ''} sovits={Path(sovits_path).name if sovits_path else ''}")
+                except Exception:
+                    pass
+            except Exception as e:
+                try:
+                    logger.warning(f"[TTS] set weights failed: {e}")
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
     if not refer_wav_path:
         raise HTTPException(status_code=500, detail=f"gpt_sovits preset '{preset}' refer_wav_path missing")
 
     url = api_base.rstrip("/") + "/" + endpoint.lstrip("/")
-    payload: Dict[str, Any] = {
+    # Send both key variants to maximize compatibility across GPT-SoVITS forks.
+    # Some servers expect *_lang, others expect *_language, and ref key names also vary.
+    payload_primary: Dict[str, Any] = {
+        "text": text,
+        "prompt_text": prompt_text,
+        "text_lang": text_lang,
+        "prompt_lang": prompt_lang,
+        "ref_audio_path": refer_wav_path,
+        "text_language": text_lang,
+        "prompt_language": prompt_lang,
+        "refer_wav_path": refer_wav_path,
+    }
+    # Legacy payload variants (used as fallback when server 400s).
+    payload_legacy: Dict[str, Any] = {
         "text": text,
         "text_lang": text_lang,
         "ref_audio_path": refer_wav_path,
-        "ref_wav_path": refer_wav_path,
-        "refer_wav_path": refer_wav_path,
         "prompt_lang": prompt_lang,
         "prompt_text": prompt_text,
     }
-    if gpt_path:
-        payload["gpt_path"] = gpt_path
-    if sovits_path:
-        payload["sovits_path"] = sovits_path
+
+    def _post_tts(_payload: Dict[str, Any]) -> Tuple[str, bytes]:
+        raw0 = json.dumps(_payload, ensure_ascii=False).encode("utf-8")
+        ureq0 = urllib.request.Request(url, data=raw0, headers={"Content-Type": "application/json"}, method="POST")
+        with urllib.request.urlopen(ureq0, timeout=timeout_sec) as resp0:
+            ct0 = str(resp0.headers.get("content-type") or "").lower()
+            data0 = resp0.read()
+        return ct0, data0
 
     try:
         try:
             logger.info(f"[TTS] POST {url}")
         except Exception:
             pass
-        raw = json.dumps(payload, ensure_ascii=False).encode("utf-8")
-        ureq = urllib.request.Request(url, data=raw, headers={"Content-Type": "application/json"}, method="POST")
-        with urllib.request.urlopen(ureq, timeout=timeout_sec) as resp:
-            ct = str(resp.headers.get("content-type") or "").lower()
-            data = resp.read()
+        ct, data = _post_tts(payload_primary)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"gpt_sovits request failed: {e}")
+        # Surface response body for HTTP 400 debugging.
+        try:
+            if isinstance(e, urllib.error.HTTPError):
+                body = b""
+                try:
+                    body = e.read() or b""
+                except Exception:
+                    body = b""
+                detail = body.decode("utf-8", errors="replace") if body else ""
+
+                # Some GPT-SoVITS variants accept `ref_wav_path` or `refer_wav_path` instead.
+                if int(getattr(e, "code", 0) or 0) == 400:
+                    # First fallback: try legacy field names.
+                    try:
+                        ct, data = _post_tts(payload_legacy)
+                    except Exception:
+                        # Second fallback: try alternative ref key names.
+                        alt = dict(payload_legacy)
+                        alt.pop("ref_audio_path", None)
+                        alt["ref_wav_path"] = refer_wav_path
+                        try:
+                            ct, data = _post_tts(alt)
+                        except Exception:
+                            alt2 = dict(payload_legacy)
+                            alt2.pop("ref_audio_path", None)
+                            alt2["refer_wav_path"] = refer_wav_path
+                            try:
+                                ct, data = _post_tts(alt2)
+                            except Exception:
+                                raise HTTPException(
+                                    status_code=500,
+                                    detail=f"gpt_sovits request failed: HTTP {int(e.code)} {detail}".strip(),
+                                )
+                else:
+                    raise HTTPException(
+                        status_code=500,
+                        detail=f"gpt_sovits request failed: HTTP {int(e.code)} {detail}".strip(),
+                    )
+            else:
+                raise HTTPException(status_code=500, detail=f"gpt_sovits request failed: {e}")
+        except HTTPException:
+            raise
+        except Exception:
+            raise HTTPException(status_code=500, detail=f"gpt_sovits request failed: {e}")
 
     try:
         logger.info(f"[TTS] response content-type={ct} bytes={len(data) if data else 0}")
@@ -2724,7 +2869,7 @@ async def start_nightly_evolution_train():
     try:
         stg = getattr(_live_runner, "strategy", None)
         if stg is not None and (not bool(getattr(stg, "models_loaded", False))):
-            fn = getattr(stg, "_load_models", None)
+            fn = getattr(stg, "load_models", None)
             if callable(fn):
                 fn()
     except Exception:
@@ -3903,13 +4048,11 @@ def _secretary_reply(text: str, ctx: Dict[str, Any]) -> str:
     # Planner strategy holds the shared model and can hot-swap to 'secretary' adapter.
     try:
         if _live_runner is not None and getattr(_live_runner, "strategy", None):
-            # Only use LLM if it's actually loaded (lazy load check)
-            if _live_runner.strategy.models_loaded:
-                # System prompt injection (context + personality)
-                sys_p = _build_secretary_system_prompt(ctx)
-                reply = _live_runner.strategy.generate_reply(t, system_prompt=sys_p)
-                if reply:
-                    return reply
+            # System prompt injection (context + personality)
+            sys_p = _build_secretary_system_prompt(ctx)
+            reply = _live_runner.strategy.generate_reply(t, system_prompt=sys_p)
+            if reply:
+                return reply
     except Exception:
         pass
 
@@ -4396,7 +4539,7 @@ def set_live_runner(runner):
         try:
             stg = getattr(_live_runner, "strategy", None)
             if stg is not None and desired_load_models and (not bool(getattr(stg, "models_loaded", False))):
-                fn = getattr(stg, "_load_models", None)
+                fn = getattr(stg, "load_models", None)
                 if callable(fn):
                     fn()
         except Exception:
@@ -4638,7 +4781,7 @@ async def reload_live_models():
             except Exception:
                 pass
 
-            fn = getattr(stg, "_load_models", None)
+            fn = getattr(stg, "load_models", None)
             if callable(fn):
                 fn()
             msg = "reloaded"
@@ -4762,7 +4905,7 @@ async def restart_live(req: LiveRestartRequest):
             stg = getattr(_live_runner, "strategy", None)
             if stg is not None:
                 if bool(lm_req) and (not bool(getattr(stg, "models_loaded", False))):
-                    fn = getattr(stg, "_load_models", None)
+                    fn = getattr(stg, "load_models", None)
                     if callable(fn):
                         fn()
                 if (not bool(lm_req)) and bool(getattr(stg, "models_loaded", False)):
@@ -4839,7 +4982,7 @@ async def restart_live(req: LiveRestartRequest):
                         except Exception:
                             pass
 
-                        fn = getattr(stg, "_load_models", None)
+                        fn = getattr(stg, "load_models", None)
                         if callable(fn):
                             fn()
 
@@ -5085,19 +5228,11 @@ async def start_online_rl():
     except Exception:
         pass
 
+    # Keep GPT-SoVITS and chat online during RL; RL should not interrupt voice/chat UX.
     global _SOVITS_RESUME_AFTER_RL, _SOVITS_RESTARTED_AFTER_RL
     with _SOVITS_LOCK:
-        if not _SOVITS_RESUME_AFTER_RL and not _SOVITS_RESTARTED_AFTER_RL:
-            res = _stop_gpt_sovits_from_state()
-            if bool(res.get("stopped")):
-                _SOVITS_RESUME_AFTER_RL = True
-                _SOVITS_RESTARTED_AFTER_RL = False
-
-    try:
-        from src.llm.local_chat import unload_model
-        await run_in_threadpool(unload_model)
-    except Exception:
-        pass
+        _SOVITS_RESUME_AFTER_RL = False
+        _SOVITS_RESTARTED_AFTER_RL = False
 
     try:
         setattr(_live_runner, "load_models", True)
@@ -5107,7 +5242,7 @@ async def start_online_rl():
     try:
         stg = getattr(_live_runner, "strategy", None)
         if stg is not None and (not bool(getattr(stg, "models_loaded", False))):
-            fn = getattr(stg, "_load_models", None)
+            fn = getattr(stg, "load_models", None)
             if callable(fn):
                 fn()
     except Exception:
@@ -5149,7 +5284,7 @@ async def start_online_rl():
         "buffer_size": int(buf_size),
         "updates": int(getattr(rl_manager, "update_count", 0) or 0),
         "metrics": metrics,
-        "voice_stopped": bool(_SOVITS_RESUME_AFTER_RL),
+        "voice_stopped": False,
     }
 
 

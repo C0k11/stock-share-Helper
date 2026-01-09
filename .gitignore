@@ -102,10 +102,15 @@ temp/
 /scripts/eval_outputs/
 /scripts/eval_results/
 
+windows_app/**/bin/
+windows_app/**/obj/
+
 # ====================
 # Local-only helper scripts
 # ====================
 /scripts/overnight_queue.ps1
+
+/scripts/verify_fix.py
 
 # ====================
 # 测试覆盖率

@@ -10,9 +10,11 @@ Architecture:
 """
 from __future__ import annotations
 
+import io
 import json
 import math
 import os
+import sys
 import threading
 from datetime import datetime
 from pathlib import Path
@@ -22,12 +24,13 @@ from .event import Event, EventType
 from src.learning.recorder import recorder as evolution_recorder
 from src.agent.gatekeeper import Gatekeeper
 from src.agent.planner import Planner
+from src.utils.llm_tools import extract_json_text, repair_and_parse_json
 
 # Default model paths
 DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 DEFAULT_SCALPER_ADAPTER = "models/trader_stock_v1_1_tech_plus_news/lora_weights"
 DEFAULT_ANALYST_ADAPTER = "models/trader_v3_dpo_analyst"
-
+DEFAULT_CHARTIST_VLM_MODEL = "Qwen2.5-VL-3B-Instruct-4bit"
 
 class MultiAgentStrategy:
     """
@@ -52,7 +55,11 @@ class MultiAgentStrategy:
         moe_scalper: str = DEFAULT_SCALPER_ADAPTER,
         moe_analyst: str = DEFAULT_ANALYST_ADAPTER,
         moe_secretary: str = "",
+        moe_system2: str = "",
         load_4bit: bool = True,
+        llm_max_context: Optional[int] = None,
+        llm_max_new_tokens: int = 256,
+        chartist_vlm_cfg: Optional[Dict[str, Any]] = None,
         planner_policy: str = "rule",
         planner_sft_model_path: str = "models/planner_sft_v1.pt",
         gatekeeper_model_path: str = "models/rl_gatekeeper_v2.pt",
@@ -95,7 +102,24 @@ class MultiAgentStrategy:
             pass
         self.moe_analyst = moe_analyst
         self.moe_secretary = str(moe_secretary or "").strip()
+        self.moe_system2 = str(moe_system2 or "").strip()
         self.load_4bit = load_4bit
+
+        try:
+            self.llm_max_context = int(llm_max_context) if llm_max_context is not None else 0
+        except Exception:
+            self.llm_max_context = 0
+        try:
+            self.llm_max_new_tokens = int(llm_max_new_tokens)
+        except Exception:
+            self.llm_max_new_tokens = 256
+        self.llm_max_context = max(0, int(self.llm_max_context or 0))
+        self.llm_max_new_tokens = max(8, int(self.llm_max_new_tokens or 256))
+
+        self._chartist_vlm_cfg: Dict[str, Any] = dict(chartist_vlm_cfg or {})
+        self._chartist_vlm_model: Any = None
+        self._chartist_vlm_processor: Any = None
+        self._chartist_vlm_error: str = ""
 
         self.all_agents_mode: bool = False
         self.committee_policy: str = "conservative"
@@ -126,7 +150,7 @@ class MultiAgentStrategy:
         
         # Load models if requested
         if load_models:
-            self._load_models()
+            self.load_models()
 
         try:
             if self.planner_policy in {"rule", "sft"}:
@@ -142,8 +166,11 @@ class MultiAgentStrategy:
         
         print("Multi-Agent Strategy Initialized.")
 
-    def _load_models(self) -> None:
+    def load_models(self) -> None:
         """Load MoE models (Scalper + Analyst adapters)"""
+        if self.models_loaded:
+            return
+
         self._log("Loading Multi-Agent models...", priority=1)
         
         try:
@@ -172,6 +199,7 @@ class MultiAgentStrategy:
             scalper_path = _resolve_adapter_path(self.moe_scalper)
             analyst_path = _resolve_adapter_path(self.moe_analyst)
             secretary_path = _resolve_adapter_path(self.moe_secretary) if self.moe_secretary else ""
+            system2_path = _resolve_adapter_path(self.moe_system2) if self.moe_system2 else ""
 
             adapters: Dict[str, str] = {}
             if Path(scalper_path).exists():
@@ -180,6 +208,8 @@ class MultiAgentStrategy:
                 adapters["analyst"] = analyst_path
             if secretary_path and Path(secretary_path).exists():
                 adapters["secretary"] = secretary_path
+            if system2_path and Path(system2_path).exists():
+                adapters["system2"] = system2_path
 
             try:
                 self._adapters_loaded = set(adapters.keys())
@@ -206,6 +236,16 @@ class MultiAgentStrategy:
             self.models_loaded = True
             self.models_error = warn
             self._log(f"MoE models loaded: {list(adapters.keys())}", priority=2)
+
+            try:
+                self._log_vram(prefix="[VRAM] after_moe_load")
+            except Exception:
+                pass
+
+            try:
+                self._maybe_load_chartist_vlm()
+            except Exception:
+                pass
             
         except Exception as e:
             self._log(f"Model loading failed: {e}", priority=2)
@@ -238,6 +278,10 @@ class MultiAgentStrategy:
         Generic thread-safe inference using the shared model.
         Supports hot-swapping adapters (or using base model if adapter is None).
         """
+        if not self.models_loaded:
+            self._log("Lazy loading models for inference...", priority=1)
+            self.load_models()
+
         if (not self.models_loaded) or (self.model is None) or (self.tokenizer is None):
             return ""
 
@@ -271,12 +315,19 @@ class MultiAgentStrategy:
                     messages.append({"role": "user", "content": user_msg})
 
                     text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-                    inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
+                    tk_kwargs: Dict[str, Any] = {"return_tensors": "pt"}
+                    if int(getattr(self, "llm_max_context", 0) or 0) > 0:
+                        tk_kwargs.update({"truncation": True, "max_length": int(self.llm_max_context)})
+                    inputs = self.tokenizer([text], **tk_kwargs).to(self.model.device)
+
+                    mn = int(max_new_tokens or 0)
+                    if mn <= 0:
+                        mn = int(getattr(self, "llm_max_new_tokens", 256) or 256)
 
                     with torch.no_grad():
                         gen_ids = self.model.generate(
                             **inputs,
-                            max_new_tokens=max_new_tokens,
+                            max_new_tokens=mn,
                             temperature=temperature,
                             do_sample=(temperature > 0),
                             top_p=0.9,
@@ -304,6 +355,169 @@ class MultiAgentStrategy:
                     pass
                 return ""
 
+    def _log_vram(self, *, prefix: str) -> None:
+        try:
+            import torch
+
+            if not torch.cuda.is_available():
+                self._log(f"{prefix} cuda=unavailable", priority=2)
+                return
+            free, total = torch.cuda.mem_get_info()
+            alloc = torch.cuda.memory_allocated()
+            reserv = torch.cuda.memory_reserved()
+            gb = 1024 ** 3
+            self._log(
+                f"{prefix} free={free / gb:.2f}GB total={total / gb:.2f}GB alloc={alloc / gb:.2f}GB reserved={reserv / gb:.2f}GB",
+                priority=2,
+            )
+        except Exception as e:
+            self._log(f"{prefix} vram_log_failed: {e}", priority=2)
+
+    def _maybe_load_chartist_vlm(self) -> None:
+        cfg = self._chartist_vlm_cfg if isinstance(self._chartist_vlm_cfg, dict) else {}
+        if not bool(cfg.get("enabled", False)):
+            return
+        if self._chartist_vlm_model is not None and self._chartist_vlm_processor is not None:
+            return
+        mname = str(cfg.get("local_model") or "").strip()
+        if not mname:
+            self._chartist_vlm_error = "missing chartist_vlm.local_model"
+            return
+
+        try:
+            from transformers import AutoProcessor
+        except Exception as e:
+            self._chartist_vlm_error = f"transformers missing: {e}"
+            self._log(f"Chartist VLM unavailable: {self._chartist_vlm_error}", priority=2)
+            return
+
+        try:
+            import torch
+            from transformers import BitsAndBytesConfig
+            from transformers import Qwen2_5_VLForConditionalGeneration
+
+            load_4bit = bool(cfg.get("load_4bit", True))
+            qcfg = None
+            if load_4bit:
+                try:
+                    qcfg = BitsAndBytesConfig(load_in_4bit=True)
+                except Exception:
+                    qcfg = None
+
+            proc = AutoProcessor.from_pretrained(mname, trust_remote_code=True)
+            try:
+                if int(cfg.get("min_image_pixels") or 0) > 0 and hasattr(proc, "min_pixels"):
+                    proc.min_pixels = int(cfg.get("min_image_pixels"))
+            except Exception:
+                pass
+            try:
+                if int(cfg.get("max_image_pixels") or 0) > 0 and hasattr(proc, "max_pixels"):
+                    proc.max_pixels = int(cfg.get("max_image_pixels"))
+            except Exception:
+                pass
+
+            load_kwargs: Dict[str, Any] = {"trust_remote_code": True, "device_map": "auto"}
+            if qcfg is not None:
+                load_kwargs["quantization_config"] = qcfg
+            else:
+                load_kwargs["torch_dtype"] = torch.bfloat16 if torch.cuda.is_available() else torch.float32
+
+            model_obj = Qwen2_5_VLForConditionalGeneration.from_pretrained(mname, **load_kwargs)
+            model_obj.eval()
+
+            self._chartist_vlm_processor = proc
+            self._chartist_vlm_model = model_obj
+            self._chartist_vlm_error = ""
+            self._log(f"Chartist VLM loaded: {mname}", priority=2)
+            self._log_vram(prefix="[VRAM] after_vlm_load")
+        except Exception as e:
+            self._chartist_vlm_error = str(e)
+            self._chartist_vlm_model = None
+            self._chartist_vlm_processor = None
+            self._log(f"Chartist VLM load failed: {e}", priority=2)
+
+    def _read_prompt_yaml(self, path: str) -> Dict[str, str]:
+        p = Path(str(path or "").strip())
+        if not p.is_absolute():
+            try:
+                project_root = Path(__file__).resolve().parents[2]
+                p = (project_root / p).resolve()
+            except Exception:
+                p = Path(str(path or "").strip())
+        if not p.exists():
+            return {}
+        try:
+            import yaml
+
+            obj = yaml.safe_load(p.read_text(encoding="utf-8"))
+            if not isinstance(obj, dict):
+                return {}
+            sp = str(obj.get("system_prompt") or "").strip()
+            up = str(obj.get("user_prompt") or "").strip()
+            if sp and up:
+                return {"system_prompt": sp, "user_prompt": up}
+            return {}
+        except Exception:
+            return {}
+
+    def _render_chartist_image(self, ticker: str) -> Any:
+        try:
+            import pandas as pd
+            import mplfinance as mpf
+            from PIL import Image
+        except Exception:
+            return None
+
+        hist = list(self.price_history.get(str(ticker or "").upper(), []) or [])
+        if len(hist) < 5:
+            return None
+
+        rows = hist[-60:]
+        try:
+            df = pd.DataFrame(rows)
+        except Exception:
+            return None
+
+        if "time" not in df.columns:
+            return None
+
+        try:
+            df["time"] = pd.to_datetime(df["time"], errors="coerce")
+            df = df.dropna(subset=["time"])
+            df = df.set_index("time")
+        except Exception:
+            return None
+
+        for col in ("open", "high", "low", "close", "volume"):
+            if col in df.columns:
+                try:
+                    df[col] = pd.to_numeric(df[col], errors="coerce")
+                except Exception:
+                    pass
+        df = df.dropna(subset=["open", "high", "low", "close"])
+        if df.empty:
+            return None
+
+        buf = io.BytesIO()
+        try:
+            mpf.plot(
+                df,
+                type="candle",
+                volume=True,
+                style="yahoo",
+                mav=(20, 50, 200),
+                savefig=dict(fname=buf, dpi=110, bbox_inches="tight"),
+            )
+        except Exception:
+            return None
+
+        try:
+            buf.seek(0)
+            img = Image.open(buf).convert("RGB")
+            return img
+        except Exception:
+            return None
+
     def generate_reply(self, user_msg: str, system_prompt: str = "") -> str:
         """Generate chat reply using the Secretary adapter (MoE hot-swap), falling back to base model if needed."""
         # Use the generic thread-safe method, preferring secretary adapter
@@ -312,7 +526,7 @@ class MultiAgentStrategy:
             system_prompt=system_prompt, 
             adapter="secretary",
             temperature=0.7,
-            max_new_tokens=256
+            max_new_tokens=int(getattr(self, "llm_max_new_tokens", 256) or 256)
         )
 
     def on_bar(self, market_data: dict) -> Optional[dict]:
@@ -446,8 +660,8 @@ class MultiAgentStrategy:
             act_a = str(dec_analyst.get("decision", "HOLD") or "HOLD").upper()
             ana_s = str(dec_scalper.get("analysis", "") or "")
             ana_a = str(dec_analyst.get("analysis", "") or "")
-            self._log(f"[scalper] {ticker}: {act_s} - {ana_s[:80]}", priority=1)
-            self._log(f"[analyst] {ticker}: {act_a} - {ana_a[:80]}", priority=1)
+            self._log(f"[scalper] {ticker}: {act_s} - {ana_s[:240]}", priority=1)
+            self._log(f"[analyst] {ticker}: {act_a} - {ana_a[:240]}", priority=1)
 
             action = "HOLD"
             analysis = ""
@@ -465,7 +679,7 @@ class MultiAgentStrategy:
             else:
                 if act_s == act_a and act_s in ("BUY", "SELL"):
                     action = act_s
-                    analysis = f"committee agree: {ana_s[:80]}"
+                    analysis = f"committee agree: {ana_s[:240]}"
                 else:
                     action = "HOLD"
                     analysis = "committee: disagree_or_hold"
@@ -603,10 +817,29 @@ class MultiAgentStrategy:
                 macro_gear, macro_label = self._macro_governor_assess()
                 self._log(f"Macro Governor: regime={macro_label} (gear={macro_gear})", priority=1)
                 
-                # Judge Decision
-                approved, confidence, reason = self._system2_judge(
-                    action, chart_score, macro_gear, features
+                # System2 Critic -> Judge (LLM via hot-swap); may override or block
+                approved, final_action, reason = self._system2_debate(
+                    ticker=ticker,
+                    proposed_action=action,
+                    proposed_analysis=analysis,
+                    features=features,
+                    chart_score=int(chart_score),
+                    macro_gear=float(macro_gear),
+                    macro_label=str(macro_label),
                 )
+
+                try:
+                    final_action = str(final_action or "").strip().upper()
+                except Exception:
+                    final_action = str(action)
+
+                if final_action in {"BUY", "SELL"} and final_action != action:
+                    self._log(f"System 2 (Judge): override {action} -> {final_action} ({reason})", priority=2)
+                    action = final_action
+
+                if (not bool(approved)) or (str(final_action) == "HOLD"):
+                    self._log(f"System 2 (Judge): BLOCKED - {reason}", priority=2)
+                    return None
 
                 try:
                     evolution_recorder.record(
@@ -628,10 +861,6 @@ class MultiAgentStrategy:
                     )
                 except Exception:
                     pass
-                
-                if not approved:
-                    self._log(f"System 2 (Judge): REJECTED - {reason}", priority=2)
-                    return None
                 
                 self._log(f"System 2 (Judge): APPROVED (conf={confidence:.2f})", priority=2)
         
@@ -937,10 +1166,16 @@ Decide BUY/SELL/HOLD for next 5 days."""
 
                 with adapter_ctx:
                     text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-                    inputs = self.tokenizer([text], return_tensors="pt").to(self.model.device)
+                    tk_kwargs: Dict[str, Any] = {"return_tensors": "pt"}
+                    if int(getattr(self, "llm_max_context", 0) or 0) > 0:
+                        tk_kwargs.update({"truncation": True, "max_length": int(self.llm_max_context)})
+                    inputs = self.tokenizer([text], **tk_kwargs).to(self.model.device)
+
+                    mn = int(getattr(self, "llm_max_new_tokens", 256) or 256)
+                    mn = max(32, min(mn, 512))
                     
                     with torch.no_grad():
-                        gen_ids = self.model.generate(**inputs, max_new_tokens=128, temperature=0.1)
+                        gen_ids = self.model.generate(**inputs, max_new_tokens=mn, temperature=0.1)
                     
                     output = self.tokenizer.decode(gen_ids[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
                     raw = str(output or "").strip()
@@ -1018,30 +1253,211 @@ Decide BUY/SELL/HOLD for next 5 days."""
 
     def _chartist_overlay(self, ticker: str, proposed_action: str) -> int:
         """Chartist overlay: visual pattern analysis score"""
-        # Returns: 1 (supports), 0 (neutral), -1 (opposes)
-        try:
-            feats = self._compute_features(str(ticker or "").upper())
-            tech = feats.get("technical") if isinstance(feats.get("technical"), dict) else {}
-            ret_5d = float(tech.get("return_5d") or 0.0)
-            p_ma20 = float(tech.get("price_vs_ma20") or 0.0)
-        except Exception:
-            ret_5d = 0.0
-            p_ma20 = 0.0
+        cfg = self._chartist_vlm_cfg if isinstance(self._chartist_vlm_cfg, dict) else {}
+        if bool(cfg.get("enabled", False)):
+            try:
+                self._maybe_load_chartist_vlm()
+            except Exception:
+                pass
 
-        act = str(proposed_action or "").upper().strip()
-        if act == "BUY":
-            if ret_5d > 0.2 and p_ma20 > 0.0:
-                return 1
-            if ret_5d < -0.2 and p_ma20 < 0.0:
-                return -1
-            return 0
-        if act == "SELL":
-            if ret_5d < -0.2 and p_ma20 < 0.0:
-                return 1
-            if ret_5d > 0.2 and p_ma20 > 0.0:
-                return -1
-            return 0
+            if self._chartist_vlm_model is not None and self._chartist_vlm_processor is not None:
+                img = self._render_chartist_image(str(ticker or "").upper())
+                if img is None:
+                    return 0
+
+                prompt_yaml = str(cfg.get("prompt_yaml") or "").strip()
+                p = self._read_prompt_yaml(prompt_yaml) if prompt_yaml else {}
+                sp = str(p.get("system_prompt") or "").strip()
+                up_t = str(p.get("user_prompt") or "").strip()
+                if not sp:
+                    sp = "Analyze the candlestick chart image. Return only JSON {signal,confidence,reasoning}."
+                if not up_t:
+                    up_t = "Analyze this chart for ticker={ticker} asof={asof}. Return only the JSON object."
+                try:
+                    up = up_t.format(ticker=str(ticker).upper(), asof=str(datetime.now().date()))
+                except Exception:
+                    up = up_t
+
+                try:
+                    import torch
+
+                    messages = [
+                        {"role": "system", "content": sp},
+                        {
+                            "role": "user",
+                            "content": [
+                                {"type": "image", "image": img},
+                                {"type": "text", "text": up},
+                            ],
+                        },
+                    ]
+
+                    proc = self._chartist_vlm_processor
+                    model_obj = self._chartist_vlm_model
+
+                    try:
+                        from qwen_vl_utils import process_vision_info  # type: ignore
+                    except Exception:
+                        process_vision_info = None
+
+                    prompt = ""
+                    if hasattr(proc, "apply_chat_template"):
+                        prompt = proc.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                        if process_vision_info is not None:
+                            image_inputs, video_inputs = process_vision_info(messages)
+                            inputs = proc(text=[prompt], images=image_inputs, videos=video_inputs, padding=True, return_tensors="pt")
+                        else:
+                            inputs = proc(text=[prompt], images=[img], padding=True, return_tensors="pt")
+                    else:
+                        inputs = proc(text=[str(up)], images=[img], padding=True, return_tensors="pt")
+
+                    inputs = {k: v.to(model_obj.device) if hasattr(v, "to") else v for k, v in inputs.items()}
+                    gen_kwargs: Dict[str, Any] = {"max_new_tokens": int(cfg.get("max_new_tokens") or 256)}
+                    temperature = float(cfg.get("temperature") or 0.2)
+                    if temperature > 0:
+                        gen_kwargs.update({"do_sample": True, "temperature": temperature})
+                    else:
+                        gen_kwargs.update({"do_sample": False})
+
+                    with torch.inference_mode():
+                        out_ids = model_obj.generate(**inputs, **gen_kwargs)
+                    txts = proc.batch_decode(out_ids, skip_special_tokens=True)
+                    out = str(txts[0] or "").strip() if txts else ""
+                    if prompt and out.startswith(prompt):
+                        out = out[len(prompt) :].strip()
+                except Exception:
+                    out = ""
+
+                raw_json = extract_json_text(out)
+                obj = None
+                if raw_json is not None:
+                    try:
+                        obj = repair_and_parse_json(raw_json)
+                    except Exception:
+                        obj = None
+                if not isinstance(obj, dict):
+                    return 0
+
+                sig = str(obj.get("signal") or "").strip().upper()
+                conf = 0.0
+                try:
+                    conf = float(obj.get("confidence") or 0.0)
+                except Exception:
+                    conf = 0.0
+                thr = float(cfg.get("confidence_threshold") or 0.7)
+                if conf <= thr:
+                    return 0
+
+                act = str(proposed_action or "").upper().strip()
+                if sig == "BULLISH":
+                    if act == "BUY":
+                        return 1
+                    if act == "SELL":
+                        return -1
+                    return 0
+                if sig == "BEARISH":
+                    if act == "SELL":
+                        return 1
+                    if act == "BUY":
+                        return -1
+                    return 0
+                return 0
+
         return 0
+
+    def _system2_debate(
+        self,
+        *,
+        ticker: str,
+        proposed_action: str,
+        proposed_analysis: str,
+        features: Dict[str, Any],
+        chart_score: int = 0,
+        macro_gear: float = 0.0,
+        macro_label: str = "",
+    ) -> Tuple[bool, str, str]:
+        action_up = str(proposed_action or "").strip().upper()
+        if action_up not in {"BUY", "SELL", "HOLD"}:
+            action_up = "HOLD"
+
+        lines = []
+        try:
+            tech = features.get("technical") if isinstance(features.get("technical"), dict) else {}
+            sig = features.get("signal") if isinstance(features.get("signal"), dict) else {}
+            lines = [
+                f"Ticker: {str(ticker).upper()}",
+                f"Date: {str(datetime.now().date())}",
+                f"Close: {tech.get('close', '')}",
+                f"Price vs MA20: {tech.get('price_vs_ma20', '')}",
+                f"Return 5d: {tech.get('return_5d', '')}",
+                f"Volatility 20d: {tech.get('volatility_20d', '')}",
+                f"Volume ratio: {tech.get('vol_ratio', '')}",
+                f"Composite signal: {sig.get('composite', '')}",
+                f"Chartist score: {int(chart_score)}",
+                f"Macro regime: {str(macro_label)} (gear={float(macro_gear)})",
+                "",
+                f"Proposed decision: {action_up}",
+                f"Proposed analysis: {str(proposed_analysis or '').strip()}",
+            ]
+        except Exception:
+            lines = [f"Ticker: {str(ticker).upper()}", "", f"Proposed decision: {action_up}", f"Proposed analysis: {str(proposed_analysis or '').strip()}"]
+
+        critic_sys = (
+            "You are a strict trading decision critic.\n"
+            "Response Format (STRICT JSON ONLY): {\"accept\": true|false, \"suggested_decision\": \"BUY\"|\"SELL\"|\"HOLD\"|\"CLEAR\", \"reasons\": [..3 strings..]}"
+        )
+        critic_user = "\n".join(lines)
+
+        judge_sys = (
+            "You are a strict trading decision judge.\n"
+            "Response Format (STRICT JSON ONLY): {\"final_decision\": \"BUY\"|\"SELL\"|\"HOLD\"|\"CLEAR\", \"rationale\": \"...\"}"
+        )
+
+        adapter = "system2" if "system2" in self._adapters_loaded else "scalper"
+        critic_raw = self.generic_inference(user_msg=critic_user, system_prompt=critic_sys, adapter=adapter, temperature=0.0, max_new_tokens=256)
+        critic_json = None
+        err = ""
+        try:
+            raw = extract_json_text(str(critic_raw or "").strip())
+            if raw is None:
+                err = "no json"
+            else:
+                critic_json = repair_and_parse_json(raw)
+        except Exception as e:
+            err = str(e)
+
+        if not isinstance(critic_json, dict):
+            return True, action_up, f"critic_parse_failed: {err}".strip()
+
+        judge_user = "\n".join(
+            [
+                f"Ticker: {str(ticker).upper()}",
+                f"Proposal JSON: {json.dumps({'decision': action_up, 'analysis': str(proposed_analysis or '').strip()}, ensure_ascii=False)}",
+                f"Critic JSON: {json.dumps(critic_json, ensure_ascii=False)}",
+            ]
+        )
+        judge_raw = self.generic_inference(user_msg=judge_user, system_prompt=judge_sys, adapter=adapter, temperature=0.0, max_new_tokens=192)
+        judge_json = None
+        jerr = ""
+        try:
+            raw = extract_json_text(str(judge_raw or "").strip())
+            if raw is None:
+                jerr = "no json"
+            else:
+                judge_json = repair_and_parse_json(raw)
+        except Exception as e:
+            jerr = str(e)
+
+        if not isinstance(judge_json, dict):
+            return True, action_up, f"judge_parse_failed: {jerr}".strip()
+
+        final_dec = str(judge_json.get("final_decision") or "").strip().upper()
+        rationale = str(judge_json.get("rationale") or "").strip()
+        if final_dec in {"CLEAR", "HOLD"}:
+            return False, "HOLD", rationale or "system2_hold"
+        if final_dec in {"BUY", "SELL"}:
+            return True, final_dec, rationale
+        return True, action_up, rationale
 
     def _macro_governor_assess(self) -> Tuple[float, str]:
         """Macro Governor: global risk assessment"""

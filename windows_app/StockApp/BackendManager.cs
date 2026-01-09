@@ -32,7 +32,7 @@ public sealed class BackendManager
 
     // Match legacy launcher defaults
     public double SecretaryVramFrac { get; set; } = 0.30;
-    public double TradingVramFrac { get; set; } = 0.70;
+    public double TradingVramFrac { get; set; } = 0.95;
 
     // Legacy SoVITS default
     public string SovitsHost { get; set; } = "127.0.0.1";
@@ -73,11 +73,10 @@ public sealed class BackendManager
             throw new FileNotFoundException("Backend script not found", script);
         }
 
-        // Align performance settings (picked up by local LLM loader)
         try
         {
-            Environment.SetEnvironmentVariable("SECRETARY_MAX_MEMORY_FRAC", SecretaryVramFrac.ToString(System.Globalization.CultureInfo.InvariantCulture));
-            Environment.SetEnvironmentVariable("TRADING_MAX_MEMORY_FRAC", TradingVramFrac.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            Environment.SetEnvironmentVariable("SECRETARY_MAX_MEMORY_FRAC", null);
+            Environment.SetEnvironmentVariable("TRADING_MAX_MEMORY_FRAC", null);
         }
         catch
         {
@@ -133,8 +132,8 @@ public sealed class BackendManager
 
         try
         {
-            psi.Environment["SECRETARY_MAX_MEMORY_FRAC"] = SecretaryVramFrac.ToString(System.Globalization.CultureInfo.InvariantCulture);
-            psi.Environment["TRADING_MAX_MEMORY_FRAC"] = TradingVramFrac.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            psi.Environment.Remove("SECRETARY_MAX_MEMORY_FRAC");
+            psi.Environment.Remove("TRADING_MAX_MEMORY_FRAC");
         }
         catch
         {

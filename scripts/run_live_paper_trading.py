@@ -163,7 +163,8 @@ class MariVoice:
     def generate_commentary(self, event_context: str) -> str:
         """Use Shared Strategy LLM (preferred) or legacy API to generate commentary"""
         # 1. Try Shared Strategy LLM (A2 Architecture)
-        if self.strategy and getattr(self.strategy, "models_loaded", False):
+        # Note: generic_inference handles lazy loading, so we just check if strategy exists
+        if self.strategy:
             try:
                 # Use 'secretary' adapter for personality
                 prompt = self.system_prompt + "\n\n请用一句话简洁转述以下事件，保持角色。"
@@ -315,6 +316,10 @@ class LivePaperTradingRunner:
         moe_scalper = None
         moe_analyst = None
         moe_secretary = None
+        moe_system2 = None
+        chartist_vlm_cfg = None
+        llm_max_context = None
+        llm_max_new_tokens = None
         all_agents_mode = None
         committee_policy = None
         load_4bit = None
@@ -334,6 +339,10 @@ class LivePaperTradingRunner:
                 moe_scalper = str(trading_cfg.get("moe_scalper") or "").strip() or None
                 moe_analyst = str(trading_cfg.get("moe_analyst") or "").strip() or None
                 moe_secretary = str(trading_cfg.get("moe_secretary") or "").strip() or None
+                moe_system2 = str(trading_cfg.get("moe_system2") or "").strip() or None
+                chartist_vlm_cfg = trading_cfg.get("chartist_vlm")
+                llm_max_context = trading_cfg.get("llm_max_context")
+                llm_max_new_tokens = trading_cfg.get("llm_max_new_tokens")
                 all_agents_mode = trading_cfg.get("all_agents_mode")
                 committee_policy = str(trading_cfg.get("committee_policy") or "").strip() or None
                 load_4bit = trading_cfg.get("load_4bit")
@@ -341,6 +350,13 @@ class LivePaperTradingRunner:
                 planner_sft_model = str(trading_cfg.get("planner_sft_model") or "").strip() or None
                 gatekeeper_model = str(trading_cfg.get("gatekeeper_model") or "").strip() or None
                 gatekeeper_threshold = trading_cfg.get("gatekeeper_threshold")
+
+                llm_cfg = cfg.get("llm") if isinstance(cfg, dict) and isinstance(cfg.get("llm"), dict) else {}
+                lazy_load = llm_cfg.get("lazy_load")
+                if isinstance(lazy_load, bool) and (not lazy_load):
+                    # User explicitly disabled lazy loading -> force load_models=True
+                    print("[Config] lazy_load=False -> forcing eager model loading")
+                    load_models = True
         except Exception:
             pass
 
@@ -372,6 +388,20 @@ class LivePaperTradingRunner:
             st_kwargs["moe_analyst"] = moe_analyst
         if isinstance(moe_secretary, str) and moe_secretary:
             st_kwargs["moe_secretary"] = moe_secretary
+        if isinstance(moe_system2, str) and moe_system2:
+            st_kwargs["moe_system2"] = moe_system2
+        if isinstance(chartist_vlm_cfg, dict) and chartist_vlm_cfg:
+            st_kwargs["chartist_vlm_cfg"] = dict(chartist_vlm_cfg)
+        try:
+            if llm_max_context is not None:
+                st_kwargs["llm_max_context"] = int(llm_max_context)
+        except Exception:
+            pass
+        try:
+            if llm_max_new_tokens is not None:
+                st_kwargs["llm_max_new_tokens"] = int(llm_max_new_tokens)
+        except Exception:
+            pass
         if isinstance(load_4bit, bool):
             st_kwargs["load_4bit"] = load_4bit
         if isinstance(planner_policy, str) and planner_policy:
