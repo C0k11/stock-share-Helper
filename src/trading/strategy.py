@@ -909,9 +909,9 @@ class MultiAgentStrategy:
                         pass
                     try:
                         macro_gear, macro_label = self._macro_governor_assess()
-                        self._log(f"Macro Governor: regime={macro_label} (gear={macro_gear})", priority=2)
+                        self._log(f"[MACRO] Macro Governor: regime={macro_label} (gear={macro_gear})", priority=2)
                     except Exception as e:
-                        self._log(f"Macro Governor: error: {e}", priority=2)
+                        self._log(f"[MACRO] Macro Governor: error: {e}", priority=2)
             except Exception:
                 pass
 
@@ -1074,7 +1074,7 @@ class MultiAgentStrategy:
                 
                 # Macro Governor
                 macro_gear, macro_label = self._macro_governor_assess()
-                self._log(f"Macro Governor: regime={macro_label} (gear={macro_gear})", priority=1)
+                self._log(f"[MACRO] Macro Governor: regime={macro_label} (gear={macro_gear})", priority=2)
                 
                 # System2 Critic -> Judge (LLM via hot-swap); may override or block
                 approved, final_action, reason = self._system2_debate(
