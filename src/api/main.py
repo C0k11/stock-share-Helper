@@ -4970,23 +4970,40 @@ async def reload_live_models():
             except Exception:
                 pass
 
+            acquired = False
             try:
-                setattr(stg, "model", None)
+                lk = getattr(stg, "_inference_lock", None)
+                if lk is not None:
+                    acquired = bool(lk.acquire(timeout=3.0))
             except Exception:
-                pass
-            try:
-                setattr(stg, "tokenizer", None)
-            except Exception:
-                pass
-            try:
-                setattr(stg, "models_loaded", False)
-            except Exception:
-                pass
+                acquired = False
+            if not acquired:
+                err = "inference_lock_busy"
+                msg = "busy"
+            else:
+                try:
+                    try:
+                        setattr(stg, "model", None)
+                    except Exception:
+                        pass
+                    try:
+                        setattr(stg, "tokenizer", None)
+                    except Exception:
+                        pass
+                    try:
+                        setattr(stg, "models_loaded", False)
+                    except Exception:
+                        pass
+                finally:
+                    try:
+                        lk.release()
+                    except Exception:
+                        pass
 
-            fn = getattr(stg, "load_models", None)
-            if callable(fn):
-                fn()
-            msg = "reloaded"
+                fn = getattr(stg, "load_models", None)
+                if callable(fn):
+                    fn()
+                msg = "reloaded"
         else:
             msg = "noop"
 
@@ -5111,18 +5128,32 @@ async def restart_live(req: LiveRestartRequest):
                     if callable(fn):
                         fn()
                 if (not bool(lm_req)) and bool(getattr(stg, "models_loaded", False)):
+                    acquired = False
                     try:
-                        setattr(stg, "model", None)
+                        lk = getattr(stg, "_inference_lock", None)
+                        if lk is not None:
+                            acquired = bool(lk.acquire(timeout=3.0))
                     except Exception:
-                        pass
-                    try:
-                        setattr(stg, "tokenizer", None)
-                    except Exception:
-                        pass
-                    try:
-                        setattr(stg, "models_loaded", False)
-                    except Exception:
-                        pass
+                        acquired = False
+                    if acquired:
+                        try:
+                            try:
+                                setattr(stg, "model", None)
+                            except Exception:
+                                pass
+                            try:
+                                setattr(stg, "tokenizer", None)
+                            except Exception:
+                                pass
+                            try:
+                                setattr(stg, "models_loaded", False)
+                            except Exception:
+                                pass
+                        finally:
+                            try:
+                                lk.release()
+                            except Exception:
+                                pass
                     try:
                         import torch
                         if torch.cuda.is_available():
@@ -5171,22 +5202,52 @@ async def restart_live(req: LiveRestartRequest):
                         except Exception:
                             pass
 
+                        acquired = False
                         try:
-                            setattr(stg, "model", None)
+                            lk = getattr(stg, "_inference_lock", None)
+                            if lk is not None:
+                                acquired = bool(lk.acquire(timeout=3.0))
                         except Exception:
-                            pass
-                        try:
-                            setattr(stg, "tokenizer", None)
-                        except Exception:
-                            pass
-                        try:
-                            setattr(stg, "models_loaded", False)
-                        except Exception:
-                            pass
+                            acquired = False
+                        if acquired:
+                            try:
+                                try:
+                                    setattr(stg, "model", None)
+                                except Exception:
+                                    pass
+                                try:
+                                    setattr(stg, "tokenizer", None)
+                                except Exception:
+                                    pass
+                                try:
+                                    setattr(stg, "models_loaded", False)
+                                except Exception:
+                                    pass
+                            finally:
+                                try:
+                                    lk.release()
+                                except Exception:
+                                    pass
 
-                        fn = getattr(stg, "load_models", None)
-                        if callable(fn):
-                            fn()
+                            fn = getattr(stg, "load_models", None)
+                            if callable(fn):
+                                fn()
+                        else:
+                            try:
+                                logs = getattr(_live_runner, "agent_logs", None)
+                                if isinstance(logs, list):
+                                    import datetime as _dt
+                                    t_str = _dt.datetime.now().strftime("%H:%M:%S")
+                                    logs.append(
+                                        {
+                                            "time": t_str,
+                                            "type": "agent",
+                                            "priority": 2,
+                                            "message": "[HotSwap] skipped reload (inference_lock_busy)",
+                                        }
+                                    )
+                            except Exception:
+                                pass
 
                     try:
                         logs = getattr(_live_runner, "agent_logs", None)
@@ -5216,7 +5277,26 @@ async def restart_live(req: LiveRestartRequest):
             tickers = []
 
         new_src = str(getattr(_live_runner, "data_source", "auto") or "auto")
-        new_df = create_data_feed(tickers, source=new_src, interval_sec=5.0)
+        interval_sec = 5.0
+        try:
+            interval_sec = float(getattr(_live_runner, "_data_feed_interval_sec", 5.0) or 5.0)
+        except Exception:
+            interval_sec = 5.0
+
+        spt = 0
+        try:
+            spt = int(getattr(_live_runner, "_md_symbols_per_tick", 0) or 0)
+        except Exception:
+            spt = 0
+        if spt <= 0:
+            try:
+                cfg = _get_secretary_config()
+                trading_cfg = cfg.get("trading") if isinstance(cfg.get("trading"), dict) else {}
+                spt = int(trading_cfg.get("md_symbols_per_tick") or 0)
+            except Exception:
+                spt = 0
+
+        new_df = create_data_feed(tickers, source=new_src, interval_sec=float(interval_sec), symbols_per_tick=int(spt))
         actual_src = None
         try:
             actual_src = str(getattr(new_df, "source", "") or "").strip().lower() or None

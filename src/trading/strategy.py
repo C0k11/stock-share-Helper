@@ -221,8 +221,36 @@ class MultiAgentStrategy:
         if self.models_loaded:
             return
 
+        acquired = False
+        try:
+            lt = float(getattr(self, "_inference_lock_timeout_sec", 1.0) or 1.0)
+            lt = max(0.1, min(lt, 10.0))
+            acquired = bool(self._inference_lock.acquire(timeout=float(lt)))
+        except Exception:
+            acquired = False
+        if not acquired:
+            try:
+                owner = str(getattr(self, "_inference_lock_owner", "") or "")
+                held = 0.0
+                try:
+                    ts0 = float(getattr(self, "_inference_lock_hold_since_ts", 0.0) or 0.0)
+                    if ts0 > 0:
+                        held = float(time.time() - ts0)
+                except Exception:
+                    held = 0.0
+                self._log(f"[LoadModels] Inference lock busy: owner={owner} held={held:.2f}s", priority=2)
+            except Exception:
+                pass
+            return
+
+        try:
+            self._inference_lock_owner = "load_models"
+            self._inference_lock_hold_since_ts = time.time()
+        except Exception:
+            pass
+
         self._log("Loading Multi-Agent models...", priority=1)
-        
+
         try:
             # Import model loading functions
             project_root = Path(__file__).resolve().parents[2]
@@ -321,6 +349,17 @@ class MultiAgentStrategy:
                 import torch
                 if torch.cuda.is_available():
                     torch.cuda.empty_cache()
+            except Exception:
+                pass
+
+        finally:
+            try:
+                self._inference_lock_owner = ""
+                self._inference_lock_hold_since_ts = 0.0
+            except Exception:
+                pass
+            try:
+                self._inference_lock.release()
             except Exception:
                 pass
 
@@ -1870,25 +1909,35 @@ Decide BUY/SELL/HOLD for next 5 days."""
                     self._inference_lock_hold_since_ts = time.time()
                 except Exception:
                     pass
+
+                model0 = getattr(self, "model", None)
+                tok0 = getattr(self, "tokenizer", None)
+                if model0 is None or tok0 is None:
+                    try:
+                        self._log(f"[{expert}] [InferDecodeFail] {ticker} model_or_tokenizer_none", priority=2)
+                    except Exception:
+                        pass
+                    return ""
+
                 import torch
                 from contextlib import nullcontext
 
                 adapter_ctx = nullcontext()
                 if adapter_name in self._adapters_loaded:
-                    self.model.set_adapter(adapter_name)
+                    model0.set_adapter(adapter_name)
                 else:
                     if "scalper" in self._adapters_loaded:
-                        self.model.set_adapter("scalper")
-                    elif hasattr(self.model, "disable_adapter"):
-                        adapter_ctx = self.model.disable_adapter()
+                        model0.set_adapter("scalper")
+                    elif hasattr(model0, "disable_adapter"):
+                        adapter_ctx = model0.disable_adapter()
 
                 with adapter_ctx:
                     t0_tok = time.perf_counter()
-                    text0 = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                    text0 = tok0.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
                     tk_kwargs2: Dict[str, Any] = {"return_tensors": "pt"}
                     if int(getattr(self, "llm_max_context", 0) or 0) > 0:
                         tk_kwargs2.update({"truncation": True, "max_length": int(self.llm_max_context)})
-                    inputs0 = self.tokenizer([text0], **tk_kwargs2).to(self.model.device)
+                    inputs0 = tok0([text0], **tk_kwargs2).to(model0.device)
 
                     try:
                         dt_tok = time.perf_counter() - t0_tok
@@ -1918,7 +1967,7 @@ Decide BUY/SELL/HOLD for next 5 days."""
                         "max_new_tokens": mn0,
                         "temperature": 0.1,
                         "do_sample": False,
-                        "pad_token_id": self.tokenizer.eos_token_id,
+                        "pad_token_id": tok0.eos_token_id,
                     }
                     # max_time may not be supported on some transformers versions.
                     mt = float(getattr(self, "_gen_max_time_sec", 12.0) or 12.0)
@@ -1940,7 +1989,7 @@ Decide BUY/SELL/HOLD for next 5 days."""
                     with torch.no_grad():
                         try:
                             t0_gen = time.perf_counter()
-                            gen_ids0 = self.model.generate(**inputs0, **kw)
+                            gen_ids0 = model0.generate(**inputs0, **kw)
                             try:
                                 dt_gen = time.perf_counter() - t0_gen
                                 self._log(f"[{expert}] [InferGen] {ticker} max_new_tokens={mn0} dt={dt_gen:.2f}s", priority=2)
@@ -1959,7 +2008,7 @@ Decide BUY/SELL/HOLD for next 5 days."""
                                     except Exception:
                                         pass
                                     t0_gen = time.perf_counter()
-                                    gen_ids0 = self.model.generate(**inputs0, **kw)
+                                    gen_ids0 = model0.generate(**inputs0, **kw)
                                     try:
                                         dt_gen = time.perf_counter() - t0_gen
                                         self._log(f"[{expert}] [InferGen] {ticker} max_new_tokens={mn0} dt={dt_gen:.2f}s (no max_time)", priority=2)
@@ -1970,8 +2019,18 @@ Decide BUY/SELL/HOLD for next 5 days."""
                             else:
                                 raise
 
-                    out0 = self.tokenizer.decode(gen_ids0[0][inputs0.input_ids.shape[1]:], skip_special_tokens=True)
-                    return str(out0 or "").strip()
+                    try:
+                        if gen_ids0 is None:
+                            raise ValueError("gen_ids_none")
+                        out_slice = gen_ids0[0][inputs0.input_ids.shape[1]:]
+                        out0 = tok0.decode(out_slice, skip_special_tokens=True)
+                        return str(out0 or "").strip()
+                    except Exception as e:
+                        try:
+                            self._log(f"[{expert}] [InferDecodeFail] {ticker} err={e}", priority=2)
+                        except Exception:
+                            pass
+                        return ""
             finally:
                 try:
                     self._inference_lock_owner = ""
@@ -1979,8 +2038,8 @@ Decide BUY/SELL/HOLD for next 5 days."""
                 except Exception:
                     pass
                 try:
-                    if "scalper" in self._adapters_loaded and self.model is not None:
-                        self.model.set_adapter("scalper")
+                    if "scalper" in self._adapters_loaded and model0 is not None:
+                        model0.set_adapter("scalper")
                 except Exception:
                     pass
                 try:

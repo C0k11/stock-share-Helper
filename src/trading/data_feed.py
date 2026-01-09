@@ -129,6 +129,7 @@ class SimulatedDataFeed(DataFeed):
         tickers: List[str],
         interval_sec: float = 4.0,
         base_prices: Optional[Dict[str, float]] = None,
+        symbols_per_tick: int = 0,
     ):
         super().__init__(tickers, interval_sec)
         import random
@@ -140,12 +141,34 @@ class SimulatedDataFeed(DataFeed):
                 self._base_prices[ticker] = random.uniform(100, 500)
         
         self._current_prices = dict(self._base_prices)
+
+        try:
+            spt = int(symbols_per_tick or 0)
+        except Exception:
+            spt = 0
+        self._symbols_per_tick = max(0, spt)
+        self._rr_index = 0
     
     def _fetch_and_publish(self) -> None:
         """Generate simulated price data"""
         import random
-        
-        for ticker in self.tickers:
+
+        tickers = list(self.tickers)
+        if not tickers:
+            return
+
+        n = int(getattr(self, "_symbols_per_tick", 0) or 0)
+        if n <= 0 or n >= len(tickers):
+            batch = tickers
+        else:
+            start = int(getattr(self, "_rr_index", 0) or 0) % len(tickers)
+            batch = [tickers[(start + i) % len(tickers)] for i in range(n)]
+            try:
+                self._rr_index = (start + n) % len(tickers)
+            except Exception:
+                self._rr_index = 0
+
+        for ticker in batch:
             # Random walk with drift
             current = self._current_prices[ticker]
             change_pct = random.gauss(0, 0.005)  # 0.5% daily vol
@@ -177,6 +200,7 @@ def create_data_feed(
     tickers: List[str],
     source: str = "auto",
     interval_sec: float = 5.0,
+    symbols_per_tick: int = 0,
 ) -> DataFeed:
     """Factory function to create appropriate data feed"""
     
@@ -199,7 +223,7 @@ def create_data_feed(
     
     # Fallback to simulated
     print("[DataFeed] WARNING: Using SIMULATED data (not real market!)")
-    feed = SimulatedDataFeed(tickers, interval_sec)
+    feed = SimulatedDataFeed(tickers, interval_sec, symbols_per_tick=symbols_per_tick)
     try:
         feed.source = "simulated"
     except Exception:
