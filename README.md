@@ -119,6 +119,54 @@ scripts\launch_desktop.ps1
 
 ---
 
+## 当前实验版本（Live / Desktop）对齐说明（2026-01）
+
+本仓库最近在验证“桌面端稳定跑盘 + 稳定收集轨迹数据”的实验版本，关键特性与修复点如下（详细复盘见工程日志对应段落）：
+
+- **yfinance 稳定性**
+  - 轮询支持 `symbols_per_tick` 分批拉取 + 缓存 `yf.Ticker`，降低 Yahoo 限流/空数据概率。
+  - intraday backfill 兼容 `yf.download(group_by='ticker')` 的 MultiIndex 输出，避免回填失败导致图上只有一个点。
+
+- **Live 图表 marker 漂移修复**
+  - 由于 yfinance 常见 15min delay，成交时间可能晚于最后一根 bar。
+  - 前端将 BUY/SELL marker 的时间戳 clamp 到最后一根 bar，避免标记跑到最右侧空白处。
+
+- **System2 Debate 稳定性**
+  - 增加推理预算控制（`max_time_sec`）与锁等待（`lock_wait_sec`），并在模型繁忙时对 Critic/Judge 做轻量重试。
+  - Critic/Judge prompt 强约束：STRICT JSON、无换行、限长。
+  - parse_failed 默认 `HOLD + REJECTED`，避免“System2 失败仍放行交易”。
+
+- **Mari（Secretary）确定性兜底**
+  - 对 `PnL/持仓/谁赚谁亏/最大仓位` 等问题，直接从 live runner 的 `broker.positions` + `price_history` 计算并回答。
+  - 对“大家最看好什么/最不看好什么”，从 `agent_logs` 的 `[Execution] SIGNAL` 统计净 BUY/SELL 输出 Top 3，避免 LLM 跑题。
+
+工程日志入口：`docs/engineering_log_phase2_cn_infusion.md`
+
+---
+
+## 常见问题（Troubleshooting）
+
+### 1) 图表没线 / 只有一个点
+
+- 现象：图表只有网格或只有一个点；Agent Terminal 出现 `[Backfill] yfinance intraday FAIL`。
+- 处理：
+  - 确认 `[DataFeed] source=yfinance interval_sec=... symbols_per_tick=...` 是否为 yfinance。
+  - 适当降低 `md_symbols_per_tick`（例如 4），避免 Yahoo 触发限流。
+  - 如果仍 FAIL，请查看 FAIL 行是否带 `err=...`（工程日志中有对应根因与修复点）。
+
+### 2) BUY/SELL 标记跑到最右侧
+
+- 原因：yfinance 延迟导致成交时间晚于最后一根 bar。
+- 状态：已通过前端 clamp 修复；若仍出现，请确认桌面端已 Ctrl+F5 刷新 dashboard。
+
+### 3) System2 频繁 parse_failed 或 model busy
+
+- 处理：
+  - 先确认已更新到最新代码（System2 已增加重试与更长推理预算）。
+  - 若仍偶发 model busy，这是推理锁竞争的正常保护行为；工程日志有进一步的性能/并发策略建议。
+
+---
+
 ## API（Secretary / Mari）
 
 ### Chat
