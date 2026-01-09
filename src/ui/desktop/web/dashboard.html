@@ -1631,9 +1631,22 @@
         };
         
         logsForPanels.forEach(log => {
-          const msg = (log.message || '').toLowerCase();
+          const msgRaw = String((log && log.message) ? log.message : '');
+          const msg = msgRaw.toLowerCase();
           const isBackfill = msg.includes('backfill');
           const isSystem2 = (msg.includes('system 2') || msg.includes('debate') || msg.includes('judge'));
+
+          // Execution should only capture actual execution lines, not generic "signal" words in reasoning.
+          const isExec = (
+            (!isBackfill && (msg.includes('[fill]') || msg.includes(' fill ') || msg.startsWith('fill '))) ||
+            msg.includes('[execution]') ||
+            msg.includes(' order ') || msg.startsWith('order ') ||
+            log.type === 'fill'
+          );
+          if (!isSystem2 && isExec) {
+            panels.execution.push(log);
+            return;
+          }
 
           // Match to appropriate panel - each log can go to multiple panels if relevant
           if (msg.includes('planner')) panels.planner.push(log);
@@ -1649,14 +1662,6 @@
             panels.chartist.push(log);
           }
 
-          // Execution should only capture actual execution lines, not generic "signal" words in reasoning.
-          const isExec = (
-            (!isBackfill && (msg.includes('[fill]') || msg.includes(' fill ') || msg.startsWith('fill '))) ||
-            msg.includes('[execution]') ||
-            msg.includes(' order ') || msg.startsWith('order ') ||
-            log.type === 'fill'
-          );
-          if (!isSystem2 && isExec) panels.execution.push(log);
         });
         
         // Update each panel
@@ -1679,13 +1684,13 @@
         if (!logsForTerminal.length) {
           el.innerHTML = '<span style="color: #6b7280;">(Waiting for logs...)</span>';
         } else {
-          el.innerHTML = logsForTerminal.slice(-30).map(log => {
-            let color = '#9ca3af';
-            if (log.type === 'fill') color = '#10b981';
-            else if (log.type === 'error') color = '#ef4444';
-            else if (log.priority >= 2) color = '#60a5fa';
-            return `<div style="color: ${color}; margin-bottom: 2px;"><span style="color: #6b7280;">[${log.time}]</span> ${log.message}</div>`;
-          }).join('');
+          const termLimit = 220;
+          const lines = logsForTerminal.slice(-termLimit).map(log => {
+            const t = String((log && log.time) ? log.time : '');
+            const m = String((log && log.message) ? log.message : '');
+            return `[${t}] ${m}`;
+          }).join('\n');
+          el.textContent = lines;
           el.scrollTop = el.scrollHeight;
         }
 

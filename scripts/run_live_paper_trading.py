@@ -1368,7 +1368,31 @@ class LivePaperTradingRunner:
                     if not bool(getattr(stg, "models_loaded", False)):
                         fn = getattr(stg, "load_models", None)
                         if callable(fn):
+                            try:
+                                t_str = datetime.now().strftime("%H:%M:%S")
+                                self.agent_logs.append({
+                                    "time": t_str,
+                                    "type": "agent",
+                                    "priority": 2,
+                                    "message": "[LoadModels] start",
+                                })
+                                if len(self.agent_logs) > 500:
+                                    self.agent_logs = self.agent_logs[-300:]
+                            except Exception:
+                                pass
                             fn()
+                            try:
+                                t_str = datetime.now().strftime("%H:%M:%S")
+                                self.agent_logs.append({
+                                    "time": t_str,
+                                    "type": "agent",
+                                    "priority": 2,
+                                    "message": "[LoadModels] done",
+                                })
+                                if len(self.agent_logs) > 500:
+                                    self.agent_logs = self.agent_logs[-300:]
+                            except Exception:
+                                pass
                     fn2 = getattr(stg, "_warmup_kv_cache", None)
                     if callable(fn2):
                         try:
