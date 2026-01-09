@@ -340,6 +340,7 @@ class LivePaperTradingRunner:
         data_feed_interval_sec = None
         md_queue_limit = None
         md_pending_limit = None
+        md_symbols_per_tick = None
         tickers_cfg = None
         effective_scalper = None
         effective_analyst = None
@@ -385,6 +386,7 @@ class LivePaperTradingRunner:
                 data_feed_interval_sec = trading_cfg.get("data_feed_interval_sec")
                 md_queue_limit = trading_cfg.get("md_queue_limit")
                 md_pending_limit = trading_cfg.get("md_pending_limit")
+                md_symbols_per_tick = trading_cfg.get("md_symbols_per_tick")
                 tickers_cfg = trading_cfg.get("tickers")
                 try:
                     self._offline_playback_file = str(trading_cfg.get("offline_playback_file") or "").strip() or None
@@ -575,6 +577,11 @@ class LivePaperTradingRunner:
             self._md_pending_limit = int(md_pending_limit) if md_pending_limit is not None else 80
         except Exception:
             self._md_pending_limit = 80
+
+        try:
+            self._md_symbols_per_tick = int(md_symbols_per_tick) if md_symbols_per_tick is not None else 0
+        except Exception:
+            self._md_symbols_per_tick = 0
 
         try:
             self._data_feed_interval_sec = float(data_feed_interval_sec) if data_feed_interval_sec is not None else 5.0
@@ -1349,6 +1356,7 @@ class LivePaperTradingRunner:
             self.strategy.tickers,
             source=self.data_source,
             interval_sec=float(getattr(self, "_data_feed_interval_sec", 5.0) or 5.0),
+            symbols_per_tick=int(getattr(self, "_md_symbols_per_tick", 0) or 0),
         )
         self.data_feed.subscribe(self._on_market_data)
         self.data_feed.start()
