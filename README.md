@@ -67,6 +67,58 @@ scripts\launch_desktop.ps1
 
 ---
 
+## 实盘数据采集（Paper Trading / News / VLM / RL）
+
+本节只保留“操作入口”。工程细节与问题复盘见工程日志：`docs/engineering_log_phase2_cn_infusion.md`。
+
+### 录制（recording）
+
+默认 live 跑盘会把 session 录成 jsonl：
+
+- `data/paper_trading/recordings/session_YYYYMMDD_HHMMSS.jsonl`
+
+配置：
+
+- `configs/secretary.yaml` -> `trading.record_enabled: true`
+
+录制内容包括：
+
+- `market_data`（OHLCV + time）
+- `news_signal`（按 ticker|date 去重）
+- `signal/order/fill`（可用于复现实验）
+
+### 回放（replay）
+
+把 offline 回放源切到录制文件：
+
+- `configs/secretary.yaml` -> `trading.offline_playback_file: 'data/paper_trading/recordings/session_*.jsonl'`
+
+然后在 UI 里切换到 offline（或调用 action `set_mode`）。
+
+### RL 数据落盘验证
+
+开启在线 RL（按钮或 action `start_rl`）后，成交闭环会落盘两份 jsonl：
+
+- `data/rl_experiences/experiences.jsonl`
+- `data/dpo_preferences/completed_decisions.jsonl`
+
+只要这些文件的行数持续增长，就说明正在采集训练样本。
+
+### 性能/推理参数（常用）
+
+`configs/secretary.yaml`：
+
+- `trading.perf.*`：backlog 过大时的降级/跳过阈值（避免误伤 VLM/Scalper）
+- `trading.infer.*`：scalper/analyst 的 tick 推理预算（减少 InferTimeout 回退）
+- `trading.news.*`：RSS/历史新闻源与时间对齐（wall vs market）
+
+如果你看到：
+
+- `InferTimeout ... budget=...`：提高 `trading.infer.tick_infer_budget_sec`
+- `Chartist (VLM): no_image/render_fail`：优先检查价格历史是否足够、VLM 是否加载成功
+
+---
+
 ## API（Secretary / Mari）
 
 ### Chat

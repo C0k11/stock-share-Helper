@@ -10,8 +10,12 @@ from __future__ import annotations
 
 import json
 import importlib
+import argparse
+import importlib
+import json
 import os
 import random
+from collections import deque
 import socket
 import sys
 import tempfile
@@ -317,9 +321,13 @@ class LivePaperTradingRunner:
         moe_analyst = None
         moe_secretary = None
         moe_system2 = None
+        moe_news = None
         chartist_vlm_cfg = None
+        news_cfg = None
+        perf_cfg = None
         llm_max_context = None
         llm_max_new_tokens = None
+        infer_cfg = None
         all_agents_mode = None
         committee_policy = None
         load_4bit = None
@@ -327,6 +335,12 @@ class LivePaperTradingRunner:
         planner_sft_model = None
         gatekeeper_model = None
         gatekeeper_threshold = None
+        system2_lenient = None
+        sim_aggressive_entry = None
+        data_feed_interval_sec = None
+        md_queue_limit = None
+        md_pending_limit = None
+        tickers_cfg = None
         effective_scalper = None
         effective_analyst = None
         try:
@@ -335,21 +349,51 @@ class LivePaperTradingRunner:
                 import yaml
                 cfg = yaml.safe_load(cfg_path.read_text(encoding="utf-8"))
                 trading_cfg = cfg.get("trading") if isinstance(cfg, dict) and isinstance(cfg.get("trading"), dict) else {}
+                try:
+                    ic = trading_cfg.get("initial_cash")
+                    if ic is not None:
+                        initial_cash = float(ic)
+                except Exception:
+                    pass
                 base_model = str(trading_cfg.get("base_model") or "").strip() or None
                 moe_scalper = str(trading_cfg.get("moe_scalper") or "").strip() or None
                 moe_analyst = str(trading_cfg.get("moe_analyst") or "").strip() or None
                 moe_secretary = str(trading_cfg.get("moe_secretary") or "").strip() or None
                 moe_system2 = str(trading_cfg.get("moe_system2") or "").strip() or None
+                moe_news = str(trading_cfg.get("moe_news") or "").strip() or None
                 chartist_vlm_cfg = trading_cfg.get("chartist_vlm")
+                news_cfg = trading_cfg.get("news")
+                perf_cfg = trading_cfg.get("perf")
                 llm_max_context = trading_cfg.get("llm_max_context")
                 llm_max_new_tokens = trading_cfg.get("llm_max_new_tokens")
+                infer_cfg = trading_cfg.get("infer")
                 all_agents_mode = trading_cfg.get("all_agents_mode")
                 committee_policy = str(trading_cfg.get("committee_policy") or "").strip() or None
+                try:
+                    lm = trading_cfg.get("load_models")
+                    if lm is not None:
+                        load_models = bool(lm)
+                except Exception:
+                    pass
                 load_4bit = trading_cfg.get("load_4bit")
                 planner_policy = str(trading_cfg.get("planner_policy") or "").strip() or None
                 planner_sft_model = str(trading_cfg.get("planner_sft_model") or "").strip() or None
                 gatekeeper_model = str(trading_cfg.get("gatekeeper_model") or "").strip() or None
                 gatekeeper_threshold = trading_cfg.get("gatekeeper_threshold")
+                system2_lenient = trading_cfg.get("system2_lenient")
+                sim_aggressive_entry = trading_cfg.get("sim_aggressive_entry")
+                data_feed_interval_sec = trading_cfg.get("data_feed_interval_sec")
+                md_queue_limit = trading_cfg.get("md_queue_limit")
+                md_pending_limit = trading_cfg.get("md_pending_limit")
+                tickers_cfg = trading_cfg.get("tickers")
+                try:
+                    self._offline_playback_file = str(trading_cfg.get("offline_playback_file") or "").strip() or None
+                except Exception:
+                    self._offline_playback_file = None
+                try:
+                    self._record_enabled = bool(trading_cfg.get("record_enabled", True))
+                except Exception:
+                    self._record_enabled = True
 
                 llm_cfg = cfg.get("llm") if isinstance(cfg, dict) and isinstance(cfg.get("llm"), dict) else {}
                 lazy_load = llm_cfg.get("lazy_load")
@@ -376,6 +420,13 @@ class LivePaperTradingRunner:
         except Exception:
             pass
 
+        # Apply potential initial_cash override from config to the already-created broker.
+        try:
+            self.broker.cash = float(initial_cash)
+            self.broker.initial_cash = float(initial_cash)
+        except Exception:
+            pass
+
         effective_scalper = moe_scalper
         effective_analyst = moe_analyst
 
@@ -390,8 +441,19 @@ class LivePaperTradingRunner:
             st_kwargs["moe_secretary"] = moe_secretary
         if isinstance(moe_system2, str) and moe_system2:
             st_kwargs["moe_system2"] = moe_system2
+        if isinstance(moe_news, str) and moe_news:
+            st_kwargs["moe_news"] = moe_news
         if isinstance(chartist_vlm_cfg, dict) and chartist_vlm_cfg:
             st_kwargs["chartist_vlm_cfg"] = dict(chartist_vlm_cfg)
+        if isinstance(news_cfg, dict) and news_cfg:
+            st_kwargs["news_cfg"] = dict(news_cfg)
+        if isinstance(perf_cfg, dict) and perf_cfg:
+            st_kwargs["perf_cfg"] = dict(perf_cfg)
+        try:
+            if isinstance(tickers_cfg, list) and tickers_cfg:
+                st_kwargs["tickers"] = [str(x or "").upper().strip() for x in list(tickers_cfg) if str(x or "").strip()]
+        except Exception:
+            pass
         try:
             if llm_max_context is not None:
                 st_kwargs["llm_max_context"] = int(llm_max_context)
@@ -415,8 +477,26 @@ class LivePaperTradingRunner:
                 st_kwargs["gatekeeper_threshold"] = float(gatekeeper_threshold)
         except Exception:
             pass
+        try:
+            if isinstance(system2_lenient, bool):
+                st_kwargs["system2_lenient"] = bool(system2_lenient)
+        except Exception:
+            pass
+        try:
+            if isinstance(sim_aggressive_entry, bool):
+                st_kwargs["sim_aggressive_entry"] = bool(sim_aggressive_entry)
+        except Exception:
+            pass
 
         self.strategy = MultiAgentStrategy(self.engine, **st_kwargs)
+        try:
+            if isinstance(infer_cfg, dict):
+                if infer_cfg.get("tick_infer_budget_sec") is not None:
+                    setattr(self.strategy, "_tick_infer_budget_sec", float(infer_cfg.get("tick_infer_budget_sec")))
+                if infer_cfg.get("gen_max_time_sec") is not None:
+                    setattr(self.strategy, "_gen_max_time_sec", float(infer_cfg.get("gen_max_time_sec")))
+        except Exception:
+            pass
         try:
             if isinstance(all_agents_mode, bool):
                 setattr(self.strategy, "all_agents_mode", bool(all_agents_mode))
@@ -443,8 +523,8 @@ class LivePaperTradingRunner:
         self.pnl_history: List[Dict] = []
         self.price_history: Dict[str, List[Dict]] = {}  # For UI charts
         self.agent_logs: List[Dict] = []  # For dashboard terminal
-        self.initial_cash = initial_cash
-        self.last_nav = initial_cash
+        self.initial_cash = float(initial_cash)
+        self.last_nav = float(initial_cash)
         self.currency = "CAD"
         
         # Significant event thresholds
@@ -464,9 +544,30 @@ class LivePaperTradingRunner:
         self._offline_thread: Optional[threading.Thread] = None
         self._offline_running = False
 
+        self._record_enabled: bool = True
+        self._record_path: Optional[Path] = None
+        self._record_fp: Any = None
+        self._record_last_news_keys: set[str] = set()
+        self._offline_playback_file: Optional[str] = None
+
         self._started = False
 
         self._md_counter = 0
+
+        self._md_pending: deque = deque()
+        try:
+            self._md_queue_limit = int(md_queue_limit) if md_queue_limit is not None else 3
+        except Exception:
+            self._md_queue_limit = 3
+        try:
+            self._md_pending_limit = int(md_pending_limit) if md_pending_limit is not None else 80
+        except Exception:
+            self._md_pending_limit = 80
+
+        try:
+            self._data_feed_interval_sec = float(data_feed_interval_sec) if data_feed_interval_sec is not None else 5.0
+        except Exception:
+            self._data_feed_interval_sec = 5.0
 
         self._backfill_last_attempt_ts: float = 0.0
         self._backfill_cooldown_sec: float = 180.0
@@ -488,14 +589,90 @@ class LivePaperTradingRunner:
         self._original_handle = self.engine._handle_event
         self.engine._handle_event = self._wrapped_handle_event
 
+        # Session recorder (jsonl)
+        try:
+            if bool(getattr(self, "_record_enabled", True)):
+                rec_dir = project_root / "data" / "paper_trading" / "recordings"
+                rec_dir.mkdir(parents=True, exist_ok=True)
+                ts0 = datetime.now().strftime("%Y%m%d_%H%M%S")
+                self._record_path = rec_dir / f"session_{ts0}.jsonl"
+                self._record_fp = self._record_path.open("a", encoding="utf-8")
+                t_str = datetime.now().strftime("%H:%M:%S")
+                self.agent_logs.append({
+                    "time": t_str,
+                    "type": "system",
+                    "priority": 2,
+                    "message": f"[Record] started: {self._record_path.name}",
+                })
+        except Exception:
+            self._record_fp = None
+            self._record_path = None
+
+    def _flush_md_pending(self) -> None:
+        try:
+            q = getattr(self.engine, "events", None)
+            qsz = int(q.qsize()) if (q is not None and hasattr(q, "qsize")) else 0
+        except Exception:
+            qsz = 0
+
+        pushed = 0
+        while qsz < int(getattr(self, "_md_queue_limit", 3) or 3) and self._md_pending:
+            try:
+                bar = self._md_pending.popleft()
+            except Exception:
+                break
+            try:
+                event = Event(
+                    EventType.MARKET_DATA,
+                    datetime.now(),
+                    bar,
+                    priority=0,
+                )
+                self.engine.push_event(event)
+                pushed += 1
+            except Exception:
+                break
+
+            try:
+                qsz = int(q.qsize()) if (q is not None and hasattr(q, "qsize")) else qsz + 1
+            except Exception:
+                qsz += 1
+
+        if pushed <= 0:
+            return
+
     def _wrapped_handle_event(self, event: Event) -> None:
         """Wrapped event handler - logs to agent_logs for dashboard, minimal terminal output"""
         self._original_handle(event)
         t_str = event.timestamp.strftime("%H:%M:%S")
 
+        # Keep the engine busy: as soon as one MARKET_DATA tick is processed, enqueue the next
+        # pending tick (bounded by _md_queue_limit). This reduces md_pending overflow.
+        try:
+            if event.type == EventType.MARKET_DATA:
+                self._flush_md_pending()
+        except Exception:
+            pass
+
         if event.type == EventType.LOG:
             msg = str(event.payload)
             priority = event.priority
+
+            # Record news logs (for later analysis) without blowing up disk.
+            try:
+                if self._record_fp is not None:
+                    m0 = str(msg or "")
+                    ml = m0.lower()
+                    if "[news]" in ml or "[newssignal]" in ml:
+                        self._record_fp.write(json.dumps({
+                            "type": "log",
+                            "ts": event.timestamp.isoformat(),
+                            "message": m0,
+                            "priority": int(priority),
+                        }, ensure_ascii=False) + "\n")
+                        self._record_fp.flush()
+            except Exception:
+                pass
             
             # Store in agent_logs for dashboard terminal
             self.agent_logs.append({
@@ -540,6 +717,17 @@ class LivePaperTradingRunner:
             except Exception:
                 pass
 
+            try:
+                if self._record_fp is not None and isinstance(p, dict):
+                    self._record_fp.write(json.dumps({
+                        "type": et.lower(),
+                        "ts": event.timestamp.isoformat(),
+                        "payload": p,
+                    }, ensure_ascii=False) + "\n")
+                    self._record_fp.flush()
+            except Exception:
+                pass
+
         elif event.type == EventType.FILL:
             fill = event.payload
             ticker = fill.get("ticker", "?")
@@ -560,6 +748,17 @@ class LivePaperTradingRunner:
             self.trade_log.append(trade_record)
 
             try:
+                if self._record_fp is not None and isinstance(fill, dict):
+                    self._record_fp.write(json.dumps({
+                        "type": "fill",
+                        "ts": event.timestamp.isoformat(),
+                        "payload": dict(fill),
+                    }, ensure_ascii=False) + "\n")
+                    self._record_fp.flush()
+            except Exception:
+                pass
+
+            try:
                 self.agent_logs.append({
                     "time": t_str,
                     "type": "fill",
@@ -573,17 +772,37 @@ class LivePaperTradingRunner:
             
             # Online RL: Track trades for learning
             if action == "BUY":
+                try:
+                    md = {
+                        "expert": fill.get("expert", "unknown"),
+                        "analysis": fill.get("analysis", ""),
+                        "trace_id": fill.get("trace_id"),
+                        "trace_ids": fill.get("trace_ids"),
+                        "chart_score": fill.get("chart_score"),
+                        "news_score": fill.get("news_score"),
+                        "news_sentiment": fill.get("news_sentiment"),
+                        "news_summary": fill.get("news_summary"),
+                    }
+                except Exception:
+                    md = {}
                 self._pending_trades[ticker] = {
                     "trade_id": trade_id,
                     "entry_price": price,
                     "shares": shares,
                     "entry_time": datetime.now(),
                     "state": self._get_current_state(ticker),
+                    "metadata": md,
                 }
                 # Log decision for DPO preference pairs
                 self.rl_manager.preference_logger.log_decision(
                     trade_id=trade_id,
-                    context={"ticker": ticker, "price": price},
+                    context={
+                        "ticker": ticker,
+                        "price": price,
+                        "trace_id": fill.get("trace_id"),
+                        "trace_ids": fill.get("trace_ids"),
+                        "chart_score": fill.get("chart_score"),
+                    },
                     decision=action,
                     reasoning=fill.get("analysis", ""),
                     expert=fill.get("expert", "unknown"),
@@ -602,6 +821,7 @@ class LivePaperTradingRunner:
                     drawdown_pct=0,
                     hold_bars=hold_bars,
                     exit_reason="signal",
+                    metadata=pending.get("metadata") if isinstance(pending, dict) else None,
                 )
             
             # Log to agent_logs
@@ -751,15 +971,113 @@ class LivePaperTradingRunner:
             self.price_history[ticker] = self.price_history[ticker][-800:]
         
         print(f">> {ticker} @ ${price:.2f}")
-        
-        # Push to engine
-        event = Event(
-            EventType.MARKET_DATA,
-            datetime.now(),
-            bar,
-            priority=0,
-        )
-        self.engine.push_event(event)
+
+        # Record the market bar (raw input for future replay)
+        try:
+            if self._record_fp is not None:
+                self._record_fp.write(json.dumps({
+                    "type": "market_data",
+                    "ts": time_str,
+                    "bar": bar,
+                }, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+
+        # Record the news signal actually used by strategy cache (once per ticker/date)
+        try:
+            if self._record_fp is not None and getattr(self, "strategy", None) is not None:
+                asof_dt = None
+                try:
+                    asof_dt = datetime.fromisoformat(str(time_str))
+                except Exception:
+                    asof_dt = None
+                ns = {}
+                try:
+                    ns = self.strategy._get_news_signal(ticker, asof_time=asof_dt)  # non-blocking cache read
+                except Exception:
+                    ns = {}
+                if isinstance(ns, dict) and ns:
+                    k0 = ticker
+                    try:
+                        if isinstance(ns.get("asof"), str) and ns.get("asof"):
+                            ad = datetime.fromisoformat(str(ns.get("asof")))
+                            k0 = f"{ticker}|{ad.strftime('%Y-%m-%d')}"
+                    except Exception:
+                        k0 = ticker
+                    if k0 not in self._record_last_news_keys:
+                        self._record_last_news_keys.add(k0)
+                        self._record_fp.write(json.dumps({
+                            "type": "news_signal",
+                            "ts": str(ns.get("asof") or time_str),
+                            "ticker": ticker,
+                            "signal": ns,
+                        }, ensure_ascii=False) + "\n")
+        except Exception:
+            pass
+
+        try:
+            if self._record_fp is not None:
+                self._record_fp.flush()
+        except Exception:
+            pass
+
+        # Small-window feeding: buffer ticks and only enqueue when engine queue is small.
+        try:
+            # Deduplicate pending bars per ticker: keep only the most recent bar for each ticker.
+            replaced = False
+            try:
+                for i in range(len(self._md_pending) - 1, -1, -1):
+                    try:
+                        b0 = self._md_pending[i]
+                    except Exception:
+                        b0 = None
+                    try:
+                        if isinstance(b0, dict) and str(b0.get("ticker") or "").upper().strip() == ticker:
+                            self._md_pending[i] = bar
+                            replaced = True
+                            break
+                    except Exception:
+                        continue
+            except Exception:
+                replaced = False
+
+            if not replaced:
+                self._md_pending.append(bar)
+            try:
+                if getattr(self, "strategy", None) is not None:
+                    setattr(self.strategy, "_md_backlog_hint", int(len(self._md_pending)))
+            except Exception:
+                pass
+            if len(self._md_pending) > int(getattr(self, "_md_pending_limit", 80) or 80):
+                # Drop oldest to keep recent market data.
+                drop_n = len(self._md_pending) - int(getattr(self, "_md_pending_limit", 80) or 80)
+                for _ in range(max(1, int(drop_n))):
+                    try:
+                        self._md_pending.popleft()
+                    except Exception:
+                        break
+
+                try:
+                    self._md_counter = int(getattr(self, "_md_counter", 0) or 0) + 1
+                    if self._md_counter % 10 == 0:
+                        t_str = datetime.now().strftime("%H:%M:%S")
+                        self.agent_logs.append({
+                            "time": t_str,
+                            "type": "agent",
+                            "priority": 2,
+                            "message": f"[Engine] md_pending overflow: dropped old ticks (pending={len(self._md_pending)})",
+                        })
+                        if len(self.agent_logs) > 500:
+                            self.agent_logs = self.agent_logs[-300:]
+                except Exception:
+                    pass
+        except Exception:
+            return
+
+        try:
+            self._flush_md_pending()
+        except Exception:
+            return
 
         try:
             self._md_counter = int(getattr(self, "_md_counter", 0) or 0) + 1
@@ -1018,7 +1336,7 @@ class LivePaperTradingRunner:
         self.data_feed = create_data_feed(
             self.strategy.tickers,
             source=self.data_source,
-            interval_sec=5.0,
+            interval_sec=float(getattr(self, "_data_feed_interval_sec", 5.0) or 5.0),
         )
         self.data_feed.subscribe(self._on_market_data)
         self.data_feed.start()
@@ -1167,6 +1485,14 @@ class LivePaperTradingRunner:
         
         # Save paper trading data for system upgrade
         self._save_trading_data()
+
+        try:
+            if self._record_fp is not None:
+                self._record_fp.flush()
+                self._record_fp.close()
+        except Exception:
+            pass
+        self._record_fp = None
         print("System Shutdown.")
         self._started = False
     
@@ -1194,8 +1520,21 @@ class LivePaperTradingRunner:
         })
         
         def _playback_thread():
-            # Load historical data from results
-            data_file = project_root / "data" / "historical" / "sample_ohlc.csv"
+            # Prefer replay from a recorded session jsonl.
+            data_file = None
+            try:
+                if isinstance(getattr(self, "_offline_playback_file", None), str) and self._offline_playback_file:
+                    p0 = Path(str(self._offline_playback_file))
+                    if not p0.is_absolute():
+                        p0 = (project_root / p0).resolve()
+                    if p0.exists():
+                        data_file = p0
+            except Exception:
+                data_file = None
+
+            if data_file is None:
+                # Load historical data from results
+                data_file = project_root / "data" / "historical" / "sample_ohlc.csv"
             if not data_file.exists():
                 # Try to find any CSV in data folder
                 for f in (project_root / "data").rglob("*.csv"):
@@ -1214,26 +1553,76 @@ class LivePaperTradingRunner:
                 return
             
             try:
-                import pandas as pd
-                df = pd.read_csv(data_file)
-                
-                for _, row in df.iterrows():
-                    if not self._offline_running:
-                        break
+                # jsonl recording replay
+                if str(data_file).lower().endswith(".jsonl"):
+                    lines = data_file.read_text(encoding="utf-8", errors="ignore").splitlines()
+                    for ln in lines:
+                        if not self._offline_running:
+                            break
+                        if not ln.strip():
+                            continue
+                        try:
+                            obj = json.loads(ln)
+                        except Exception:
+                            continue
+                        tp = str(obj.get("type") or "").strip().lower()
+                        if tp == "news_signal":
+                            try:
+                                tk0 = str(obj.get("ticker") or "").upper().strip()
+                                sig0 = obj.get("signal") if isinstance(obj.get("signal"), dict) else None
+                                if tk0 and isinstance(sig0, dict) and getattr(self, "strategy", None) is not None:
+                                    fn = getattr(self.strategy, "inject_news_signal", None)
+                                    if callable(fn):
+                                        fn(tk0, sig0)
+                            except Exception:
+                                pass
+                            continue
+                        if tp != "market_data":
+                            continue
+                        bar0 = obj.get("bar") if isinstance(obj.get("bar"), dict) else {}
+                        if not isinstance(bar0, dict):
+                            continue
+                        self._on_market_data(dict(bar0))
+                        time.sleep(0.2)
+                else:
+                    import pandas as pd
+                    df = pd.read_csv(data_file)
                     
-                    ticker = row.get("ticker", row.get("symbol", "NVDA"))
-                    data = {
-                        "ticker": str(ticker).upper(),
-                        "open": float(row.get("open", row.get("Open", 0))),
-                        "high": float(row.get("high", row.get("High", 0))),
-                        "low": float(row.get("low", row.get("Low", 0))),
-                        "close": float(row.get("close", row.get("Close", 0))),
-                        "volume": float(row.get("volume", row.get("Volume", 0))),
-                        "time": datetime.now(),
-                    }
-                    
-                    self._on_market_data(data)
-                    time.sleep(0.5)  # Simulate real-time pace
+                    for _, row in df.iterrows():
+                        if not self._offline_running:
+                            break
+                        
+                        ticker = row.get("ticker", row.get("symbol", "NVDA"))
+                        t_row = None
+                        try:
+                            for k in ("time", "datetime", "date", "timestamp"):
+                                if k in row and str(row.get(k) or "").strip():
+                                    t_row = row.get(k)
+                                    break
+                        except Exception:
+                            t_row = None
+                        try:
+                            if t_row is not None:
+                                t_parsed = pd.to_datetime(t_row, errors="coerce")
+                                if pd.notna(t_parsed):
+                                    t_row = t_parsed.to_pydatetime()
+                                else:
+                                    t_row = None
+                        except Exception:
+                            t_row = None
+
+                        data = {
+                            "ticker": str(ticker).upper(),
+                            "open": float(row.get("open", row.get("Open", 0))),
+                            "high": float(row.get("high", row.get("High", 0))),
+                            "low": float(row.get("low", row.get("Low", 0))),
+                            "close": float(row.get("close", row.get("Close", 0))),
+                            "volume": float(row.get("volume", row.get("Volume", 0))),
+                            "time": t_row or datetime.now(),
+                        }
+                        
+                        self._on_market_data(data)
+                        time.sleep(0.5)  # Simulate real-time pace
                 
                 self.agent_logs.append({
                     "time": datetime.now().strftime("%H:%M:%S"),

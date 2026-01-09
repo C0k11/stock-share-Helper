@@ -118,6 +118,7 @@ function Stop-ProcessByPort {
 }
 
 $autoNoLLM = $false
+$autoNoVoice = $false
 try {
     $cfgPath = Join-Path $repo "configs\secretary.yaml"
     if (Test-Path $cfgPath) {
@@ -129,6 +130,14 @@ try {
                 $autoNoLLM = $true
             }
         }
+
+        $m2 = [regex]::Match($raw, '(?ms)^\s*voice\s*:\s*.*?^\s*enabled\s*:\s*"?(true|false|1|0|yes|no|on|off)"?')
+        if ($m2.Success) {
+            $v0 = ($m2.Groups[1].Value | ForEach-Object { $_.ToString().Trim().ToLower() })
+            if ($v0 -in @('false','0','no','off')) {
+                $autoNoVoice = $true
+            }
+        }
     }
 } catch {
 }
@@ -136,6 +145,11 @@ try {
 if ($autoNoLLM -and (-not $NoLLM)) {
     Write-Host "[Auto] secretary.yaml llm.mode=local -> skip Ollama" -ForegroundColor DarkGray
     $NoLLM = $true
+}
+
+if ($autoNoVoice -and (-not $NoVoice)) {
+    Write-Host "[Auto] secretary.yaml voice.enabled=false -> skip GPT-SoVITS" -ForegroundColor DarkGray
+    $NoVoice = $true
 }
 
 # 0) Start Ollama LLM Server
