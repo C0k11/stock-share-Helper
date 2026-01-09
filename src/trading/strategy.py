@@ -2075,6 +2075,13 @@ Decide BUY/SELL/HOLD for next 5 days."""
                         pass
 
                     mn0 = int(getattr(self, "llm_max_new_tokens", 256) or 256)
+                    try:
+                        if str(expert or "").strip().lower() == "scalper":
+                            mn0 = int(getattr(self, "llm_max_new_tokens_scalper", mn0) or mn0)
+                        elif str(expert or "").strip().lower() == "analyst":
+                            mn0 = int(getattr(self, "llm_max_new_tokens_analyst", mn0) or mn0)
+                    except Exception:
+                        pass
                     cap_tokens = int(getattr(self, "_max_new_tokens_cap", 512) or 512)
                     cap_tokens = max(64, cap_tokens)
                     mn0 = max(32, min(mn0, cap_tokens))
@@ -2097,6 +2104,12 @@ Decide BUY/SELL/HOLD for next 5 days."""
                         "do_sample": False,
                         "pad_token_id": tok0.eos_token_id,
                     }
+                    try:
+                        rp = float(getattr(self, "llm_repetition_penalty", 1.0) or 1.0)
+                        if rp and rp > 0 and abs(rp - 1.0) >= 1e-6:
+                            kw["repetition_penalty"] = float(rp)
+                    except Exception:
+                        pass
                     # max_time may not be supported on some transformers versions.
                     mt = float(getattr(self, "_gen_max_time_sec", 12.0) or 12.0)
                     try:
@@ -2500,7 +2513,7 @@ Decide BUY/SELL/HOLD for next 5 days."""
 
         critic_sys = (
             "You are a strict trading decision critic.\n"
-            "Response Format (STRICT JSON ONLY): {\"accept\": true|false, \"suggested_decision\": \"BUY\"|\"SELL\"|\"HOLD\"|\"CLEAR\", \"reasons\": [..3 strings..]}"
+            "Response Format (STRICT JSON ONLY): {\"accept\": true|false, \"suggested_decision\": \"BUY\"|\"SELL\"|\"HOLD\"|\"CLEAR\", \"pro\": \"...\", \"con\": \"...\", \"reasons\": [..3 strings..]}"
         )
         critic_user = "\n".join(lines)
 
@@ -2539,8 +2552,18 @@ Decide BUY/SELL/HOLD for next 5 days."""
             if not isinstance(rs, list):
                 rs = []
             rs2 = [str(x or "").strip() for x in rs if str(x or "").strip()]
+            pro = str(critic_json.get("pro") or "").strip()
+            con = str(critic_json.get("con") or "").strip()
+            if (not pro) and rs2:
+                pro = rs2[0]
+            if (not con) and len(rs2) >= 2:
+                con = rs2[1]
             msg = f"System 2 (Critic): accept={acc} suggested={sug} reasons={rs2[:3]}"
             self._log(msg[:1200], priority=2)
+            if pro:
+                self._log((f"System 2 [PRO]: {pro}")[:1600], priority=2)
+            if con:
+                self._log((f"System 2 [CON]: {con}")[:1600], priority=2)
         except Exception:
             pass
 
