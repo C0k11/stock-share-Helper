@@ -1944,21 +1944,10 @@ def _execute_action(*, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         rl_manager = getattr(_live_runner, "rl_manager", None)
         if rl_manager is None:
             return {"ok": False, "error": "rl manager not initialized"}
-        strategy = getattr(_live_runner, "strategy", None)
-        if strategy is not None:
-            try:
-                setattr(_live_runner, "load_models", True)
-            except Exception:
-                pass
-            try:
-                if not bool(getattr(strategy, "models_loaded", False)):
-                    fn = getattr(strategy, "load_models", None)
-                    if callable(fn):
-                        fn()
-            except Exception:
-                pass
+        # Collection-only: enable experience logging, but do NOT force model loading
+        # and do NOT enable online updates/training.
         rl_manager.enabled = True
-        rl_manager.enable_updates = True
+        rl_manager.enable_updates = False
         rl_manager.learning_rate = 0.001
         return {"ok": True, "enabled": True}
 
@@ -1969,6 +1958,10 @@ def _execute_action(*, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         if rl_manager is None:
             return {"ok": False, "error": "rl manager not initialized"}
         rl_manager.enabled = False
+        try:
+            rl_manager.enable_updates = False
+        except Exception:
+            pass
         return {"ok": True, "enabled": False}
 
     if a in {"set_mode", "trading_mode"}:
@@ -5443,19 +5436,8 @@ async def start_online_rl():
         _SOVITS_RESUME_AFTER_RL = False
         _SOVITS_RESTARTED_AFTER_RL = False
 
-    try:
-        setattr(_live_runner, "load_models", True)
-    except Exception:
-        pass
-
-    try:
-        stg = getattr(_live_runner, "strategy", None)
-        if stg is not None and (not bool(getattr(stg, "models_loaded", False))):
-            fn = getattr(stg, "load_models", None)
-            if callable(fn):
-                fn()
-    except Exception:
-        pass
+    # Collection-only: enable experience logging, but do NOT force model loading
+    # and do NOT enable online updates/training.
 
     try:
         setattr(rl_manager, "enabled", True)
@@ -5463,7 +5445,7 @@ async def start_online_rl():
         pass
 
     try:
-        setattr(rl_manager, "enable_updates", True)
+        setattr(rl_manager, "enable_updates", False)
     except Exception:
         pass
 
@@ -5507,6 +5489,10 @@ async def stop_online_rl():
     if rl_manager:
         try:
             setattr(rl_manager, "enabled", False)
+        except Exception:
+            pass
+        try:
+            setattr(rl_manager, "enable_updates", False)
         except Exception:
             pass
 
