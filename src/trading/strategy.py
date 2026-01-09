@@ -393,7 +393,10 @@ class MultiAgentStrategy:
 
         acquired = False
         try:
-            acquired = bool(self._inference_lock.acquire(blocking=False))
+            lt = float(getattr(self, "_inference_lock_timeout_sec", 3.0) or 3.0)
+            # Chat/generic requests should wait for the lock instead of failing immediately.
+            wait_time = max(10.0, min(20.0, float(lt) * 2.0))
+            acquired = bool(self._inference_lock.acquire(timeout=float(wait_time)))
         except Exception:
             acquired = False
         if not acquired:
@@ -415,12 +418,17 @@ class MultiAgentStrategy:
 
                 # Context manager for adapter usage
                 adapter_ctx = nullcontext()
+
+                model0 = getattr(self, "model", None)
+                tok0 = getattr(self, "tokenizer", None)
+                if model0 is None or tok0 is None:
+                    return ""
                 if target_adapter:
-                    self.model.set_adapter(target_adapter)
+                    model0.set_adapter(target_adapter)
                 else:
                     # Use base model
-                    if hasattr(self.model, "disable_adapter"):
-                        adapter_ctx = self.model.disable_adapter()
+                    if hasattr(model0, "disable_adapter"):
+                        adapter_ctx = model0.disable_adapter()
 
                 with adapter_ctx:
                     messages = []
@@ -428,11 +436,11 @@ class MultiAgentStrategy:
                         messages.append({"role": "system", "content": system_prompt})
                     messages.append({"role": "user", "content": user_msg})
 
-                    text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
+                    text = tok0.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
                     tk_kwargs: Dict[str, Any] = {"return_tensors": "pt"}
                     if int(getattr(self, "llm_max_context", 0) or 0) > 0:
                         tk_kwargs.update({"truncation": True, "max_length": int(self.llm_max_context)})
-                    inputs = self.tokenizer([text], **tk_kwargs).to(self.model.device)
+                    inputs = tok0([text], **tk_kwargs).to(model0.device)
 
                     mn = int(max_new_tokens or 0)
                     if mn <= 0:
@@ -445,35 +453,35 @@ class MultiAgentStrategy:
                                 mt = min(mt, 2.5)
                             except Exception:
                                 pass
-                            gen_ids = self.model.generate(
+                            gen_ids = model0.generate(
                                 **inputs,
                                 max_new_tokens=mn,
                                 temperature=temperature,
                                 do_sample=(temperature > 0),
                                 top_p=0.9,
                                 max_time=mt,
-                                pad_token_id=self.tokenizer.eos_token_id,
+                                pad_token_id=tok0.eos_token_id,
                             )
                         except TypeError as e:
                             if "max_time" in str(e):
-                                gen_ids = self.model.generate(
+                                gen_ids = model0.generate(
                                     **inputs,
                                     max_new_tokens=mn,
                                     temperature=temperature,
                                     do_sample=(temperature > 0),
                                     top_p=0.9,
-                                    pad_token_id=self.tokenizer.eos_token_id,
+                                    pad_token_id=tok0.eos_token_id,
                                 )
                             else:
                                 raise
                     
-                    output = self.tokenizer.decode(gen_ids[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
+                    output = tok0.decode(gen_ids[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
 
                 # Restore default adapter (scalper) to minimize impact on next trading tick
                 # (Scalper is usually the default active one)
                 default = "scalper" if "scalper" in self._adapters_loaded else (list(self._adapters_loaded)[0] if self._adapters_loaded else None)
                 if default:
-                    self.model.set_adapter(default)
+                    model0.set_adapter(default)
 
                 return str(output or "").strip()
 
@@ -483,7 +491,7 @@ class MultiAgentStrategy:
                 try:
                     default = "scalper" if "scalper" in self._adapters_loaded else (list(self._adapters_loaded)[0] if self._adapters_loaded else None)
                     if default:
-                        self.model.set_adapter(default)
+                        model0.set_adapter(default)
                 except Exception:
                     pass
                 return ""
