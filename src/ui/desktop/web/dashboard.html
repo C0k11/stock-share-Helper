@@ -1408,6 +1408,15 @@
         lastChartKey = chartKey;
         
         const x = prices.map(p => p.time);
+        const lastBarTime = x.length ? x[x.length - 1] : null;
+        const lastBarMs = lastBarTime ? Date.parse(String(lastBarTime)) : NaN;
+        function _clampTradeTime(ts) {
+          if (!lastBarTime) return ts;
+          const ms = Date.parse(String(ts || ''));
+          if (!isFinite(ms) || !isFinite(lastBarMs)) return ts;
+          if (ms > lastBarMs) return lastBarTime;
+          return ts;
+        }
         const closes = prices.map(p => {
           try {
             const v = Number(p.close);
@@ -1484,7 +1493,7 @@
         const buys = liveTradesCache.filter(t => t.ticker === ticker && t.action === 'BUY');
         if (buys.length) {
           traces.push({
-            x: buys.map(t => t.time),
+            x: buys.map(t => _clampTradeTime(t.time)),
             y: buys.map(t => t.price),
             mode: 'markers',
             marker: { symbol: 'triangle-up', size: 14, color: '#10b981', line: { width: 1, color: '#fff' } },
@@ -1497,7 +1506,7 @@
         const sells = liveTradesCache.filter(t => t.ticker === ticker && t.action === 'SELL');
         if (sells.length) {
           traces.push({
-            x: sells.map(t => t.time),
+            x: sells.map(t => _clampTradeTime(t.time)),
             y: sells.map(t => t.price),
             mode: 'markers',
             marker: { symbol: 'triangle-down', size: 14, color: '#ef4444', line: { width: 1, color: '#fff' } },

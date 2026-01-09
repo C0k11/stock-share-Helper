@@ -1195,8 +1195,11 @@ class LivePaperTradingRunner:
         if not tickers:
             return False
 
+        dl_err = ""
         def _try_download(*, period: str, interval: str):
+            nonlocal dl_err
             try:
+                dl_err = ""
                 return yf.download(
                     tickers=" ".join(tickers),
                     period=period,
@@ -1204,10 +1207,11 @@ class LivePaperTradingRunner:
                     group_by="ticker",
                     auto_adjust=False,
                     prepost=True,
-                    threads=True,
+                    threads=False,
                     progress=False,
                 )
-            except Exception:
+            except Exception as e:
+                dl_err = str(e)
                 return None
 
         last_err: Dict[str, str] = {}
@@ -1233,10 +1237,29 @@ class LivePaperTradingRunner:
             df = None
             try:
                 cols = getattr(hist, "columns", None)
-                if cols is not None and ("Open" in cols and "Close" in cols):
-                    df = hist
-                else:
-                    df = hist.get(tk)
+                if cols is not None:
+                    # Single-ticker DataFrame
+                    try:
+                        if ("Open" in cols and "Close" in cols):
+                            df = hist
+                        else:
+                            df = None
+                    except Exception:
+                        df = None
+
+                    # Multi-ticker download (group_by='ticker') often returns a DataFrame with MultiIndex columns.
+                    if df is None:
+                        try:
+                            if int(getattr(cols, "nlevels", 1) or 1) > 1:
+                                df = hist[tk]
+                        except Exception:
+                            df = None
+
+                if df is None:
+                    try:
+                        df = hist.get(tk)
+                    except Exception:
+                        df = None
             except Exception:
                 df = None
 
@@ -1337,7 +1360,7 @@ class LivePaperTradingRunner:
                     bars = bars[-int(max_bars):]
 
                 self.price_history[tk] = bars
-                if len(bars) >= 20:
+                if len(bars) >= 5:
                     ok = True
 
                 try:
@@ -1371,6 +1394,8 @@ class LivePaperTradingRunner:
                         err_sample = f"{k0}: {last_err.get(k0)}"
                 except Exception:
                     err_sample = None
+                if (not err_sample) and dl_err:
+                    err_sample = f"download: {dl_err}"
                 self.agent_logs.append(
                     {
                         "time": t_str,

@@ -382,6 +382,7 @@ class MultiAgentStrategy:
         adapter: Optional[str] = None,
         temperature: float = 0.7,
         max_new_tokens: int = 512,
+        max_time_sec: Optional[float] = None,
     ) -> str:
         """
         Generic thread-safe inference using the shared model.
@@ -460,11 +461,14 @@ class MultiAgentStrategy:
 
                     with torch.no_grad():
                         try:
-                            mt = float(getattr(self, "_gen_max_time_sec", 12.0) or 12.0)
-                            try:
-                                mt = min(mt, 2.5)
-                            except Exception:
-                                pass
+                            if max_time_sec is not None:
+                                mt = float(max_time_sec)
+                            else:
+                                mt = float(getattr(self, "_gen_max_time_sec", 12.0) or 12.0)
+                                try:
+                                    mt = min(mt, 2.5)
+                                except Exception:
+                                    pass
                             gen_ids = model0.generate(
                                 **inputs,
                                 max_new_tokens=mn,
@@ -1175,7 +1179,7 @@ class MultiAgentStrategy:
                 except Exception:
                     pass
                 
-                self._log(f"System 2 (Judge): APPROVED (conf={confidence:.2f}) reason={reason}", priority=2)
+                self._log(f"System 2 (Judge): {'APPROVED' if approved else 'REJECTED'} (conf={confidence:.2f}) reason={reason}", priority=2)
         
         
         # --- 6. Generate Signal ---
@@ -2523,7 +2527,7 @@ Decide BUY/SELL/HOLD for next 5 days."""
         )
 
         adapter = "system2" if "system2" in self._adapters_loaded else "scalper"
-        critic_raw = self.generic_inference(user_msg=critic_user, system_prompt=critic_sys, adapter=adapter, temperature=0.0, max_new_tokens=512)
+        critic_raw = self.generic_inference(user_msg=critic_user, system_prompt=critic_sys, adapter=adapter, temperature=0.0, max_new_tokens=768, max_time_sec=10.0)
         critic_json = None
         err = ""
         try:
@@ -2547,7 +2551,7 @@ Decide BUY/SELL/HOLD for next 5 days."""
                 self._log(f"System 2 (Critic): parse_failed err={err} raw={raw_hint}", priority=2)
             except Exception:
                 pass
-            return True, action_up, f"critic_parse_failed: {err}".strip()
+            return False, "HOLD", f"critic_parse_failed: {err}".strip()
 
         try:
             acc = bool(critic_json.get("accept", True))
@@ -2578,7 +2582,7 @@ Decide BUY/SELL/HOLD for next 5 days."""
                 f"Critic JSON: {json.dumps(critic_json, ensure_ascii=False)}",
             ]
         )
-        judge_raw = self.generic_inference(user_msg=judge_user, system_prompt=judge_sys, adapter=adapter, temperature=0.0, max_new_tokens=384)
+        judge_raw = self.generic_inference(user_msg=judge_user, system_prompt=judge_sys, adapter=adapter, temperature=0.0, max_new_tokens=512, max_time_sec=8.0)
         judge_json = None
         jerr = ""
         try:
@@ -2602,7 +2606,7 @@ Decide BUY/SELL/HOLD for next 5 days."""
                 self._log(f"System 2 (Judge): parse_failed err={jerr} raw={raw_hint}", priority=2)
             except Exception:
                 pass
-            return True, action_up, f"judge_parse_failed: {jerr}".strip()
+            return False, "HOLD", f"judge_parse_failed: {jerr}".strip()
 
         final_dec = str(judge_json.get("final_decision") or "").strip().upper()
         rationale = str(judge_json.get("rationale") or "").strip()
