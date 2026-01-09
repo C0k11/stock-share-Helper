@@ -337,6 +337,9 @@ class LivePaperTradingRunner:
         perf_cfg = None
         llm_max_context = None
         llm_max_new_tokens = None
+        llm_max_tokens_scalper = None
+        llm_max_tokens_analyst = None
+        llm_repetition_penalty = None
         infer_cfg = None
         all_agents_mode = None
         committee_policy = None
@@ -413,6 +416,24 @@ class LivePaperTradingRunner:
                     # User explicitly disabled lazy loading -> force load_models=True
                     print("[Config] lazy_load=False -> forcing eager model loading")
                     load_models = True
+                try:
+                    v = llm_cfg.get("max_tokens_scalper")
+                    if v is not None:
+                        llm_max_tokens_scalper = int(v)
+                except Exception:
+                    pass
+                try:
+                    v = llm_cfg.get("max_tokens_analyst")
+                    if v is not None:
+                        llm_max_tokens_analyst = int(v)
+                except Exception:
+                    pass
+                try:
+                    v = llm_cfg.get("repetition_penalty")
+                    if v is not None:
+                        llm_repetition_penalty = float(v)
+                except Exception:
+                    pass
         except Exception:
             pass
 
@@ -519,6 +540,22 @@ class LivePaperTradingRunner:
                     setattr(self.strategy, "_max_new_tokens_cap", int(infer_cfg.get("max_new_tokens_cap")))
                 if infer_cfg.get("inference_lock_timeout_sec") is not None:
                     setattr(self.strategy, "_inference_lock_timeout_sec", float(infer_cfg.get("inference_lock_timeout_sec")))
+        except Exception:
+            pass
+
+        try:
+            if llm_max_tokens_scalper is not None:
+                setattr(self.strategy, "llm_max_new_tokens_scalper", int(llm_max_tokens_scalper))
+        except Exception:
+            pass
+        try:
+            if llm_max_tokens_analyst is not None:
+                setattr(self.strategy, "llm_max_new_tokens_analyst", int(llm_max_tokens_analyst))
+        except Exception:
+            pass
+        try:
+            if llm_repetition_penalty is not None:
+                setattr(self.strategy, "llm_repetition_penalty", float(llm_repetition_penalty))
         except Exception:
             pass
         try:
