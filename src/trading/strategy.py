@@ -1823,9 +1823,49 @@ class MultiAgentStrategy:
                 std = math.sqrt(max(0.0, var))
             except Exception:
                 std = 0.0
-            # Approx bars/year: 252 trading days * 390 minutes/day
+
+            # Annualize using observed bar interval when possible.
+            # This avoids exploding vols when bars are not 1-minute (e.g., 10s simulated bars).
             bars_per_year = 252.0 * 390.0
-            vol_ann = std * math.sqrt(bars_per_year) * 100.0
+            try:
+                from datetime import datetime
+
+                def _pt(x: Any) -> Optional[datetime]:
+                    if x is None:
+                        return None
+                    if isinstance(x, datetime):
+                        return x
+                    try:
+                        return datetime.fromisoformat(str(x).replace("Z", "+00:00"))
+                    except Exception:
+                        return None
+
+                dt_secs: list[float] = []
+                times = [((bar or {}).get("time")) for bar in history[-(w + 3) :]]
+                pts = [_pt(t0) for t0 in times]
+                for i in range(1, len(pts)):
+                    a = pts[i - 1]
+                    b = pts[i]
+                    if a is None or b is None:
+                        continue
+                    try:
+                        ds = float((b - a).total_seconds())
+                    except Exception:
+                        continue
+                    if ds > 0:
+                        dt_secs.append(ds)
+
+                if dt_secs:
+                    dt_secs_sorted = sorted(dt_secs)
+                    dt_sec = float(dt_secs_sorted[len(dt_secs_sorted) // 2])
+                    # Guard against clock jitter / duplicated timestamps.
+                    dt_sec = max(5.0, min(3600.0, dt_sec))
+                    trading_seconds_per_year = 252.0 * 6.5 * 3600.0
+                    bars_per_year = float(trading_seconds_per_year) / float(dt_sec)
+            except Exception:
+                bars_per_year = 252.0 * 390.0
+
+            vol_ann = std * math.sqrt(float(bars_per_year)) * 100.0
             try:
                 # Guardrail: simulated/random-walk bars can explode annualized vol early.
                 vol_ann = min(float(vol_ann), 300.0)
