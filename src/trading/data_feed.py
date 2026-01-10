@@ -11,6 +11,7 @@ from __future__ import annotations
 import threading
 import time
 from datetime import datetime
+import math
 from typing import Any, Callable, Dict, List, Optional
 
 try:
@@ -204,7 +205,15 @@ class SimulatedDataFeed(DataFeed):
         for ticker in batch:
             # Random walk with drift
             current = self._current_prices[ticker]
-            change_pct = random.gauss(0, 0.005)  # 0.5% daily vol
+            try:
+                itv = float(getattr(self, "interval_sec", 4.0) or 4.0)
+            except Exception:
+                itv = 4.0
+            itv = max(0.5, min(itv, 3600.0))
+            trading_day_sec = 6.5 * 3600.0
+            daily_sigma = 0.005
+            sigma = float(daily_sigma) * math.sqrt(float(itv) / float(trading_day_sec))
+            change_pct = random.gauss(0, float(sigma))
             new_price = current * (1 + change_pct)
             
             # Clamp to reasonable range

@@ -822,6 +822,27 @@ class MultiAgentStrategy:
             except Exception:
                 pass
             return None
+
+        try:
+            src0 = str(md.get("source") or "").strip().lower()
+            if src0:
+                m = getattr(self, "_last_md_source", None)
+                if not isinstance(m, dict):
+                    m = {}
+                    setattr(self, "_last_md_source", m)
+                prev0 = str(m.get(ticker, "") or "").strip().lower()
+                if prev0 and prev0 != src0:
+                    try:
+                        self.price_history[ticker] = []
+                    except Exception:
+                        pass
+                    try:
+                        self._log(f"[MarketData] {ticker} source switched {prev0}->{src0} -> reset price_history", priority=2)
+                    except Exception:
+                        pass
+                m[ticker] = src0
+        except Exception:
+            pass
         
         # Update price history (normalized schema)
         try:
@@ -856,10 +877,11 @@ class MultiAgentStrategy:
                     "low": l,
                     "close": float(price),
                     "volume": float(volume),
+                    "source": md.get("source"),
                 },
             )
         except Exception:
-            self._update_price_history(ticker, {"close": float(price), "volume": float(volume), "time": md.get("time", datetime.now())})
+            self._update_price_history(ticker, {"close": float(price), "volume": float(volume), "time": md.get("time", datetime.now()), "source": md.get("source")})
         
         # Calculate technical features
         features = self._compute_features(ticker)
@@ -1915,6 +1937,12 @@ class MultiAgentStrategy:
         except Exception:
             v = 0.0
 
+        s0 = None
+        try:
+            s0 = str(data.get("source") or "").strip() or None
+        except Exception:
+            s0 = None
+
         self.price_history[ticker].append({
             "time": t,
             "open": o,
@@ -1922,6 +1950,7 @@ class MultiAgentStrategy:
             "low": l,
             "close": c,
             "volume": v,
+            "source": s0,
         })
         
         # Keep last 60 bars
@@ -2305,7 +2334,7 @@ class MultiAgentStrategy:
         )
         
         messages = [
-            {"role": "system", "content": "Output JSON: {\"decision\": \"BUY|SELL|HOLD\", \"analysis\": \"brief reason\"}. Decision must respect allow_short and current position context."},
+            {"role": "system", "content": "Return ONLY a single-line JSON object: {\"decision\": \"BUY|SELL|HOLD\", \"analysis\": \"brief reason\"}. No markdown, no extra text before/after JSON. Decision must respect allow_short and current position context."},
             {"role": "user", "content": prompt},
         ]
 
