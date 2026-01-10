@@ -73,6 +73,7 @@ class MultiAgentStrategy:
         gatekeeper_threshold: float = 0.0,
         system2_lenient: bool = False,
         sim_aggressive_entry: bool = False,
+        allow_short: bool = False,
     ) -> None:
         self.engine = engine
         try:
@@ -188,6 +189,7 @@ class MultiAgentStrategy:
 
         self.system2_lenient = bool(system2_lenient)
         self.sim_aggressive_entry = bool(sim_aggressive_entry)
+        self.allow_short = bool(allow_short)
 
         self._heuristic_only_until_ts: float = 0.0
         self._slow_infer_warn_sec: float = 25.0
@@ -1216,6 +1218,20 @@ class MultiAgentStrategy:
         
         
         # --- 6. Generate Signal ---
+        try:
+            if (not bool(getattr(self, "allow_short", False))) and str(action or "").strip().upper() == "SELL":
+                br = getattr(self.engine, "broker", None)
+                pos = None
+                if br is not None and isinstance(getattr(br, "positions", None), dict):
+                    pos = br.positions.get(str(ticker).upper())
+                sh = float(getattr(pos, "shares", 0.0) or 0.0) if pos is not None else 0.0
+                # Long-only: allow SELL only to reduce/close an existing long. Block opening/increasing shorts.
+                if not (sh > 0.0):
+                    self._log(f"[Risk] {ticker}: block SELL (short_disabled shares={sh:g})", priority=2)
+                    return None
+        except Exception:
+            pass
+
         signal = {
             "ticker": ticker,
             "action": action,
@@ -2917,6 +2933,13 @@ Decide BUY/SELL/HOLD for next 5 days."""
 
     def _log(self, message: str, priority: int = 0) -> None:
         """Send log event to Mari"""
+        try:
+            # Windows console defaults to GBK; sanitize to avoid UnicodeEncodeError when external
+            # listeners print agent logs containing chars like U+2011 (non-breaking hyphen).
+            if os.name == "nt":
+                message = str(message).encode("gbk", errors="replace").decode("gbk", errors="replace")
+        except Exception:
+            pass
         try:
             q = getattr(self.engine, "events", None)
             qsz = int(q.qsize()) if (q is not None and hasattr(q, "qsize")) else 0
