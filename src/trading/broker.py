@@ -23,6 +23,141 @@ class PaperBroker:
         self.initial_cash = float(cash)
         self.positions: Dict[str, Position] = {}
         self.orders: list[dict] = []
+        self.last_price: Dict[str, float] = {}
+        self.max_leverage = 3.0
+        self.initial_margin = 0.35
+        self.maintenance_margin = 0.25
+
+    def _mark_price(self, ticker: str, *, fallback: float = 0.0) -> float:
+        try:
+            p = float(self.last_price.get(str(ticker).upper(), 0.0) or 0.0)
+            if p > 0:
+                return p
+        except Exception:
+            pass
+        try:
+            if fallback and float(fallback) > 0:
+                return float(fallback)
+        except Exception:
+            pass
+        try:
+            pos = self.positions.get(str(ticker).upper())
+            if pos is not None:
+                ap = float(getattr(pos, "avg_price", 0.0) or 0.0)
+                if ap > 0:
+                    return ap
+        except Exception:
+            pass
+        return 0.0
+
+    def _compute_equity_gross(self, *, cash: float, pos_shares: Dict[str, float], marks: Dict[str, float]) -> tuple[float, float]:
+        eq = float(cash)
+        gross = 0.0
+        for tk, sh in (pos_shares or {}).items():
+            try:
+                sh_f = float(sh or 0.0)
+            except Exception:
+                continue
+            if sh_f == 0.0:
+                continue
+            try:
+                px = float((marks or {}).get(str(tk).upper(), 0.0) or 0.0)
+            except Exception:
+                px = 0.0
+            if px <= 0.0:
+                continue
+            eq += sh_f * px
+            gross += abs(sh_f) * px
+        return float(eq), float(gross)
+
+    def _pretrade_risk_check(self, *, ticker: str, action: str, price: float, shares: float, commission: float) -> tuple[bool, str]:
+        tk = str(ticker).upper().strip()
+        try:
+            px = float(price)
+        except Exception:
+            px = 0.0
+        if not (tk and px > 0.0):
+            return False, "invalid_price"
+
+        try:
+            sh0 = float(abs(shares) or 0.0)
+        except Exception:
+            sh0 = 0.0
+        if sh0 <= 0.0:
+            return False, "invalid_shares"
+
+        cash_new = float(self.cash)
+        pos_shares: Dict[str, float] = {}
+        marks: Dict[str, float] = {}
+        try:
+            for k, p in (self.positions or {}).items():
+                if p is None:
+                    continue
+                pos_shares[str(k).upper()] = float(getattr(p, "shares", 0.0) or 0.0)
+                marks[str(k).upper()] = self._mark_price(str(k).upper(), fallback=float(getattr(p, "avg_price", 0.0) or 0.0))
+        except Exception:
+            pos_shares = {}
+            marks = {}
+        marks[tk] = float(px)
+
+        cur = float(pos_shares.get(tk, 0.0) or 0.0)
+        act = str(action or "").upper().strip()
+
+        if act == "BUY":
+            buy_sh = float(sh0)
+            if cur < 0.0:
+                cover = min(abs(cur), buy_sh)
+                cash_new -= (px * cover) + float(commission)
+                cur = cur + cover
+                buy_sh = float(buy_sh - cover)
+                if buy_sh > 0.0:
+                    cash_new -= px * buy_sh
+                    cur = cur + buy_sh
+            else:
+                cash_new -= (px * buy_sh) + float(commission)
+                cur = cur + buy_sh
+        elif act == "SELL":
+            sell_sh = float(sh0)
+            if cur > 0.0:
+                sell2 = min(cur, sell_sh)
+                cash_new += (px * sell2) - float(commission)
+                cur = cur - sell2
+            else:
+                cash_new += (px * sell_sh) - float(commission)
+                cur = cur - sell_sh
+        else:
+            return False, "unsupported_action"
+
+        if abs(cur) < 1e-12:
+            pos_shares.pop(tk, None)
+        else:
+            pos_shares[tk] = float(cur)
+
+        eq, gross = self._compute_equity_gross(cash=cash_new, pos_shares=pos_shares, marks=marks)
+        if gross <= 0.0:
+            return True, "ok"
+        if not (eq > 0.0):
+            return False, f"equity_nonpositive eq={eq:.2f}"
+
+        try:
+            ml = float(getattr(self, "max_leverage", 3.0) or 3.0)
+        except Exception:
+            ml = 3.0
+        ml = max(1.0, min(ml, 50.0))
+
+        lev = gross / eq
+        if lev > float(ml) + 1e-9:
+            return False, f"leverage_exceeded lev={lev:.2f} max={ml:.2f}"
+
+        try:
+            im = float(getattr(self, "initial_margin", 0.35) or 0.35)
+        except Exception:
+            im = 0.35
+        im = max(0.01, min(im, 1.0))
+        if eq < (im * gross) - 1e-6:
+            return False, f"margin_exceeded eq={eq:.2f} req={im * gross:.2f}"
+
+        return True, "ok"
 
     def place_order(self, signal: dict) -> None:
         def _rej(msg: str) -> None:
@@ -62,19 +197,24 @@ class PaperBroker:
         commission = float(signal.get("commission") or 0.0)
         notional = price * abs(shares)
 
+        ok, why = self._pretrade_risk_check(
+            ticker=ticker,
+            action=action,
+            price=price,
+            shares=shares,
+            commission=commission,
+        )
+        if not bool(ok):
+            _rej(f"[Broker] reject {action} {ticker} x{shares:g} @ {price:.2f}: {why}")
+            return
+
         if action == "BUY":
             total_cost = notional + commission
-            if total_cost > self.cash:
-                _rej(f"[Broker] reject BUY {ticker} x{shares:g} @ {price:.2f}: cash={self.cash:.2f} need={total_cost:.2f}")
-                return
             pos = self.positions.get(ticker)
             if pos is not None and float(pos.shares) < 0:
                 # Cover short first
                 cover_shares = min(abs(float(pos.shares)), abs(shares))
                 total_cost = (price * cover_shares) + commission
-                if total_cost > self.cash:
-                    _rej(f"[Broker] reject COVER {ticker} x{cover_shares:g} @ {price:.2f}: cash={self.cash:.2f} need={total_cost:.2f}")
-                    return
                 entry_price = float(pos.avg_price)
                 self.cash -= total_cost
                 remaining = float(pos.shares) + float(cover_shares)
@@ -101,9 +241,6 @@ class PaperBroker:
                 if extra > 0:
                     # Flip to long with remaining buy size
                     total_cost2 = (price * extra)
-                    if (total_cost2) > self.cash:
-                        _rej(f"[Broker] reject FLIP->LONG {ticker} x{extra:g} @ {price:.2f}: cash={self.cash:.2f} need={total_cost2:.2f}")
-                        return
                     self.cash -= total_cost2
                     self.positions[ticker] = Position(ticker=ticker, shares=extra, avg_price=price, trace_ids=list(trace_ids))
             else:
@@ -175,6 +312,10 @@ class PaperBroker:
             return
 
         self.orders.append({"ticker": ticker, "action": action, "price": price, "shares": shares, "trace_id": trace_id})
+        try:
+            self.last_price[str(ticker).upper()] = float(price)
+        except Exception:
+            pass
         print(f"broker >> Processing Order: {action} {ticker} {shares} @ {price}")
 
         fill = {

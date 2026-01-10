@@ -67,6 +67,7 @@ class MultiAgentStrategy:
         chartist_vlm_cfg: Optional[Dict[str, Any]] = None,
         news_cfg: Optional[Dict[str, Any]] = None,
         perf_cfg: Optional[Dict[str, Any]] = None,
+        risk_cfg: Optional[Dict[str, Any]] = None,
         planner_policy: str = "rule",
         planner_sft_model_path: str = "models/planner_sft_v1.pt",
         gatekeeper_model_path: str = "models/rl_gatekeeper_v2.pt",
@@ -146,6 +147,7 @@ class MultiAgentStrategy:
         self._news_inflight: Dict[str, Any] = {}
 
         self._perf_cfg: Dict[str, Any] = dict(perf_cfg or {})
+        self._risk_cfg: Dict[str, Any] = dict(risk_cfg or {})
         try:
             self._perf_backlog_degrade_threshold = int(self._perf_cfg.get("backlog_degrade_threshold", 40))
         except Exception:
@@ -2213,18 +2215,70 @@ class MultiAgentStrategy:
         except Exception:
             pass
         
-        # Build prompt (simplified)
+        # Build prompt (position-aware)
         tech = features.get("technical", {})
-        prompt = f"""Ticker: {ticker}
-Close: {tech.get('close', 0):.2f}
-Return 5d: {tech.get('return_5d', 0):.2f}%
-Volatility: {tech.get('volatility_20d', 0):.1f}%
 
-Decide BUY/SELL/HOLD for next 5 days."""
+        pos_sh = 0.0
+        pos_avg = 0.0
+        cash = 0.0
+        equity = 0.0
+        gross = 0.0
+        lev = 0.0
+        try:
+            br = getattr(self.engine, "broker", None)
+            cash = float(getattr(br, "cash", 0.0) or 0.0) if br is not None else 0.0
+            equity = float(cash)
+            marks: Dict[str, float] = {}
+            if br is not None and isinstance(getattr(br, "positions", None), dict):
+                for tk, p in br.positions.items():
+                    try:
+                        sh = float(getattr(p, "shares", 0.0) or 0.0)
+                        ap = float(getattr(p, "avg_price", 0.0) or 0.0)
+                        mk = ap
+                        try:
+                            lp = getattr(br, "last_price", None)
+                            if isinstance(lp, dict) and str(tk).upper() in lp:
+                                mk = float(lp.get(str(tk).upper()) or mk)
+                        except Exception:
+                            pass
+                        marks[str(tk).upper()] = float(mk)
+                        equity += sh * float(mk)
+                        gross += abs(sh) * float(mk)
+                        if str(tk).upper() == str(ticker).upper():
+                            pos_sh = float(sh)
+                            pos_avg = float(ap)
+                    except Exception:
+                        continue
+            if equity > 0.0 and gross > 0.0:
+                lev = gross / equity
+        except Exception:
+            pass
+
+        allow_short = bool(getattr(self, "allow_short", False))
+        prompt = (
+            f"Ticker: {ticker}\n"
+            f"Close: {tech.get('close', 0):.2f}\n"
+            f"Return 5d: {tech.get('return_5d', 0):.2f}%\n"
+            f"Volatility: {tech.get('volatility_20d', 0):.1f}%\n\n"
+            f"Account:\n"
+            f"- cash: {cash:.2f}\n"
+            f"- equity: {equity:.2f}\n"
+            f"- gross_exposure: {gross:.2f}\n"
+            f"- leverage: {lev:.2f}\n\n"
+            f"Position ({ticker}):\n"
+            f"- shares: {pos_sh:.4f} (positive=long, negative=short)\n"
+            f"- avg_price: {pos_avg:.2f}\n\n"
+            f"Trading rules:\n"
+            f"- Output decision BUY|SELL|HOLD.\n"
+            f"- BUY means buy more if long/flat OR cover (reduce) if currently short.\n"
+            f"- SELL means sell/reduce if long OR open/increase short if flat/short.\n"
+            f"- allow_short: {str(allow_short).lower()}\n\n"
+            f"Decide BUY/SELL/HOLD for next 5 days." 
+        )
         
         messages = [
-            {"role": "system", "content": "Output JSON: {\"decision\": \"BUY|SELL|HOLD\", \"analysis\": \"brief reason\"}"},
-            {"role": "user", "content": prompt}
+            {"role": "system", "content": "Output JSON: {\"decision\": \"BUY|SELL|HOLD\", \"analysis\": \"brief reason\"}. Decision must respect allow_short and current position context."},
+            {"role": "user", "content": prompt},
         ]
 
         # If a previous inference task finished, clear inflight.
@@ -2927,9 +2981,65 @@ Decide BUY/SELL/HOLD for next 5 days."""
 
     def _calculate_position_size(self, ticker: str, price: float, confidence: float) -> int:
         """Calculate position size based on confidence and risk"""
-        base_shares = 100
-        # Scale by confidence
-        return int(base_shares * confidence)
+        try:
+            price_f = float(price or 0.0)
+        except Exception:
+            price_f = 0.0
+        if not (price_f > 0.0):
+            return 0
+
+        # Risk-based sizing: allocate a fraction of equity per position.
+        pos_risk_pct = 0.05
+        try:
+            pos_risk_pct = float((self._risk_cfg or {}).get("position_risk_pct", pos_risk_pct) or pos_risk_pct)
+        except Exception:
+            pos_risk_pct = 0.05
+        pos_risk_pct = max(0.005, min(pos_risk_pct, 0.5))
+
+        eq = 0.0
+        try:
+            br = getattr(self.engine, "broker", None)
+            cash = float(getattr(br, "cash", 0.0) or 0.0) if br is not None else 0.0
+            eq = cash
+            if br is not None and isinstance(getattr(br, "positions", None), dict):
+                for tk, pos in br.positions.items():
+                    try:
+                        sh = float(getattr(pos, "shares", 0.0) or 0.0)
+                        ap = float(getattr(pos, "avg_price", 0.0) or 0.0)
+                        mark = ap
+                        if str(tk).upper() == str(ticker).upper():
+                            mark = price_f
+                        try:
+                            lastp = getattr(br, "last_price", None)
+                            if isinstance(lastp, dict) and str(tk).upper() in lastp:
+                                mark = float(lastp.get(str(tk).upper()) or mark)
+                        except Exception:
+                            pass
+                        eq += sh * float(mark)
+                    except Exception:
+                        continue
+        except Exception:
+            eq = 0.0
+
+        if not (eq > 0.0):
+            eq = 50000.0
+
+        # Confidence scales allocation mildly; a senior trader may size up when conviction is high.
+        c = 0.75
+        try:
+            c = float(confidence or 0.0)
+        except Exception:
+            c = 0.75
+        c = max(0.1, min(c, 0.99))
+        alloc = float(eq) * float(pos_risk_pct) * (0.5 + 1.0 * c)
+
+        shares = int(max(1.0, alloc / float(price_f)))
+        try:
+            max_sh = int((self._risk_cfg or {}).get("max_shares", 2000) or 2000)
+        except Exception:
+            max_sh = 2000
+        max_sh = max(1, min(max_sh, 200000))
+        return int(max(1, min(shares, max_sh)))
 
     def _log(self, message: str, priority: int = 0) -> None:
         """Send log event to Mari"""

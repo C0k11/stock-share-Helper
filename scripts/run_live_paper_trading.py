@@ -350,6 +350,9 @@ class LivePaperTradingRunner:
         gatekeeper_threshold = None
         system2_lenient = None
         sim_aggressive_entry = None
+        allow_short = None
+        broker_cfg = None
+        risk_cfg = None
         data_feed_interval_sec = None
         md_queue_limit = None
         md_pending_limit = None
@@ -396,6 +399,9 @@ class LivePaperTradingRunner:
                 gatekeeper_threshold = trading_cfg.get("gatekeeper_threshold")
                 system2_lenient = trading_cfg.get("system2_lenient")
                 sim_aggressive_entry = trading_cfg.get("sim_aggressive_entry")
+                allow_short = trading_cfg.get("allow_short")
+                broker_cfg = trading_cfg.get("broker")
+                risk_cfg = trading_cfg.get("risk")
                 data_feed_interval_sec = trading_cfg.get("data_feed_interval_sec")
                 md_queue_limit = trading_cfg.get("md_queue_limit")
                 md_pending_limit = trading_cfg.get("md_pending_limit")
@@ -460,6 +466,18 @@ class LivePaperTradingRunner:
         except Exception:
             pass
 
+        # Broker leverage/margin settings (optional)
+        try:
+            if isinstance(broker_cfg, dict) and broker_cfg:
+                if broker_cfg.get("max_leverage") is not None:
+                    setattr(self.broker, "max_leverage", float(broker_cfg.get("max_leverage")))
+                if broker_cfg.get("initial_margin") is not None:
+                    setattr(self.broker, "initial_margin", float(broker_cfg.get("initial_margin")))
+                if broker_cfg.get("maintenance_margin") is not None:
+                    setattr(self.broker, "maintenance_margin", float(broker_cfg.get("maintenance_margin")))
+        except Exception:
+            pass
+
         effective_scalper = moe_scalper
         effective_analyst = moe_analyst
 
@@ -518,6 +536,16 @@ class LivePaperTradingRunner:
         try:
             if isinstance(sim_aggressive_entry, bool):
                 st_kwargs["sim_aggressive_entry"] = bool(sim_aggressive_entry)
+        except Exception:
+            pass
+        try:
+            if isinstance(allow_short, bool):
+                st_kwargs["allow_short"] = bool(allow_short)
+        except Exception:
+            pass
+        try:
+            if isinstance(risk_cfg, dict) and risk_cfg:
+                st_kwargs["risk_cfg"] = dict(risk_cfg)
         except Exception:
             pass
 
