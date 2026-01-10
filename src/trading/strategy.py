@@ -1967,6 +1967,7 @@ class MultiAgentStrategy:
             # Annualize using observed bar interval when possible.
             # This avoids exploding vols when bars are not 1-minute (e.g., 10s simulated bars).
             bars_per_year = 252.0 * 390.0
+            dt_sec = None
             try:
                 from datetime import datetime
 
@@ -2005,10 +2006,33 @@ class MultiAgentStrategy:
             except Exception:
                 bars_per_year = 252.0 * 390.0
 
-            vol_ann = std * math.sqrt(float(bars_per_year)) * 100.0
+            vol_raw = std * math.sqrt(float(bars_per_year)) * 100.0
+            vol_ann = float(vol_raw)
             try:
                 # Guardrail: simulated/random-walk bars can explode annualized vol early.
                 vol_ann = min(float(vol_ann), 300.0)
+            except Exception:
+                pass
+            try:
+                if float(vol_raw) > 300.0 and float(vol_ann) >= 299.999:
+                    now0 = time.time()
+                    m = getattr(self, "_vol_cap_last_log_ts", None)
+                    if not isinstance(m, dict):
+                        m = {}
+                        setattr(self, "_vol_cap_last_log_ts", m)
+                    last0 = float(m.get(str(ticker).upper(), 0.0) or 0.0)
+                    if (now0 - last0) >= 60.0:
+                        m[str(ticker).upper()] = float(now0)
+                        ds = -1.0
+                        try:
+                            if dt_sec is not None:
+                                ds = float(dt_sec)
+                        except Exception:
+                            ds = -1.0
+                        self._log(
+                            f"[VolCap] {str(ticker).upper()} raw={float(vol_raw):.2f}% std={float(std):.6f} bars_per_year={float(bars_per_year):.0f} dt_sec={ds:.1f}",
+                            priority=2,
+                        )
             except Exception:
                 pass
             if not (vol_ann > 0.0):
@@ -2122,10 +2146,13 @@ class MultiAgentStrategy:
         if thr > 0.0 and vol_f >= thr:
             use_analyst = True
         try:
-            if bool(getattr(self, "moe_any_news", True)) and float(news_new_count) > 0.0:
-                use_analyst = True
-            elif abs(float(news_score)) >= float(getattr(self, "moe_news_threshold", 0.8) or 0.8):
-                use_analyst = True
+            any_news = bool(getattr(self, "moe_any_news", True))
+            if any_news:
+                if float(news_new_count) > 0.0:
+                    use_analyst = True
+            else:
+                if abs(float(news_score)) >= float(getattr(self, "moe_news_threshold", 0.8) or 0.8):
+                    use_analyst = True
         except Exception:
             pass
         
@@ -2142,13 +2169,14 @@ class MultiAgentStrategy:
             trig: list[str] = []
             if thr > 0.0 and vol_f >= thr:
                 trig.append(f"vol={vol_f:.1f}%>=thr{thr:g}")
-            if bool(getattr(self, "moe_any_news", True)) and float(news_new_count) > 0.0:
+            any_news = bool(getattr(self, "moe_any_news", True))
+            if any_news and float(news_new_count) > 0.0:
                 trig.append(f"news_new={int(news_new_count)}")
             try:
                 nt = float(getattr(self, "moe_news_threshold", 0.8) or 0.8)
             except Exception:
                 nt = 0.8
-            if abs(float(news_score)) >= float(nt):
+            if (not any_news) and abs(float(news_score)) >= float(nt):
                 trig.append(f"news_score={news_score:+.2f}>=thr{nt:g}")
             trig_s = " | ".join(trig) if trig else "no_trigger"
             self._log(
@@ -2552,7 +2580,7 @@ class MultiAgentStrategy:
         try:
             raw = raw.replace("```json", "").replace("```", "").strip()
         except Exception:
-            raw = str(output or "").strip()
+            raw = str(raw or "").strip()
 
         def _normalize_decision(x: Any) -> str:
             d = str(x or "").strip().upper()
@@ -2592,21 +2620,42 @@ class MultiAgentStrategy:
         except Exception:
             pass
 
-        # Fallback: infer decision from text
-        tl = raw.lower()
-        decision = "HOLD"
-        if "buy" in tl or "买入" in tl or "做多" in tl:
-            decision = "BUY"
-        elif "sell" in tl or "卖出" in tl or "做空" in tl:
-            decision = "SELL"
-        elif "hold" in tl or "观望" in tl or "保持" in tl:
-            decision = "HOLD"
+        # Fallback: only accept explicit decision markers; otherwise treat as parse_failed to avoid mis-trades.
+        import re
+
+        decision = ""
+        try:
+            m = re.search(r"\bdecision\b\s*[:=]\s*(BUY|SELL|HOLD)\b", raw, flags=re.IGNORECASE)
+            if m:
+                decision = str(m.group(1) or "").strip().upper()
+        except Exception:
+            decision = ""
+        if not decision:
+            try:
+                m = re.search(r"\bfinal\s*[:=]\s*(BUY|SELL|HOLD)\b", raw, flags=re.IGNORECASE)
+                if m:
+                    decision = str(m.group(1) or "").strip().upper()
+            except Exception:
+                decision = ""
+
+        if decision not in {"BUY", "SELL", "HOLD"}:
+            try:
+                hint = raw.replace("\n", " ").strip()
+                if len(hint) > 260:
+                    hint = hint[:257] + "..."
+                self._log(f"[{expert}] parse_failed (no_json) {ticker} raw={hint}", priority=2)
+            except Exception:
+                pass
+            try:
+                self._heuristic_only_until_ts = time.time() + float(getattr(self, "_slow_infer_fuse_sec", 90.0) or 90.0)
+            except Exception:
+                pass
+            return {"decision": "HOLD", "analysis": "parse_failed"}
 
         try:
             tail = raw.replace("\n", " ").strip()
         except Exception:
             tail = raw
-
         return {"decision": decision, "analysis": str(tail or "").strip()}
 
     def _chartist_overlay(self, ticker: str, proposed_action: str) -> int:
