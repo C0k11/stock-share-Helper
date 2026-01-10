@@ -1005,10 +1005,26 @@ class MultiAgentStrategy:
                     pos = None
                     if br is not None and isinstance(getattr(br, "positions", None), dict):
                         pos = br.positions.get(str(ticker).upper())
-                    forced = "SELL" if pos is not None else "BUY"
+                    forced = "BUY"
+                    try:
+                        sh = float(getattr(pos, "shares", 0.0) or 0.0) if pos is not None else 0.0
+                        # Forced mode is for demo / ensuring some activity; it must not endlessly add shorts.
+                        # If currently short -> force BUY to cover; if long -> force SELL; if flat -> force BUY.
+                        if sh < 0.0:
+                            forced = "BUY"
+                        elif sh > 0.0:
+                            forced = "SELL"
+                        else:
+                            forced = "BUY"
+                    except Exception:
+                        forced = "BUY"
                     action = forced
                     analysis = f"sim_aggressive_entry: forced {forced} after HOLD"
-                    self._log(f"[Sim] {ticker}: override HOLD -> {forced} (sim_aggressive_entry)", priority=2)
+                    try:
+                        sh2 = float(getattr(pos, "shares", 0.0) or 0.0) if pos is not None else 0.0
+                    except Exception:
+                        sh2 = 0.0
+                    self._log(f"[Sim] {ticker}: override HOLD -> {forced} (sim_aggressive_entry shares={sh2:g})", priority=2)
                 except Exception:
                     forced = None
 
