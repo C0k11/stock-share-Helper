@@ -924,7 +924,6 @@ class MultiAgentStrategy:
         
         # --- 3. MoE Router: Select Expert ---
         expert, router_meta = self._moe_route(ticker, features)
-        self._log(f"MoE Router: {ticker} -> [{expert}] (vol={router_meta.get('vol', 0):.1f}%)", priority=2)
 
         # --- 4. Expert Inference ---
         degraded_all_agents = False
@@ -2104,6 +2103,26 @@ class MultiAgentStrategy:
             "news_count": news_count,
             "news_new_count": news_new_count,
         }
+        
+        try:
+            trig: list[str] = []
+            if thr > 0.0 and vol_f >= thr:
+                trig.append(f"vol={vol_f:.1f}%>=thr{thr:g}")
+            if bool(getattr(self, "moe_any_news", True)) and float(news_new_count) > 0.0:
+                trig.append(f"news_new={int(news_new_count)}")
+            try:
+                nt = float(getattr(self, "moe_news_threshold", 0.8) or 0.8)
+            except Exception:
+                nt = 0.8
+            if abs(float(news_score)) >= float(nt):
+                trig.append(f"news_score={news_score:+.2f}>=thr{nt:g}")
+            trig_s = " | ".join(trig) if trig else "no_trigger"
+            self._log(
+                f"MoE Router: {ticker} -> [{expert}] (vol={vol_f:.1f}% news_new={int(news_new_count)} news_score={news_score:+.2f} trig={trig_s})",
+                priority=2,
+            )
+        except Exception:
+            pass
         
         return expert, meta
 
