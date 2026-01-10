@@ -136,6 +136,24 @@ scripts\launch_desktop.ps1
   - Critic/Judge prompt 强约束：STRICT JSON、无换行、限长。
   - parse_failed 默认 `HOLD + REJECTED`，避免“System2 失败仍放行交易”。
 
+- **Pro Trader（多空 + 保证金/杠杆）**
+  - 支持开空/回补：`trading.allow_short: true`
+  - Broker 风控（避免无限卖空导致 cash 虚高）：
+    - `trading.broker.max_leverage`
+    - `trading.broker.initial_margin`
+    - `trading.broker.maintenance_margin`
+  - scalper/analyst prompt 注入账户与仓位快照（cash/equity/gross/leverage + shares/avg_price），让模型能做回补/加减仓。
+
+- **券商级模拟（结算/费用/强平）**
+  - 资金费用：
+    - `trading.broker.margin_interest_apr`（负现金融资利息）
+    - `trading.broker.short_borrow_fee_apr`（空头借券费）
+  - 结算与强平：
+    - `trading.broker.settlement_interval_sec`
+    - `trading.broker.liquidation_enabled`
+    - `trading.broker.liquidation_commission`
+  - 维持保证金不足会自动强平：多头 SELL / 空头 BUY 回补，并产生 `FILL (expert=liquidation)`。
+
 - **Mari（Secretary）确定性兜底**
   - 对 `PnL/持仓/谁赚谁亏/最大仓位` 等问题，直接从 live runner 的 `broker.positions` + `price_history` 计算并回答。
   - 对“大家最看好什么/最不看好什么”，从 `agent_logs` 的 `[Execution] SIGNAL` 统计净 BUY/SELL 输出 Top 3，避免 LLM 跑题。
@@ -164,6 +182,22 @@ scripts\launch_desktop.ps1
 - 处理：
   - 先确认已更新到最新代码（System2 已增加重试与更长推理预算）。
   - 若仍偶发 model busy，这是推理锁竞争的正常保护行为；工程日志有进一步的性能/并发策略建议。
+
+### 4) 模型输出非 JSON（parse_failed no_json）导致动作不一致
+
+- 现象：日志里出现 `parse_failed (no_json)`，或曾经出现 `BUY`/`HOLD` 文本冲突。
+- 状态：已修复为“仅接受 JSON 或显式 `Decision:`；否则强制 HOLD 并短时间启用 heuristic-only”，避免误交易。
+
+### 5) vol=300%（VolCap）不清楚怎么来的
+
+- 现象：MoE Router 显示 `vol=300.0%`。
+- 解释：年化波动率被 cap 到 300%（保护栏），通常是 bar 间隔太小或价格跳变导致。
+- 诊断：会限频打印 `[VolCap] TICKER raw=... std=... dt_sec=... bars_per_year=...`。
+
+### 6) MoE Router 新闻触发不符合直觉（news_new=0 仍走 analyst）
+
+- 状态：已修复。
+- 规则：当 `trading.news.moe_any_news: true` 时，只用 `news_new_count>0` 触发 analyst；否则才使用 `abs(news_score) >= moe_news_threshold`。
 
 ---
 
