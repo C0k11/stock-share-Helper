@@ -438,6 +438,42 @@ Prompt 模板：
 
 
 
+8) Pro Trader 模式：多空交易 + 保证金/杠杆约束 + 位置感知 Prompt（2026-01-10）
+
+- 目标：从“长仓 + 现金约束”的简化模拟升级为“可开空 + 可回补 + 杠杆受控”的专业交易模式。
+- 改动点：
+  - 配置启用：`configs/secretary.yaml` 新增 `trading.allow_short: true`。
+  - Broker 风控：`PaperBroker` 增加杠杆/保证金约束（`max_leverage` / `initial_margin` / `maintenance_margin`），下单前按预期 `equity/gross_exposure` 检查，拒绝无限卖空导致的 `cash` 虚高。
+  - 模型输入：scalper/analyst prompt 注入账户与仓位快照（cash/equity/gross/leverage + shares/avg_price），并明确 BUY=回补/加仓、SELL=减仓/开空。
+- 相关改动：`configs/secretary.yaml`、`scripts/run_live_paper_trading.py`、`src/trading/strategy.py`、`src/trading/broker.py`（commit `5ea4770`）。
+
+
+
+9) 券商级模拟：资金费用结算 + Mark-to-Market + 维持保证金强平（2026-01-10）
+
+- 目标：让模拟账户具备券商级“结算/费用/强平”机制，避免 PnL 与风险敞口不真实。
+- 新增机制：
+  - `margin_interest_apr`：当 `cash < 0` 时计提融资利息。
+  - `short_borrow_fee_apr`：对空头市值计提借券费。
+  - `settlement_interval_sec`：按时间步长执行 mark-to-market 与费用计提。
+  - 维持保证金检查：若 `equity < maintenance_margin * gross_exposure`，自动按最大敞口优先强平（多头 SELL / 空头 BUY 回补）。
+- 行情到 Broker：引擎在每个 `MARKET_DATA` tick 先调用 `broker.on_market_data()` 更新标记价并触发结算/强平。
+- 相关改动：`src/trading/engine.py`、`src/trading/broker.py`、`scripts/run_live_paper_trading.py`、`configs/secretary.yaml`（commit `1c5bb21`）。
+
+
+
+10) 稳定性：严格决策解析 + VolCap 诊断 + MoE 新闻触发去误报（2026-01-10）
+
+- 问题 A（决策冲突）：部分 DPO/LLM 输出非 JSON，导致日志出现 `BUY` 前缀但正文写 `Decision: HOLD` 的错配风险。
+  - 修复：仅接受 JSON 或显式 `Decision: BUY|SELL|HOLD`；否则视为 `parse_failed` 并强制 `HOLD`，同时短时间进入 heuristic-only，避免误交易。
+- 问题 B（vol=300% 顶格不可解释）：波动率年化可能被 cap 到 300%，但缺少诊断信息。
+  - 修复：仅当触发 cap 时限频输出 `[VolCap]`（raw_vol/std/dt_sec/bars_per_year），用于判断是 bar 间隔过小还是价格跳变。
+- 问题 C（MoE 新闻误触发）：`moe_any_news=true` 时，`news_new=0` 仍可能被缓存 `news_score` 触发 analyst。
+  - 修复：`moe_any_news=true` 时只用 `news_new_count>0` 触发 analyst；`moe_any_news=false` 才使用 `abs(news_score)`。
+- 相关改动：`src/trading/strategy.py`（commit `6012e7a`）。
+
+
+
 #### 受影响文件（本轮）
 
 
@@ -449,6 +485,11 @@ Prompt 模板：
 - `src/ui/desktop/web/dashboard.html`
 - `src/rl/online_learning.py`
 
+（增量）
+
+- `src/trading/broker.py`
+- `src/trading/engine.py`
+
 
 
 #### 验证清单
@@ -459,6 +500,10 @@ Prompt 模板：
 2) Chartist：出现 `Chartist (VLM): ... pattern ...` 或明确的 `idle/not_ready/no_image/render_fail`（不再空白）。
 3) RL：`data/rl_experiences/experiences.jsonl` 行数持续增长。
 4) Replay：设置 `trading.offline_playback_file` 指向 `session_*.jsonl`，回放可复现实验且新闻不泄漏。
+
+5) Pro Trader：允许开空/回补；当杠杆或保证金不足时出现 `[Broker] reject ... leverage_exceeded/margin_exceeded`。
+6) 券商级模拟：出现 `[Broker] fees accrued: ...`；维持保证金不足时出现 `[Broker] [Liquidation] start ...` 且产生 `FILL (expert=liquidation)`。
+7) 稳定性：非 JSON 模型输出会出现 `parse_failed (no_json)` 并强制 HOLD；当 vol 顶格到 300% 时出现 `[VolCap] ...` 诊断。
 
 
 
