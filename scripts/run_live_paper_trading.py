@@ -475,6 +475,16 @@ class LivePaperTradingRunner:
                     setattr(self.broker, "initial_margin", float(broker_cfg.get("initial_margin")))
                 if broker_cfg.get("maintenance_margin") is not None:
                     setattr(self.broker, "maintenance_margin", float(broker_cfg.get("maintenance_margin")))
+                if broker_cfg.get("margin_interest_apr") is not None:
+                    setattr(self.broker, "margin_interest_apr", float(broker_cfg.get("margin_interest_apr")))
+                if broker_cfg.get("short_borrow_fee_apr") is not None:
+                    setattr(self.broker, "short_borrow_fee_apr", float(broker_cfg.get("short_borrow_fee_apr")))
+                if broker_cfg.get("settlement_interval_sec") is not None:
+                    setattr(self.broker, "settlement_interval_sec", float(broker_cfg.get("settlement_interval_sec")))
+                if broker_cfg.get("liquidation_enabled") is not None:
+                    setattr(self.broker, "liquidation_enabled", bool(broker_cfg.get("liquidation_enabled")))
+                if broker_cfg.get("liquidation_commission") is not None:
+                    setattr(self.broker, "liquidation_commission", float(broker_cfg.get("liquidation_commission")))
         except Exception:
             pass
 

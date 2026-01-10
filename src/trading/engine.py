@@ -53,6 +53,11 @@ class TradingEngine:
 
     def _handle_event(self, event: Event) -> None:
         if event.type == EventType.MARKET_DATA:
+            try:
+                if self.broker is not None and hasattr(self.broker, "on_market_data"):
+                    self.broker.on_market_data(event.payload)
+            except Exception:
+                pass
             if self.strategy is None:
                 return
             if hasattr(self.strategy, "on_bar"):
