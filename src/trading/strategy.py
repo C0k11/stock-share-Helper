@@ -883,6 +883,7 @@ class MultiAgentStrategy:
                 sig = features.get("signal") if isinstance(features.get("signal"), dict) else {}
                 sig["news_score"] = float(news_sig.get("news_score") or 0.0)
                 sig["news_count"] = float(news_sig.get("news_count") or 0.0)
+                sig["news_new_count"] = float(news_sig.get("news_new_count") or 0.0)
                 features["signal"] = sig
         except Exception:
             pass
@@ -1437,6 +1438,103 @@ class MultiAgentStrategy:
             except Exception:
                 pass
 
+        try:
+            titles = []
+            for it in list(items)[:limit]:
+                if not isinstance(it, dict):
+                    continue
+                t0 = str(it.get("title") or "").strip()
+                if t0:
+                    titles.append(t0)
+
+            prev_titles: set[str] = set()
+            try:
+                prev = self._news_cache.get(ck) if isinstance(self._news_cache.get(ck), dict) else {}
+                prev_items = prev.get("items") if isinstance(prev.get("items"), list) else []
+                for it in list(prev_items)[:limit]:
+                    if not isinstance(it, dict):
+                        continue
+                    t0 = str(it.get("title") or "").strip()
+                    if t0:
+                        prev_titles.add(str(t0).strip().lower())
+            except Exception:
+                prev_titles = set()
+
+            new_count = 0
+            try:
+                for t0 in titles[:limit]:
+                    if str(t0).strip().lower() not in prev_titles:
+                        new_count += 1
+            except Exception:
+                new_count = 0
+
+            score = 0.0
+            try:
+                best = 0.0
+                for t in titles[:12]:
+                    tl = str(t or "").lower()
+                    s = 0.0
+                    if any(k in tl for k in ["sec", "investigation", "lawsuit", "fraud", "bankrupt", "halt", "delist"]):
+                        s = -1.0
+                    elif any(k in tl for k in ["downgrade", "miss", "cuts guidance", "cut guidance", "plunge", "crash", "fall"]):
+                        s = -0.8
+                    elif any(k in tl for k in ["earnings", "guidance", "results", "forecast", "beats", "raises guidance", "raise guidance"]):
+                        s = 1.0
+                    elif any(k in tl for k in ["upgrade", "initiated", "buy rating", "soar", "surge", "jump"]):
+                        s = 0.6
+                    if abs(s) > abs(best):
+                        best = s
+                score = float(best)
+            except Exception:
+                score = 0.0
+
+            sentiment = "neutral"
+            if score > 0.05:
+                sentiment = "positive"
+            elif score < -0.05:
+                sentiment = "negative"
+
+            summary = ""
+            if titles:
+                summary = " | ".join(titles[:3])
+                if len(summary) > 240:
+                    summary = summary[:237] + "..."
+
+            src_label = "yahoo+google" if (bool(cfg.get("google_enabled", False))) else "yahoo_rss"
+            try:
+                if time_mode == "market" and historical_enabled and isinstance(asof_time, datetime):
+                    src_label = "gdelt"
+            except Exception:
+                pass
+
+            sig = {
+                "news_count": int(len(items) or 0),
+                "news_new_count": int(new_count),
+                "news_score": float(score),
+                "news_sentiment": str(sentiment),
+                "news_confidence": 0.0,
+                "news_summary": summary,
+                "news_source": src_label,
+                "asof": datetime.now().isoformat(),
+            }
+            try:
+                if time_mode == "market" and isinstance(asof_time, datetime):
+                    sig["asof"] = asof_time.isoformat()
+            except Exception:
+                pass
+
+            self._news_cache[ck] = {"items": items[:limit], "signal": sig}
+            self._news_last_fetch_ts[ck] = time.time()
+            try:
+                self._log(f"[News] {tk} sentiment={sentiment} score={float(score):.2f} n={len(items) or 0} :: {summary}", priority=2)
+            except Exception:
+                pass
+        except Exception:
+            try:
+                self._news_last_fetch_ts[ck] = time.time()
+            except Exception:
+                pass
+
     def _fast_generic_inference(
         self,
         user_msg: str,
@@ -1970,11 +2068,17 @@ class MultiAgentStrategy:
             vol_f = 0.0
 
         news_score = 0.0
+        news_count = 0.0
+        news_new_count = 0.0
         try:
             sig = features.get("signal") if isinstance(features.get("signal"), dict) else {}
             news_score = float(sig.get("news_score") or 0.0)
+            news_count = float(sig.get("news_count") or 0.0)
+            news_new_count = float(sig.get("news_new_count") or 0.0)
         except Exception:
             news_score = 0.0
+            news_count = 0.0
+            news_new_count = 0.0
         
         # Route to Analyst for high volatility or meaningful news signal
         use_analyst = False
@@ -1985,13 +2089,21 @@ class MultiAgentStrategy:
         if thr > 0.0 and vol_f >= thr:
             use_analyst = True
         try:
-            if bool(getattr(self, "moe_any_news", True)) and abs(float(news_score)) >= float(getattr(self, "moe_news_threshold", 0.8) or 0.8):
+            if bool(getattr(self, "moe_any_news", True)) and float(news_new_count) > 0.0:
+                use_analyst = True
+            elif abs(float(news_score)) >= float(getattr(self, "moe_news_threshold", 0.8) or 0.8):
                 use_analyst = True
         except Exception:
             pass
         
         expert = "analyst" if use_analyst else "scalper"
-        meta = {"vol": vol_f, "expert": expert, "news_score": news_score}
+        meta = {
+            "vol": vol_f,
+            "expert": expert,
+            "news_score": news_score,
+            "news_count": news_count,
+            "news_new_count": news_new_count,
+        }
         
         return expert, meta
 
