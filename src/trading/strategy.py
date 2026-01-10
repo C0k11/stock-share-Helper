@@ -1160,7 +1160,16 @@ class MultiAgentStrategy:
                     action = final_action
 
                 if (not bool(approved)) or (str(final_action) == "HOLD"):
-                    if bool(getattr(self, "system2_lenient", False)):
+                    allow_lenient = False
+                    try:
+                        if bool(getattr(self, "system2_lenient", False)):
+                            r0 = str(reason or "").lower()
+                            if ("parse_failed" in r0) or ("model busy" in r0) or ("no json" in r0):
+                                allow_lenient = True
+                    except Exception:
+                        allow_lenient = False
+
+                    if allow_lenient:
                         self._log(f"System 2 (Judge): LENIENT_BYPASS - {reason}", priority=2)
                     else:
                         self._log(f"System 2 (Judge): BLOCKED - {reason}", priority=2)
