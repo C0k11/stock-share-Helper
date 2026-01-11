@@ -1014,6 +1014,28 @@ class MultiAgentStrategy:
                         self._log(f"System 2 Debate: idle (action=HOLD)", priority=2)
                     except Exception:
                         pass
+
+                    try:
+                        cfg = self._chartist_vlm_cfg if isinstance(self._chartist_vlm_cfg, dict) else {}
+                        if bool(cfg.get("enabled", False)):
+                            now2 = float(time.time())
+                            idle_map = getattr(self, "_chartist_idle_last_ts", None)
+                            if not isinstance(idle_map, dict):
+                                idle_map = {}
+                            last2 = float(idle_map.get(str(ticker).upper(), 0.0) or 0.0)
+                            interval = float(cfg.get("idle_interval_sec") or 60.0)
+                            interval = max(30.0, min(interval, 600.0))
+                            if (now2 - last2) >= interval:
+                                idle_map[str(ticker).upper()] = now2
+                                setattr(self, "_chartist_idle_last_ts", idle_map)
+                                self._log(f"Chartist (VLM): idle_tick ticker={str(ticker).upper()}", priority=2)
+                                try:
+                                    self._chartist_overlay(str(ticker).upper(), "HOLD")
+                                except Exception as e:
+                                    self._log(f"Chartist (VLM): idle_tick failed: {e}", priority=2)
+                    except Exception:
+                        pass
+
                     try:
                         macro_gear, macro_label = self._macro_governor_assess()
                         self._log(f"[MACRO] Macro Governor: regime={macro_label} (gear={macro_gear})", priority=2)
