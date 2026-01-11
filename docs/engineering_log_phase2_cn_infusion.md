@@ -114,6 +114,19 @@
 
 
 
+## Live Ops 快速索引（常见问题 -> 根因 -> 修复 -> 验收）
+
+| 问题 | 根因（摘要） | 修复（摘要） | 关键文件 | 验收（最短路径） |
+|---|---|---|---|---|
+| 图表挤压 / flat / 必须拖 rangeslider 才正常 | chart 数据存在 NaN/Inf 或历史存在大 time gap；前端更新覆盖历史导致 rangeslider 无法回看 | 后端过滤非有限 OHLC；前端保留全历史并默认聚焦“最新连续段”；提高 price_history 保留上限 | `src/api/main.py`、`src/ui/desktop/web/dashboard.html`、`scripts/run_live_paper_trading.py` | UI 重新加载后：默认视图跟随最新走势；rangeslider/ALL 可回看历史；不再出现长 flat 段 |
+| backlog 常驻高位、VLM/System2 被跳过、日志被丢 | `md_pending` 堆积未去重；perf gating 阈值过小/写死 | `md_pending` 按 ticker 去重；perf gating 阈值改为可配置（degrade/skip/drop） | `scripts/run_live_paper_trading.py`、`src/trading/data_feed.py`、`src/trading/strategy.py` | dashboard terminal 不再长期出现 backlog=81；System2/VLM 正常触发 |
+| System2 parse_failed / model busy | 推理预算过小 + 推理锁竞争；JSON 截断 | System2 独立预算 + 轻量重试；parse_failed 强制 HOLD；推理锁 timeout 可配 | `src/trading/strategy.py` | 日志出现 parse_failed 时不再误交易；System2 能稳定输出 JSON |
+| Chartist 面板“后面不工作”（HOLD 时不刷新） | Chartist/VLM 只在 System2 路径触发，HOLD 时不会触发 | 增加 `idle_tick`：HOLD 时按 ticker 节流触发一次 Chartist overlay | `src/trading/strategy.py`、`configs/secretary.yaml` | 长时间 HOLD 时 Chartist 仍周期输出（可配置 interval） |
+| 负现金 / 仓位过度集中 / 杠杆飙升 | 缺少硬性风控（负现金加仓、持仓数量、单 ticker 暴露、总暴露） | 新增 risk caps：负现金禁买（不影响回补）、最大持仓数、单 ticker 暴露上限、总暴露上限、止损止盈 | `src/trading/strategy.py`、`configs/secretary.yaml` | 触发条件时日志出现 `[Risk] block/clamp ...`，不会继续加仓 |
+| RL 数据稀疏（只在平仓写 experiences），长持仓学不到 | trade-level experience 频率太低 | 新增 step-level experience：按 ticker 周期采样写入 `step_experiences.jsonl`，含 reward 归一化与风险元数据 | `src/rl/online_learning.py`、`src/trading/strategy.py`、`configs/secretary.yaml` | RL enabled 后：`data/rl_experiences/step_experiences.jsonl` 行数持续增长；metadata 记录 blocked/clamp/stop_loss 等 |
+
+
+
 ## Phase 执行索引（从头到尾对齐）
 
 

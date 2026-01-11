@@ -1340,6 +1340,18 @@ class MultiAgentStrategy:
         if not (equity_now > 0.0):
             equity_now = 1.0
 
+        step_now_ts = None
+        try:
+            if isinstance(asof_dt, datetime):
+                step_now_ts = float(asof_dt.timestamp())
+        except Exception:
+            step_now_ts = None
+        if step_now_ts is None:
+            try:
+                step_now_ts = float(time.time())
+            except Exception:
+                step_now_ts = None
+
         try:
             if float(equity_now) > float(getattr(self, "_step_rl_peak_equity", 0.0) or 0.0):
                 self._step_rl_peak_equity = float(equity_now)
@@ -1359,15 +1371,21 @@ class MultiAgentStrategy:
             take_profit_pct = 0.0
         stop_loss_pct = max(0.0, min(stop_loss_pct, 0.5))
         take_profit_pct = max(0.0, min(take_profit_pct, 5.0))
+        risk_flags: List[str] = []
+        blocked_by_risk = False
+        blocked_reason: Optional[str] = None
+        attempted_action = str(action or "HOLD").strip().upper() or "HOLD"
         if stop_take_enabled and float(cur_sh) > 0.0 and float(cur_avg) > 0.0 and float(price) > 0.0:
             try:
                 ret = (float(price) - float(cur_avg)) / float(cur_avg)
                 if stop_loss_pct > 0.0 and ret <= -float(stop_loss_pct):
                     action = "SELL"
                     analysis = f"risk: stop_loss hit ret={ret:.3%} <= -{stop_loss_pct:.1%}"
+                    risk_flags.append("stop_loss")
                 elif take_profit_pct > 0.0 and ret >= float(take_profit_pct):
                     action = "SELL"
                     analysis = f"risk: take_profit hit ret={ret:.3%} >= {take_profit_pct:.1%}"
+                    risk_flags.append("take_profit")
             except Exception:
                 pass
 
@@ -1380,7 +1398,9 @@ class MultiAgentStrategy:
                 # Long-only: allow SELL only to reduce/close an existing long. Block opening/increasing shorts.
                 if not (sh > 0.0):
                     self._log(f"[Risk] {ticker}: block SELL (short_disabled shares={sh:g})", priority=2)
-                    return None
+                    blocked_by_risk = True
+                    blocked_reason = "short_disabled"
+                    risk_flags.append("short_disabled_block")
         except Exception:
             pass
 
@@ -1409,14 +1429,18 @@ class MultiAgentStrategy:
             try:
                 if ban_buy_neg_cash and float(cash_now) < 0.0 and float(cur_sh) >= 0.0:
                     self._log(f"[Risk] {ticker}: block BUY (cash_negative cash={cash_now:.2f})", priority=2)
-                    return None
+                    blocked_by_risk = True
+                    blocked_reason = "cash_negative"
+                    risk_flags.append("cash_negative_block")
             except Exception:
                 pass
 
             opening_new = bool(abs(float(cur_sh)) < 1e-12)
             if opening_new and int(max_positions or 0) > 0 and int(pos_count) >= int(max_positions):
                 self._log(f"[Risk] {ticker}: block BUY (max_positions={int(max_positions)} current={int(pos_count)})", priority=2)
-                return None
+                blocked_by_risk = True
+                blocked_reason = "max_positions"
+                risk_flags.append("max_positions_block")
 
             if float(max_gross_pct or 0.0) > 0.0:
                 try:
@@ -1426,7 +1450,9 @@ class MultiAgentStrategy:
                             f"[Risk] {ticker}: block BUY (gross_exposure cap gross={gross_now:.2f} add={(abs(shares_i) * float(price)):.2f} eq={equity_now:.2f} cap={max_gross_pct:g}x)",
                             priority=2,
                         )
-                        return None
+                        blocked_by_risk = True
+                        blocked_reason = "gross_exposure"
+                        risk_flags.append("gross_exposure_block")
                 except Exception:
                     pass
 
@@ -1440,20 +1466,25 @@ class MultiAgentStrategy:
                             f"[Risk] {ticker}: block BUY (pos_cap cap={cap_notional:.2f} cur={cur_notional:.2f} max_pos_pct={max_pos_pct:.2f})",
                             priority=2,
                         )
-                        return None
+                        blocked_by_risk = True
+                        blocked_reason = "pos_cap"
+                        risk_flags.append("pos_cap_block")
                     allow_add = int(max(0.0, math.floor(room / float(price))))
                     if allow_add <= 0:
                         self._log(
                             f"[Risk] {ticker}: block BUY (pos_cap room={room:.2f} price={price:.2f})",
                             priority=2,
                         )
-                        return None
+                        blocked_by_risk = True
+                        blocked_reason = "pos_cap"
+                        risk_flags.append("pos_cap_block")
                     if allow_add < int(abs(shares_i)):
                         shares_i = int(max(1, allow_add))
                         self._log(
                             f"[Risk] {ticker}: clamp BUY size -> {shares_i} (max_pos_pct={max_pos_pct:.2f} eq={equity_now:.2f})",
                             priority=2,
                         )
+                        risk_flags.append("pos_cap_clamp")
                 except Exception:
                     pass
 
@@ -1472,7 +1503,7 @@ class MultiAgentStrategy:
             if step_enabled:
                 interval_s = float(step_cfg.get("interval_sec") or 60.0)
                 interval_s = max(5.0, min(interval_s, 3600.0))
-                now_ts = float(time.time())
+                now_ts = float(step_now_ts if step_now_ts is not None else time.time())
                 last = self._step_rl_last.get(str(ticker).upper())
                 last_ts = float(last.get("ts", 0.0) or 0.0) if isinstance(last, dict) else 0.0
                 if (now_ts - last_ts) >= interval_s:
@@ -1510,17 +1541,19 @@ class MultiAgentStrategy:
                         delta_eq = float(equity_now) - float(prev_eq)
 
                         pnl_scale = float(step_cfg.get("pnl_scale") or 0.001)
-                        pnl_scale = max(0.0, min(pnl_scale, 1.0))
+                        pnl_scale = max(0.0, min(pnl_scale, 100.0))
                         cash_pen = float(step_cfg.get("cash_penalty") or 0.0)
-                        cash_pen = max(0.0, min(cash_pen, 1.0))
+                        cash_pen = max(0.0, min(cash_pen, 10.0))
                         dd_pen = float(step_cfg.get("drawdown_penalty") or 0.0)
                         dd_pen = max(0.0, min(dd_pen, 10.0))
                         vol_pen = float(step_cfg.get("vol_penalty") or 0.0)
                         vol_pen = max(0.0, min(vol_pen, 10.0))
 
-                        reward = (delta_eq * pnl_scale)
+                        denom = max(1e-9, abs(float(prev_eq)))
+                        reward = (delta_eq / denom) * float(pnl_scale)
                         if float(cash_now) < 0.0 and cash_pen > 0.0:
-                            reward -= float(abs(cash_now)) * float(cash_pen)
+                            cash_ratio = float(abs(float(cash_now))) / max(1e-9, float(equity_now))
+                            reward -= float(cash_ratio) * float(cash_pen)
                         if dd < 0.0 and dd_pen > 0.0:
                             reward -= float(abs(dd)) * float(dd_pen)
                         if vol_ann > 0.0 and vol_pen > 0.0:
@@ -1530,6 +1563,11 @@ class MultiAgentStrategy:
                             "mode": "step",
                             "ticker": str(ticker).upper(),
                             "delta_equity": float(delta_eq),
+                            "attempted_action": str(attempted_action),
+                            "blocked": bool(blocked_by_risk),
+                            "blocked_reason": (str(blocked_reason) if blocked_reason else ""),
+                            "risk_flags": list(risk_flags),
+                            "shares": int(shares_i),
                         }
                         try:
                             mgr = get_online_learning_manager()
@@ -1540,11 +1578,14 @@ class MultiAgentStrategy:
                     self._step_rl_last[str(ticker).upper()] = {
                         "ts": float(now_ts),
                         "state": state_now,
-                        "action": str(action or "HOLD").upper(),
+                        "action": ("HOLD" if bool(blocked_by_risk) else str(action or "HOLD").upper()),
                         "equity": float(equity_now),
                     }
         except Exception:
             pass
+
+        if bool(blocked_by_risk):
+            return None
 
         signal = {
             "ticker": ticker,
