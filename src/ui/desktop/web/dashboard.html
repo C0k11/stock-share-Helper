@@ -99,9 +99,10 @@
         <button id="btnChartLine" class="active" onclick="setLiveChartMode('line')" style="background: rgba(239,68,68,0.78);">Line</button>
         <button id="btnChartCandle" onclick="setLiveChartMode('candlestick')" style="background: rgba(55,65,81,0.92);">Candles</button>
         <button id="btnRefresh" onclick="loadLiveData()">Refresh</button>
+        <button id="btnReloadUI" onclick="reloadDashboardUI()" style="background: rgba(31,41,55,0.96); border: 1px solid rgba(255,255,255,0.14);">Reload UI</button>
         <button id="btnReloadModels" onclick="reloadModels()" style="background: rgba(34,197,94,0.85);">Reload Models</button>
         <button id="btnRL" onclick="startOnlineRL()" style="background: rgba(139,92,246,0.92);">Start RL</button>
-        <button id="btnPlannerOLRL" onclick="startNightlyTraining()" style="background: rgba(16,185,129,0.85);">Planner OLRL</button>
+        <button id="btnPlannerOLRL" onclick="startNightlyTraining()" style="background: rgba(16,185,129,0.85);">Mari OLRL</button>
         <button id="btnAlphaTrain" onclick="startAlphaTraining()" style="background: rgba(245,158,11,0.88);">Alpha Evolution (train)</button>
         <button id="btnAlphaStop" onclick="stopAlphaTraining()" style="background: rgba(239,68,68,0.78);">Stop Alpha</button>
         <label style="font-size: 13px;"><input type="checkbox" id="autoRefresh" checked> Auto (5s)</label>
@@ -151,7 +152,7 @@
       <div class="agent-log" id="log_news">--</div>
     </div>
     <div class="agent-panel" id="panel_macro">
-      <div class="agent-title">Macro Governor</div>
+      <div class="agent-title">Rules / Compliance</div>
       <div class="agent-log" id="log_macro">--</div>
     </div>
     <div class="agent-panel" id="panel_system2">
@@ -268,8 +269,16 @@
       try {
         window.open(url, '_blank');
       } catch (e) {
-        try { window.location.href = url; } catch (e2) {}
+        try {
+          window.location.href = url;
+        } catch (e2) {}
       }
+    }
+
+    function reloadDashboardUI() {
+      try {
+        window.location.reload();
+      } catch (e) {}
     }
 
     function _sessionId() {
@@ -299,7 +308,7 @@
       try {
         let t = String(s || '');
         // Keep UI snappy: don't TTS extremely long outputs.
-        if (t.length > 220) t = t.slice(0, 220) + '…';
+        if (t.length > 520) t = t.slice(0, 520) + '…';
         // Preserve the user's preferred addressing.
         const keepSensei = t.includes('Sensei');
         // Strip long hiragana/katakana runs which often cause language switching.
@@ -730,7 +739,7 @@
       }
     }
 
-    // ===== Ouroboros Nightly Evolution (Planner OLRL) =====
+    // ===== Ouroboros Nightly Evolution (Mari OLRL) =====
     let trainPoll = null;
 
     async function pollNightlyTraining() {
@@ -743,42 +752,42 @@
         setTrainLog(tail || '(No log yet)');
 
         if (running) {
-          setTrainStatus('Planner OLRL running' + (pid ? (' (pid=' + pid + ')') : ''));
+          setTrainStatus('Mari OLRL running (inference paused)' + (pid ? (' (pid=' + pid + ')') : ''));
         } else {
           const meta = (data && data.meta && typeof data.meta === 'object') ? data.meta : null;
           let next = '';
           try {
             next = meta && meta.outputs ? String(meta.outputs.next_dpo_adapter || '') : '';
           } catch (e) { next = ''; }
-          setTrainStatus('Planner OLRL finished' + (rc ? (' (rc=' + rc + ')') : '') + (next ? (' | next: ' + next) : ''));
+          setTrainStatus('Mari OLRL finished' + (rc ? (' (rc=' + rc + ')') : '') + (next ? (' | next: ' + next) : ''));
           if (trainPoll) {
             clearInterval(trainPoll);
             trainPoll = null;
           }
         }
       } catch (e) {
-        setTrainStatus('Planner OLRL status error: ' + (e && e.message ? e.message : String(e)));
+        setTrainStatus('Mari OLRL status error: ' + (e && e.message ? e.message : String(e)));
       }
     }
 
     async function startNightlyTraining() {
       const btn = document.getElementById('btnPlannerOLRL');
       if (btn) btn.disabled = true;
-      setTrainStatus('Starting Planner OLRL...');
+      setTrainStatus('Starting Mari OLRL (inference will pause)...');
       try {
         const resp = await fetch(apiBase + '/evolution/nightly/train/start', { method: 'POST' });
         const data = await resp.json();
         if (data && data.ok) {
-          setTrainStatus('Planner OLRL started');
+          setTrainStatus('Mari OLRL started (inference paused)');
           await pollNightlyTraining();
           if (!trainPoll) {
             trainPoll = setInterval(pollNightlyTraining, 2000);
           }
         } else {
-          setTrainStatus('Planner OLRL start failed');
+          setTrainStatus('Mari OLRL start failed');
         }
       } catch (e) {
-        setTrainStatus('Planner OLRL start error: ' + (e && e.message ? e.message : String(e)));
+        setTrainStatus('Mari OLRL start error: ' + (e && e.message ? e.message : String(e)));
       } finally {
         if (btn) btn.disabled = false;
       }
@@ -822,12 +831,12 @@
     async function startAlphaTraining() {
       const btn = document.getElementById('btnAlphaTrain');
       btn.disabled = true;
-      setAlphaStatus('Starting alpha training...');
+      setAlphaStatus('Starting alpha training (inference will pause)...');
       try {
         const resp = await fetch(apiBase + '/evolution/alpha/train/start', { method: 'POST' });
         const data = await resp.json();
         if (data && data.ok) {
-          setAlphaStatus('Alpha training started');
+          setAlphaStatus('Alpha training started (inference paused)');
           await pollAlphaTraining();
           if (!alphaPoll) {
             alphaPoll = setInterval(pollAlphaTraining, 2000);
@@ -890,6 +899,7 @@
     let liveTradesCache = [];
     let liveLoading = false;
     let lastChartKey = '';
+    let lastPricesByTicker = {};
     let lastTickersKey = '';
     let currentLiveTicker = '';
 
@@ -1380,34 +1390,133 @@
       if (!ticker) return;
       
       try {
+        let chartLimit = 600;
+        try {
+          const cached = Array.isArray(lastPricesByTicker[ticker]) ? lastPricesByTicker[ticker] : [];
+          if (!cached.length) chartLimit = 5000;
+        } catch (e) { chartLimit = 600; }
+
         const [chartData, tradesData] = await Promise.all([
-          apiGet(`/live/chart/${encodeURIComponent(ticker)}?limit=600`),
-          apiGet('/live/trades')
+          apiGet(`/live/chart/${encodeURIComponent(ticker)}?limit=${chartLimit}`),
+          apiGet('/live/trades?limit=600')
         ]);
         
-        const prices = chartData.prices || [];
+        let prices = chartData.prices || [];
         liveTradesCache = tradesData.trades || [];
         
         await ensurePlotly();
         if (typeof Plotly === 'undefined') return;
         
         if (!prices.length) {
-          Plotly.purge('chart');
-          lastChartKey = '';
-          try {
-            setLiveStatus('No chart data yet (try Refresh or switch source)');
-          } catch (e) {}
-          return;
+          const cached = lastPricesByTicker[ticker] || [];
+          if (cached.length) {
+            prices = cached;
+            try { setLiveStatus('No new chart data (showing last known data)'); } catch (e) {}
+          } else {
+            Plotly.purge('chart');
+            lastChartKey = '';
+            try {
+              setLiveStatus('No chart data yet (try Refresh or switch source)');
+            } catch (e) {}
+            return;
+          }
         }
 
+        let viewStartMs = null;
+        let viewEndMs = null;
+
+        try {
+          const cachedRows = Array.isArray(lastPricesByTicker[ticker]) ? lastPricesByTicker[ticker] : [];
+          const rows = cachedRows.concat(Array.isArray(prices) ? prices : []);
+          const norm = [];
+          for (const p of rows) {
+            if (!p || typeof p !== 'object') continue;
+            const t = String(p.time || '');
+            const ms = Date.parse(t);
+            if (!t || !isFinite(ms)) continue;
+            norm.push(Object.assign({}, p, { _ms: ms }));
+          }
+          norm.sort((a, b) => (a._ms || 0) - (b._ms || 0));
+          const seen = new Set();
+          const dedup = [];
+          for (const p of norm) {
+            const k = String(p._ms);
+            if (seen.has(k)) continue;
+            seen.add(k);
+            dedup.push(p);
+          }
+          if (dedup.length) {
+            let startIdx = 0;
+            try {
+              const dts = [];
+              const j0 = Math.max(1, dedup.length - 60);
+              for (let j = j0; j < dedup.length; j++) {
+                const dt = Number(dedup[j]._ms) - Number(dedup[j - 1]._ms);
+                if (isFinite(dt) && dt > 0) dts.push(dt);
+              }
+              dts.sort((a, b) => a - b);
+              const med = dts.length ? dts[Math.floor(dts.length / 2)] : 0;
+              const gapMs = Math.max(10 * 60 * 1000, 6 * (med || 0));
+              for (let j = dedup.length - 1; j >= 1; j--) {
+                const dt = Number(dedup[j]._ms) - Number(dedup[j - 1]._ms);
+                if (isFinite(dt) && dt > gapMs) {
+                  startIdx = j;
+                  break;
+                }
+              }
+            } catch (e) { startIdx = 0; }
+
+            const seg = dedup.slice(Math.max(0, startIdx));
+            const endMs = Number(seg[seg.length - 1]._ms);
+            const windowMs = 2 * 60 * 60 * 1000;
+            let filtered = seg.filter(p => Number(p._ms) >= (endMs - windowMs));
+            if (filtered.length < 5 && seg.length > 0) {
+              filtered = seg.slice(Math.max(0, seg.length - 200));
+            }
+            try {
+              if (filtered.length) {
+                viewStartMs = Number(filtered[0]._ms);
+                viewEndMs = Number(filtered[filtered.length - 1]._ms);
+              }
+            } catch (e) {}
+
+            // Keep full history (for rangeslider / ALL), but set the viewport to latest window.
+            // Cap retained history to a reasonable size to avoid unbounded growth.
+            const cap = 20000;
+            const kept = (dedup.length > cap) ? dedup.slice(dedup.length - cap) : dedup;
+            prices = kept.map(p => {
+              const q = Object.assign({}, p);
+              try { delete q._ms; } catch (e) {}
+              return q;
+            });
+          }
+        } catch (e) {}
+
+        try { lastPricesByTicker[ticker] = prices; } catch (e) {}
+
         const last = prices[prices.length - 1] || {};
-        const chartKey = `${ticker}|${prices.length}|${String(last.time || '')}|${String(last.close || '')}|${String(last.source || '')}`;
+        const first = prices.length ? (prices[0] || {}) : {};
+        const chartKey = `${ticker}|${prices.length}|${String(first.time || '')}|${String(last.time || '')}|${String(last.close || '')}|${String(last.source || '')}`;
         if (chartKey === lastChartKey) {
           return;
         }
         lastChartKey = chartKey;
         
-        const x = prices.map(p => p.time);
+        const x = [];
+        const xMs = [];
+        for (const p of prices) {
+          try {
+            const t = String((p && p.time) ? p.time : '');
+            const ms = Date.parse(t);
+            xMs.push(ms);
+            if (isFinite(ms)) x.push(new Date(ms).toISOString());
+            else x.push(t);
+          } catch (e) {
+            const t2 = String((p && p.time) ? p.time : '');
+            xMs.push(NaN);
+            x.push(t2);
+          }
+        }
         const lastBarTime = x.length ? x[x.length - 1] : null;
         const lastBarMs = lastBarTime ? Date.parse(String(lastBarTime)) : NaN;
         function _clampTradeTime(ts) {
@@ -1415,7 +1524,7 @@
           const ms = Date.parse(String(ts || ''));
           if (!isFinite(ms) || !isFinite(lastBarMs)) return ts;
           if (ms > lastBarMs) return lastBarTime;
-          return ts;
+          try { return new Date(ms).toISOString(); } catch (e) { return ts; }
         }
         const closes = prices.map(p => {
           try {
@@ -1530,26 +1639,48 @@
         }
 
         // Avoid a "flat" looking chart due to y-axis including 0 (e.g. area fill).
-        // Auto-range around the actual price series.
+        // Auto-range around the visible window by default.
         let yRange = null;
         try {
-          const ys = closes.filter(v => typeof v === 'number' && isFinite(v) && v > 0);
+          const ys0 = [];
+          for (let i = 0; i < closes.length; i++) {
+            const v = closes[i];
+            const ms = xMs[i];
+            if (!(typeof v === 'number' && isFinite(v) && v > 0)) continue;
+            if (isFinite(viewStartMs) && isFinite(viewEndMs) && isFinite(ms)) {
+              if (ms >= viewStartMs && ms <= viewEndMs) ys0.push(v);
+            } else {
+              ys0.push(v);
+            }
+          }
+          const ys = ys0.length ? ys0 : closes.filter(v => typeof v === 'number' && isFinite(v) && v > 0);
           if (ys.length >= 1) {
             let ymin = Math.min(...ys);
             let ymax = Math.max(...ys);
             if (isFinite(ymin) && isFinite(ymax) && ymin > 0 && ymax > 0) {
               if (ymax <= ymin) {
-                const pad0 = Math.max(0.02 * ymin, 0.5);
+                const pad0 = Math.max(0.002 * ymin, 0.05);
                 yRange = [ymin - pad0, ymax + pad0];
               } else {
-                const pad = Math.max(0.02 * (ymax - ymin), 0.01 * ymin);
+                const span = Math.max(1e-9, (ymax - ymin));
+                const pad = Math.max(0.15 * span, 0.001 * ymin, 0.02);
                 yRange = [ymin - pad, ymax + pad];
               }
             }
           }
         } catch (e) { yRange = null; }
 
+        let xRange = null;
+        try {
+          if (isFinite(viewStartMs) && isFinite(viewEndMs)) {
+            xRange = [new Date(Number(viewStartMs)).toISOString(), new Date(Number(viewEndMs)).toISOString()];
+          } else if (x.length >= 2) {
+            xRange = [String(x[0] || ''), String(x[x.length - 1] || '')];
+          }
+        } catch (e) { xRange = null; }
+
         const layout = {
+          uirevision: chartKey,
           title: { text: `${ticker} - Live`, font: { color: '#e5e7eb' } },
           plot_bgcolor: 'rgba(17,24,39,0.96)',
           paper_bgcolor: 'rgba(17,24,39,0.96)',
@@ -1559,6 +1690,7 @@
           hovermode: 'x unified',
           shapes,
           xaxis: {
+            type: 'date',
             rangeslider: { visible: true, thickness: 0.08 },
             rangeselector: {
               bgcolor: 'rgba(31,41,55,0.96)',
@@ -1578,7 +1710,9 @@
             showspikes: true,
             spikemode: 'across',
             spikesnap: 'cursor',
-            spikecolor: 'rgba(255,255,255,0.22)'
+            spikecolor: 'rgba(255,255,255,0.22)',
+            autorange: xRange ? false : true,
+            range: xRange || undefined
           },
           yaxis: {
             gridcolor: 'rgba(255,255,255,0.08)',
@@ -1638,12 +1772,47 @@
           planner: [], gatekeeper: [], scalper: [], analyst: [],
           chartist: [], news: [], macro: [], system2: [], execution: []
         };
+
+        function escapeHtml(s) {
+          const t = String(s == null ? '' : s);
+          return t
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+        }
         
         logsForPanels.forEach(log => {
           const msgRaw = String((log && log.message) ? log.message : '');
           const msg = msgRaw.toLowerCase();
           const isBackfill = msg.includes('backfill');
           const isSystem2 = (msg.includes('system 2') || msg.includes('debate') || msg.includes('judge'));
+          const isRules = (msg.includes('[rules]') || msg.startsWith('rules ') || msg.startsWith('[rules '));
+
+          const isNews = (
+            msg.includes('[news]') ||
+            msg.startsWith('news ') ||
+            msg.startsWith('[news ') ||
+            msg.includes(' news_id') ||
+            msg.includes(' sentiment=') ||
+            msg.includes('gdelt') ||
+            msg.includes('rss') ||
+            msg.startsWith('[news')
+          );
+
+          const isAnalyst = (
+            msg.includes('[analyst]') ||
+            msg.startsWith('analyst (dpo):') ||
+            msg.includes('analyst (dpo):') ||
+            msg.includes('adapter=analyst')
+          );
+
+          const isScalper = (
+            msg.includes('[scalper]') ||
+            msg.startsWith('scalper:') ||
+            msg.includes('adapter=scalper')
+          );
 
           // Execution should only capture actual execution lines, not generic "signal" words in reasoning.
           const isExec = (
@@ -1657,12 +1826,22 @@
             return;
           }
 
+          if (isRules) {
+            panels.macro.push(log);
+            return;
+          }
+
+          // News should be exclusive: avoid misrouting to Analyst due to headlines containing "analyst(s)".
+          if (isNews) {
+            panels.news.push(log);
+            return;
+          }
+
           // Match to appropriate panel - each log can go to multiple panels if relevant
           if (msg.includes('planner')) panels.planner.push(log);
           if (msg.includes('gatekeeper')) panels.gatekeeper.push(log);
-          if (msg.includes('scalper')) panels.scalper.push(log);
-          if (msg.includes('analyst') || msg.includes('dpo')) panels.analyst.push(log);
-          if (msg.includes('[news]')) panels.news.push(log);
+          if (isScalper) panels.scalper.push(log);
+          if (isAnalyst) panels.analyst.push(log);
           if (!isSystem2 && (msg.includes('macro') || msg.includes('governor'))) panels.macro.push(log);
           if (isSystem2) panels.system2.push(log);
 
@@ -1676,12 +1855,15 @@
         // Update each panel
         Object.keys(panels).forEach(key => {
           const el = document.getElementById('log_' + key);
-          const items = panels[key].slice(-5);
+          const maxItems = (key === 'news') ? 20 : 5;
+          const items = panels[key].slice(-maxItems);
           if (!items.length) {
             el.innerHTML = '<span class="time">--</span>';
           } else {
             el.innerHTML = items.map(log => {
-              return `<div class="entry"><span class="time">[${log.time}]</span> ${log.message}</div>`;
+              const t = escapeHtml(log.time);
+              const m = escapeHtml(log.message);
+              return `<div class="entry"><span class="time">[${t}]</span> ${m}</div>`;
             }).join('');
             el.scrollTop = el.scrollHeight;
           }

@@ -478,7 +478,9 @@ class MultiAgentStrategy:
                             else:
                                 mt = float(getattr(self, "_gen_max_time_sec", 12.0) or 12.0)
                                 try:
-                                    mt = min(mt, 2.5)
+                                    mt_cap = float(getattr(self, "_gen_max_time_cap_sec", 12.0) or 12.0)
+                                    mt_cap = max(0.5, mt_cap)
+                                    mt = min(float(mt), float(mt_cap))
                                 except Exception:
                                     pass
                             gen_ids = model0.generate(
@@ -833,11 +835,7 @@ class MultiAgentStrategy:
                 prev0 = str(m.get(ticker, "") or "").strip().lower()
                 if prev0 and prev0 != src0:
                     try:
-                        self.price_history[ticker] = []
-                    except Exception:
-                        pass
-                    try:
-                        self._log(f"[MarketData] {ticker} source switched {prev0}->{src0} -> reset price_history", priority=2)
+                        self._log(f"[MarketData] {ticker} source switched {prev0}->{src0}", priority=2)
                     except Exception:
                         pass
                 m[ticker] = src0
@@ -1167,7 +1165,8 @@ class MultiAgentStrategy:
                         skip_vlm = True
                 except Exception:
                     pass
-                self._log("System 2 Debate: initiated...", priority=2)
+                proposed_action = str(action or "").strip().upper() or str(action)
+                self._log(f"System 2 Debate: initiated... ticker={ticker} proposed={proposed_action} trace_ids={trace_ids}", priority=2)
                 
                 # Chartist Overlay
                 if skip_vlm:
@@ -1184,7 +1183,7 @@ class MultiAgentStrategy:
                 # System2 Critic -> Judge (LLM via hot-swap); may override or block
                 approved, final_action, reason = self._system2_debate(
                     ticker=ticker,
-                    proposed_action=action,
+                    proposed_action=proposed_action,
                     proposed_analysis=analysis,
                     features=features,
                     chart_score=int(chart_score),
@@ -1214,7 +1213,33 @@ class MultiAgentStrategy:
                     if allow_lenient:
                         self._log(f"System 2 (Judge): LENIENT_BYPASS - {reason}", priority=2)
                     else:
-                        self._log(f"System 2 (Judge): BLOCKED - {reason}", priority=2)
+                        self._log(
+                            f"System 2 (Judge): BLOCKED ticker={ticker} proposed={proposed_action} final={final_action} trace_ids={trace_ids} reason={reason}",
+                            priority=2,
+                        )
+                        try:
+                            evolution_recorder.record(
+                                agent_id="system2",
+                                context=json.dumps(
+                                    {
+                                        "ticker": ticker,
+                                        "expert": expert,
+                                        "trace_id": trace_id,
+                                        "trace_ids": trace_ids,
+                                        "proposed_action": proposed_action,
+                                        "final_action": final_action,
+                                        "chart_score": chart_score,
+                                        "macro_gear": macro_gear,
+                                        "features": features,
+                                    },
+                                    ensure_ascii=False,
+                                ),
+                                action="REJECTED",
+                                outcome=0.0,
+                                feedback=str(reason or ""),
+                            )
+                        except Exception:
+                            pass
                         return None
 
                 try:
@@ -1223,8 +1248,11 @@ class MultiAgentStrategy:
                         context=json.dumps(
                             {
                                 "ticker": ticker,
-                                "proposed_action": action,
                                 "expert": expert,
+                                "trace_id": trace_id,
+                                "trace_ids": trace_ids,
+                                "proposed_action": proposed_action,
+                                "final_action": final_action,
                                 "chart_score": chart_score,
                                 "macro_gear": macro_gear,
                                 "features": features,
@@ -1238,7 +1266,10 @@ class MultiAgentStrategy:
                 except Exception:
                     pass
                 
-                self._log(f"System 2 (Judge): {'APPROVED' if approved else 'REJECTED'} (conf={confidence:.2f}) reason={reason}", priority=2)
+                self._log(
+                    f"System 2 (Judge): {'APPROVED' if approved else 'REJECTED'} ticker={ticker} proposed={proposed_action} final={final_action} trace_ids={trace_ids} reason={reason}",
+                    priority=2,
+                )
         
         
         # --- 6. Generate Signal ---
@@ -1460,8 +1491,13 @@ class MultiAgentStrategy:
                         avg_score = 0.0
                     sentiment = str(obj.get("news_sentiment") or "neutral").strip().lower() or "neutral"
                     summary = str(obj.get("summary") or "").strip()
-                    if len(summary) > 240:
-                        summary = summary[:237] + "..."
+                    try:
+                        maxc = int(cfg.get("summary_max_chars", 800))
+                    except Exception:
+                        maxc = 800
+                    maxc = max(180, min(maxc, 4000))
+                    if len(summary) > maxc:
+                        summary = summary[: max(0, maxc - 3)] + "..."
                     src_label = "yahoo+google" if (bool(cfg.get("google_enabled", False))) else "yahoo_rss"
                     try:
                         if time_mode == "market" and historical_enabled and isinstance(asof_time, datetime):
@@ -1551,9 +1587,19 @@ class MultiAgentStrategy:
 
             summary = ""
             if titles:
-                summary = " | ".join(titles[:3])
-                if len(summary) > 240:
-                    summary = summary[:237] + "..."
+                try:
+                    max_titles = int(cfg.get("summary_titles", 6))
+                except Exception:
+                    max_titles = 6
+                max_titles = max(3, min(max_titles, 18))
+                summary = " | ".join(titles[:max_titles])
+                try:
+                    maxc = int(cfg.get("summary_max_chars", 800))
+                except Exception:
+                    maxc = 800
+                maxc = max(180, min(maxc, 4000))
+                if len(summary) > maxc:
+                    summary = summary[: max(0, maxc - 3)] + "..."
 
             src_label = "yahoo+google" if (bool(cfg.get("google_enabled", False))) else "yahoo_rss"
             try:
@@ -1758,8 +1804,19 @@ class MultiAgentStrategy:
             sentiment = "negative"
 
         summary = " | ".join(titles[:3]).strip()
-        if len(summary) > 240:
-            summary = summary[:237] + "..."
+        try:
+            max_titles = int(cfg.get("summary_titles", 6))
+        except Exception:
+            max_titles = 6
+        max_titles = max(3, min(max_titles, 18))
+        summary = " | ".join(titles[:max_titles]).strip()
+        try:
+            maxc = int(cfg.get("summary_max_chars", 800))
+        except Exception:
+            maxc = 800
+        maxc = max(180, min(maxc, 4000))
+        if len(summary) > maxc:
+            summary = summary[: max(0, maxc - 3)] + "..."
 
         sig = {
             "news_count": int(len(items) or 0),
@@ -1943,7 +2000,7 @@ class MultiAgentStrategy:
         except Exception:
             s0 = None
 
-        self.price_history[ticker].append({
+        rec = {
             "time": t,
             "open": o,
             "high": h,
@@ -1951,7 +2008,24 @@ class MultiAgentStrategy:
             "close": c,
             "volume": v,
             "source": s0,
-        })
+        }
+        try:
+            ph = self.price_history[ticker]
+            if ph:
+                last = ph[-1] if isinstance(ph[-1], dict) else None
+                last_t = (last or {}).get("time") if isinstance(last, dict) else None
+                last_s = (last or {}).get("source") if isinstance(last, dict) else None
+                if str(last_t) == str(t) and str(last_s or "") == str(s0 or ""):
+                    ph[-1] = rec
+                else:
+                    ph.append(rec)
+            else:
+                ph.append(rec)
+        except Exception:
+            try:
+                self.price_history[ticker].append(rec)
+            except Exception:
+                pass
         
         # Keep last 60 bars
         if len(self.price_history[ticker]) > 60:
@@ -2855,6 +2929,26 @@ class MultiAgentStrategy:
         if action_up not in {"BUY", "SELL", "HOLD"}:
             action_up = "HOLD"
 
+        pos_shares = 0.0
+        pos_side = "FLAT"
+        try:
+            br = getattr(self.engine, "broker", None)
+            pos = None
+            if br is not None and isinstance(getattr(br, "positions", None), dict):
+                pos = br.positions.get(str(ticker).upper())
+            try:
+                if pos is not None:
+                    pos_shares = float(getattr(pos, "shares", 0.0) or 0.0)
+            except Exception:
+                pos_shares = 0.0
+            if pos_shares > 0.0:
+                pos_side = "LONG"
+            elif pos_shares < 0.0:
+                pos_side = "SHORT"
+        except Exception:
+            pos_shares = 0.0
+            pos_side = "FLAT"
+
         lines = []
         try:
             tech = features.get("technical") if isinstance(features.get("technical"), dict) else {}
@@ -2870,6 +2964,8 @@ class MultiAgentStrategy:
                 f"Composite signal: {sig.get('composite', '')}",
                 f"Chartist score: {int(chart_score)}",
                 f"Macro regime: {str(macro_label)} (gear={float(macro_gear)})",
+                f"Current position shares: {pos_shares:g} ({pos_side})",
+                "Action semantics: BUY increases long / reduces short; SELL reduces long / increases short; HOLD no trade; CLEAR means close position to FLAT.",
                 "",
                 f"Proposed decision: {action_up}",
                 f"Proposed analysis: {str(proposed_analysis or '').strip()}",
@@ -2880,6 +2976,7 @@ class MultiAgentStrategy:
         critic_sys = (
             "You are a strict trading decision critic.\n"
             "Rules: return STRICT JSON only; no markdown; no extra text; no newlines.\n"
+            "You MUST respect position semantics: if current position is SHORT (shares<0), reducing risk/exposure means BUY (cover), not SELL. If LONG (shares>0), reducing exposure means SELL.\n"
             "Keep 'pro' and 'con' concise (<= 30 words each).\n"
             "Response Format (STRICT JSON ONLY): {\"accept\": true|false, \"suggested_decision\": \"BUY\"|\"SELL\"|\"HOLD\"|\"CLEAR\", \"pro\": \"...\", \"con\": \"...\", \"reasons\": [..3 strings..]}"
         )
@@ -2888,6 +2985,7 @@ class MultiAgentStrategy:
         judge_sys = (
             "You are a strict trading decision judge.\n"
             "Rules: return STRICT JSON only; no markdown; no extra text; no newlines.\n"
+            "You MUST respect position semantics: if current position is SHORT (shares<0), BUY reduces short exposure and SELL increases short exposure. If LONG (shares>0), SELL reduces exposure and BUY increases exposure.\n"
             "Keep 'rationale' concise (<= 60 words).\n"
             "Response Format (STRICT JSON ONLY): {\"final_decision\": \"BUY\"|\"SELL\"|\"HOLD\"|\"CLEAR\", \"rationale\": \"...\"}"
         )
@@ -2968,6 +3066,7 @@ class MultiAgentStrategy:
         judge_user = "\n".join(
             [
                 f"Ticker: {str(ticker).upper()}",
+                f"Current position shares: {pos_shares:g} ({pos_side})",
                 f"Proposal JSON: {json.dumps({'decision': action_up, 'analysis': str(proposed_analysis or '').strip()}, ensure_ascii=False)}",
                 f"Critic JSON: {json.dumps(critic_json, ensure_ascii=False)}",
             ]

@@ -14,6 +14,8 @@ class TradingEngine:
         self.is_running = False
         self._thread: Optional[threading.Thread] = None
 
+        self.paused: bool = False
+
         self.data_feed: Any = None
         self.strategy: Any = None
         self.broker: Any = None
@@ -52,6 +54,8 @@ class TradingEngine:
                 self.push(EventType.ERROR, {"error": str(e), "event": str(event.type)})
 
     def _handle_event(self, event: Event) -> None:
+        if bool(getattr(self, "paused", False)) and event.type in {EventType.MARKET_DATA, EventType.SIGNAL, EventType.ORDER}:
+            return
         if event.type == EventType.MARKET_DATA:
             try:
                 if self.broker is not None and hasattr(self.broker, "on_market_data"):

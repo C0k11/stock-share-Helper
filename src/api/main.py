@@ -9,12 +9,14 @@ import sys
 import time
 import threading
 import uuid
+import math
 import ipaddress
 import socket
 import urllib.request
 import urllib.parse
 import urllib.error
-from datetime import date, datetime
+from collections import deque
+from datetime import date, datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -144,6 +146,95 @@ _SOVITS_RESTARTED_AFTER_ALPHA: bool = False
 
 # Short-lived per-session state for better conversational continuity (desktop only).
 _SESSION_STATE: Dict[str, Dict[str, Any]] = {}
+
+
+def _is_training_running() -> Tuple[bool, str]:
+    try:
+        with _EVOLUTION_TRAIN_LOCK:
+            p = _EVOLUTION_TRAIN_PROC
+        if p is not None and p.poll() is None:
+            return True, "ouroboros"
+    except Exception:
+        pass
+    try:
+        with _ALPHA_TRAIN_LOCK:
+            p = _ALPHA_TRAIN_PROC
+        if p is not None and p.poll() is None:
+            return True, "alpha"
+    except Exception:
+        pass
+    return False, ""
+
+
+def _set_live_engine_paused(paused: bool) -> None:
+    try:
+        if _live_runner is None:
+            return
+        eng = getattr(_live_runner, "engine", None)
+        if eng is None:
+            return
+        setattr(eng, "paused", bool(paused))
+    except Exception:
+        return
+
+
+def _suspend_live_inference() -> None:
+    _set_live_engine_paused(True)
+    try:
+        if _live_runner is None:
+            return
+        stg = getattr(_live_runner, "strategy", None)
+        if stg is None:
+            return
+        acquired = False
+        try:
+            lk = getattr(stg, "_inference_lock", None)
+            if lk is not None:
+                acquired = bool(lk.acquire(timeout=2.0))
+        except Exception:
+            acquired = False
+        try:
+            setattr(stg, "model", None)
+        except Exception:
+            pass
+        try:
+            setattr(stg, "tokenizer", None)
+        except Exception:
+            pass
+        try:
+            setattr(stg, "models_loaded", False)
+        except Exception:
+            pass
+        try:
+            setattr(stg, "models_error", "suspended_for_training")
+        except Exception:
+            pass
+        try:
+            import torch
+            try:
+                if torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+        except Exception:
+            pass
+        try:
+            if acquired:
+                lk.release()
+        except Exception:
+            pass
+    except Exception:
+        return
+
+
+def _resume_live_after_training() -> None:
+    try:
+        running, _ = _is_training_running()
+        if running:
+            return
+    except Exception:
+        pass
+    _set_live_engine_paused(False)
 
 
 def _get_session_id(ctx: Dict[str, Any]) -> Optional[str]:
@@ -1931,8 +2022,8 @@ def _run_news_analysis_job(news_id: str) -> None:
         try:
             if _live_runner is not None and isinstance(getattr(_live_runner, "agent_logs", None), list):
                 s0 = str(summary or "").strip().replace("\n", " ")
-                if len(s0) > 260:
-                    s0 = s0[:257] + "..."
+                if len(s0) > 900:
+                    s0 = s0[:897] + "..."
                 _live_runner.agent_logs.append({
                     "time": datetime.now().strftime("%H:%M:%S"),
                     "type": "agent",
@@ -2069,6 +2160,13 @@ def _execute_action(*, action: str, params: Dict[str, Any]) -> Dict[str, Any]:
         "params": p,
     })
 
+    try:
+        running, which = _is_training_running()
+        if running and a in {"start_rl", "rl_start", "set_mode", "trading_mode"}:
+            return {"ok": False, "error": f"training_running:{which}"}
+    except Exception:
+        pass
+
     if a in {"start_rl", "rl_start"}:
         if _live_runner is None:
             return {"ok": False, "error": "no live session"}
@@ -2187,6 +2285,13 @@ def _execute_live_order_from_chat(cmd: Dict[str, Any]) -> Dict[str, Any]:
     if _live_runner is None:
         return {"ok": False, "error": "no live session"}
 
+    try:
+        running, which = _is_training_running()
+        if running:
+            return {"ok": False, "error": f"training_running:{which}"}
+    except Exception:
+        pass
+
     tk = str(cmd.get("ticker") or "").strip().upper()
     act = str(cmd.get("action") or "").strip().upper()
     if not tk or act not in {"BUY", "SELL", "CLOSE"}:
@@ -2276,6 +2381,19 @@ async def chat(req: ChatRequest):
     if not text:
         raise HTTPException(status_code=400, detail="message is required")
     ctx = req.context if isinstance(req.context, dict) else {}
+
+    try:
+        running, which = _is_training_running()
+        if running:
+            msg = "Sensei, 训练正在运行中（会占满 GPU）。请先等训练结束或点 Stop，再点 Reload Models 恢复推理。"
+            if which:
+                msg = f"Sensei, {which} 训练正在运行中（会占满 GPU）。请先等训练结束或点 Stop，再点 Reload Models 恢复推理。"
+            return JSONResponse(
+                content={"reply": msg, "message_id": None},
+                media_type="application/json; charset=utf-8",
+            )
+    except Exception:
+        pass
 
     trade_res: Optional[Dict[str, Any]] = None
     try:
@@ -3066,6 +3184,11 @@ def _spawn_train_watcher(proc: subprocess.Popen) -> None:
                 _SOVITS_RESTARTED_AFTER_TRAIN = True
                 _SOVITS_RESUME_AFTER_TRAIN = False
 
+        try:
+            _resume_live_after_training()
+        except Exception:
+            pass
+
     try:
         th = threading.Thread(target=_run, daemon=True)
         _EVOLUTION_TRAIN_WATCHER = th
@@ -3146,6 +3269,11 @@ def _spawn_alpha_train_watcher(proc: subprocess.Popen) -> None:
                 _SOVITS_RESTARTED_AFTER_ALPHA = True
                 _SOVITS_RESUME_AFTER_ALPHA = False
 
+        try:
+            _resume_live_after_training()
+        except Exception:
+            pass
+
     try:
         th = threading.Thread(target=_run, daemon=True)
         _ALPHA_TRAIN_WATCHER = th
@@ -3196,16 +3324,7 @@ async def start_nightly_evolution_train():
         pass
 
     try:
-        setattr(_live_runner, "load_models", True)
-    except Exception:
-        pass
-
-    try:
-        stg = getattr(_live_runner, "strategy", None)
-        if stg is not None and (not bool(getattr(stg, "models_loaded", False))):
-            fn = getattr(stg, "load_models", None)
-            if callable(fn):
-                fn()
+        _suspend_live_inference()
     except Exception:
         pass
 
@@ -3343,6 +3462,11 @@ async def stop_nightly_evolution_train():
     with _SOVITS_LOCK:
         if _SOVITS_RESUME_AFTER_TRAIN:
             _SOVITS_RESTARTED_AFTER_TRAIN = False
+
+    try:
+        _resume_live_after_training()
+    except Exception:
+        pass
 
     return {"ok": True, "stopped": True, "pid": int(getattr(p, "pid", 0) or 0), "log_path": str(logp) if logp else ""}
 
@@ -3575,6 +3699,11 @@ async def stop_alpha_evolution_train():
     with _SOVITS_LOCK:
         if _SOVITS_RESUME_AFTER_ALPHA:
             _SOVITS_RESTARTED_AFTER_ALPHA = False
+
+    try:
+        _resume_live_after_training()
+    except Exception:
+        pass
 
     return {"ok": True, "stopped": True, "pid": int(getattr(p, "pid", 0) or 0), "log_path": str(logp) if logp else ""}
 
@@ -4030,9 +4159,17 @@ def _call_llm(*, text: str, ctx: Dict[str, Any], profile: str = "work") -> Optio
         except Exception:
             temperature = 0.85
         try:
-            max_tokens = min(int(max_tokens), 160)
+            mt_chat = (llm_cfg or {}).get("max_tokens_chat", None)
+            if mt_chat is None:
+                mt_chat = max_tokens
+            max_tokens = int(mt_chat)
         except Exception:
-            max_tokens = 160
+            max_tokens = int(max_tokens)
+
+        try:
+            max_tokens = max(96, min(int(max_tokens), 8192))
+        except Exception:
+            max_tokens = 256
 
         try:
             memory = get_mari_memory()
@@ -5238,10 +5375,6 @@ async def restart_live(req: LiveRestartRequest):
 
     try:
         cur_src = str(getattr(_live_runner, "data_source", "auto") or "auto")
-        if prev_src is not None and cur_src != prev_src:
-            fn = getattr(_live_runner, "reset_price_history", None)
-            if callable(fn):
-                fn(None)
     except Exception:
         pass
 
@@ -5465,7 +5598,36 @@ async def restart_live(req: LiveRestartRequest):
             except Exception:
                 spt = 0
 
-        new_df = create_data_feed(tickers, source=new_src, interval_sec=float(interval_sec), symbols_per_tick=int(spt))
+        base_prices = None
+        try:
+            bp: Dict[str, float] = {}
+            ph = getattr(_live_runner, "price_history", None)
+            if isinstance(ph, dict):
+                for tk in list(tickers or []):
+                    k = str(tk or "").upper().strip()
+                    if not k:
+                        continue
+                    try:
+                        if k in ph and ph[k]:
+                            px = float(ph[k][-1].get("close") or 0.0)
+                            if px > 0:
+                                bp[k] = float(px)
+                    except Exception:
+                        continue
+            base_prices = bp if bp else None
+        except Exception:
+            base_prices = None
+
+        try:
+            new_df = create_data_feed(
+                tickers,
+                source=new_src,
+                interval_sec=float(interval_sec),
+                symbols_per_tick=int(spt),
+                base_prices=base_prices,
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"create_data_feed failed for source={new_src}: {e}")
         actual_src = None
         try:
             actual_src = str(getattr(new_df, "source", "") or "").strip().lower() or None
@@ -5483,7 +5645,8 @@ async def restart_live(req: LiveRestartRequest):
 
         try:
             if actual_src:
-                setattr(_live_runner, "data_source", actual_src)
+                if str(new_src).strip().lower() in {"", "auto"}:
+                    setattr(_live_runner, "data_source", actual_src)
         except Exception:
             pass
 
@@ -5547,9 +5710,17 @@ async def get_live_chart(ticker: str, limit: int = 100):
                 continue
             try:
                 c = float(p.get("close") or 0.0)
+                o = float(p.get("open") or c)
+                h = float(p.get("high") or c)
+                l = float(p.get("low") or c)
             except Exception:
                 c = 0.0
-            if c <= 0:
+                o = 0.0
+                h = 0.0
+                l = 0.0
+            if (not math.isfinite(c)) or (not math.isfinite(o)) or (not math.isfinite(h)) or (not math.isfinite(l)):
+                continue
+            if c <= 0 or o <= 0 or h <= 0 or l <= 0:
                 continue
             tmp.append(p)
         tmp.sort(key=lambda x: str(x.get("time") or ""))
@@ -5575,12 +5746,19 @@ async def get_live_chart(ticker: str, limit: int = 100):
 
 
 @app.get("/api/v1/live/trades")
-async def get_live_trades():
+async def get_live_trades(limit: int = 200):
     """Get trade markers for chart overlay (buy/sell points)"""
     if _live_runner is None:
         raise HTTPException(status_code=404, detail="No live trading session")
     
-    trades = _live_runner.get_trade_markers()
+    try:
+        limit = int(limit)
+    except Exception:
+        limit = 200
+    if limit <= 0:
+        limit = 0
+
+    trades = _live_runner.get_trade_markers(limit=limit if limit > 0 else None)
     
     # Format for chart markers
     markers = []
@@ -5595,6 +5773,56 @@ async def get_live_trades():
         })
     
     return {"trades": markers, "count": len(markers)}
+
+
+@app.get("/api/v1/live/trade_history")
+async def get_live_trade_history(limit: int = 500):
+    """Get persistent trade history (append-only JSONL), tail N records."""
+    try:
+        limit = int(limit)
+    except Exception:
+        limit = 500
+    if limit <= 0:
+        return {"trades": [], "count": 0, "path": None}
+
+    path: Optional[Path] = None
+    try:
+        p0 = None
+        try:
+            fn = getattr(_live_runner, "get_trade_history_path", None)
+            if callable(fn):
+                p0 = fn()
+        except Exception:
+            p0 = None
+        if p0:
+            path = Path(str(p0))
+    except Exception:
+        path = None
+
+    if path is None:
+        path = DATA_DIR / "paper_trading" / "trade_history.jsonl"
+
+    if not path.exists():
+        return {"trades": [], "count": 0, "path": str(path)}
+
+    buf: deque = deque(maxlen=int(limit))
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            for line in f:
+                s = str(line or "").strip()
+                if not s:
+                    continue
+                try:
+                    obj = json.loads(s)
+                    if isinstance(obj, dict):
+                        buf.append(obj)
+                except Exception:
+                    continue
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"failed to read trade_history: {e}")
+
+    out = list(buf)
+    return {"trades": out, "count": len(out), "path": str(path)}
 
 
 @app.get("/api/v1/live/chat")
@@ -5615,6 +5843,86 @@ async def get_agent_logs(limit: int = 100):
     
     logs = getattr(_live_runner, "agent_logs", [])
     return {"logs": logs[-limit:] if logs else [], "count": len(logs)}
+
+
+@app.get("/api/v1/live/md_diag")
+async def get_md_diag():
+    if _live_runner is None:
+        raise HTTPException(status_code=404, detail="No live trading session")
+
+    feed = getattr(_live_runner, "data_feed", None)
+    tickers = []
+    try:
+        stg = getattr(_live_runner, "strategy", None)
+        if stg is not None:
+            tickers = list(getattr(stg, "tickers", []) or [])
+    except Exception:
+        tickers = []
+    tickers = [str(x or "").upper().strip() for x in tickers if str(x or "").strip()]
+
+    ph = getattr(_live_runner, "price_history", {})
+    now = datetime.now(timezone.utc)
+
+    per: Dict[str, Any] = {}
+    for tk in tickers:
+        rows = None
+        try:
+            rows = ph.get(tk) if isinstance(ph, dict) else None
+        except Exception:
+            rows = None
+        last_time = None
+        last_src = None
+        n = 0
+        try:
+            if isinstance(rows, list) and rows:
+                n = len(rows)
+                last = rows[-1] if isinstance(rows[-1], dict) else None
+                if isinstance(last, dict):
+                    last_time = last.get("time")
+                    last_src = last.get("source")
+        except Exception:
+            pass
+
+        age_sec = None
+        try:
+            if last_time:
+                dt = None
+                try:
+                    dt = datetime.fromisoformat(str(last_time).replace("Z", "+00:00"))
+                except Exception:
+                    dt = None
+                if dt is not None:
+                    if dt.tzinfo is None:
+                        dt = dt.replace(tzinfo=timezone.utc)
+                    age_sec = float((now - dt.astimezone(timezone.utc)).total_seconds())
+        except Exception:
+            age_sec = None
+
+        per[tk] = {
+            "bars": int(n),
+            "last_time": str(last_time) if last_time is not None else None,
+            "age_sec": age_sec,
+            "source": str(last_src) if last_src is not None else None,
+        }
+
+    out = {
+        "data_source": str(getattr(_live_runner, "data_source", "")),
+        "interval_sec": float(getattr(_live_runner, "_data_feed_interval_sec", 0.0) or 0.0),
+        "symbols_per_tick": int(getattr(_live_runner, "_md_symbols_per_tick", 0) or 0),
+        "md_queue_limit": int(getattr(_live_runner, "_md_queue_limit", 0) or 0),
+        "md_pending_limit": int(getattr(_live_runner, "_md_pending_limit", 0) or 0),
+        "md_pending": int(len(getattr(_live_runner, "_md_pending", []) or [])),
+        "feed": {
+            "type": type(feed).__name__ if feed is not None else None,
+            "source": str(getattr(feed, "source", "")) if feed is not None else None,
+            "interval_sec": float(getattr(feed, "interval_sec", 0.0) or 0.0) if feed is not None else None,
+            "symbols_per_tick": int(getattr(feed, "_symbols_per_tick", 0) or 0) if feed is not None else None,
+            "rr_index": int(getattr(feed, "_rr_index", 0) or 0) if feed is not None else None,
+        },
+        "tickers": tickers,
+        "per_ticker": per,
+    }
+    return out
 
 
 @app.post("/api/v1/evolution/nightly/dry-run")
@@ -5700,6 +6008,13 @@ async def start_online_rl():
 
     try:
         setattr(rl_manager, "learning_rate", 0.001)
+    except Exception:
+        pass
+
+    try:
+        fn = getattr(_live_runner, "_rl_seed_open_positions", None)
+        if callable(fn):
+            fn()
     except Exception:
         pass
 

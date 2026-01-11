@@ -34,10 +34,28 @@ class ExperienceBuffer:
         exp_file = self.save_dir / "experiences.jsonl"
         if exp_file.exists():
             try:
-                with open(exp_file, "r", encoding="utf-8") as f:
-                    for line in f:
-                        if line.strip():
-                            self.buffer.append(json.loads(line))
+                text = exp_file.read_text(encoding="utf-8")
+                if not text:
+                    return
+                dec = json.JSONDecoder()
+                i = 0
+                n = len(text)
+                while i < n:
+                    ch = text[i]
+                    if ch.isspace():
+                        i += 1
+                        continue
+                    try:
+                        obj, j = dec.raw_decode(text, i)
+                    except Exception:
+                        nxt = text.find("{", i + 1)
+                        if nxt < 0:
+                            break
+                        i = nxt
+                        continue
+                    if isinstance(obj, dict):
+                        self.buffer.append(obj)
+                    i = int(j)
             except Exception:
                 pass
     
@@ -64,8 +82,25 @@ class ExperienceBuffer:
             
             # Append to file
             exp_file = self.save_dir / "experiences.jsonl"
-            with open(exp_file, "a", encoding="utf-8") as f:
-                f.write(json.dumps(exp, ensure_ascii=False) + "\n")
+            try:
+                payload = (json.dumps(exp, ensure_ascii=False) + "\n").encode("utf-8")
+                needs_nl = False
+                try:
+                    if exp_file.exists() and exp_file.stat().st_size > 0:
+                        with exp_file.open("rb") as rf:
+                            rf.seek(-1, 2)
+                            last = rf.read(1)
+                        if last not in (b"\n", b"\r"):
+                            needs_nl = True
+                except Exception:
+                    needs_nl = False
+
+                with exp_file.open("ab") as f:
+                    if needs_nl:
+                        f.write(b"\n")
+                    f.write(payload)
+            except Exception:
+                pass
     
     def sample(self, batch_size: int = 32) -> List[Dict[str, Any]]:
         """Sample a batch of experiences for training"""

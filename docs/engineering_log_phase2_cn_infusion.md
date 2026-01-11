@@ -437,6 +437,21 @@ Prompt 模板：
   - 相关改动：`src/api/main.py`（commit `d6edf9b`）。
 
 
+- 现象 E（图表挤压/flat/必须拖底部条才正常，且挂久历史会消失，2026-01-11）：
+  - 现象：
+    - 图表左侧出现一大段“几乎不动”的长线，右侧最新走势被挤在最右边；需要手动拖 rangeslider 才能正常查看。
+    - 波动很小但 y 轴范围过大，导致看起来“全程 flat”。
+    - 模拟盘运行过久后，早期图表历史消失（无法回看整晚）。
+  - 根因：
+    - 后端 chart 清洗对 `NaN/Inf` 漏过滤，时间轴可能被无效点拉长。
+    - 前端“窗口化”策略会覆盖 `prices`，导致旧历史无法在 rangeslider/ALL 中回看。
+    - 后端 `_on_market_data()` 仅保留每 ticker 最近 800 根 bars，长时间运行必然裁剪。
+  - 修复：
+    - `src/api/main.py`：chart 清洗新增 `math.isfinite` 检查，过滤 `NaN/Inf` 的 OHLC。
+    - `src/ui/desktop/web/dashboard.html`：保留完整历史序列用于 rangeslider/ALL，但默认视图聚焦“最新连续段”的最近窗口（自动识别大 time gap），并按可视窗口计算 y 轴范围。
+    - `scripts/run_live_paper_trading.py`：提高 `price_history` 保留上限（800 → 20000）。
+
+
 
 8) Pro Trader 模式：多空交易 + 保证金/杠杆约束 + 位置感知 Prompt（2026-01-10）
 
