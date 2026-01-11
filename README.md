@@ -31,9 +31,10 @@
 | 19 | Planner Offline RL / Bandit（19.2 Gatekeeper v2：Showdown + 阈值 Sweep，默认阈值 0.05） | 完成 | 2025-12-27 |
 | 20 | 数据飞轮（Unified Data Harvester）+ 模拟实盘压力测试 | 进行中 | 2025-12 |
 | 21 | 多模态视觉之眼（Visual Alpha / Chartist） | 进行中 | 2025-12 |
-| 22 | 宏观指挥官（Macro-Agent Hierarchy） | 规划中 | - |
-| 23 | 深度思考与辩论（System-2 Debate） | 规划中 | - |
-| 24 | 精细化执行（Execution Algorithms） | 规划中 | - |
+| 22 | 宏观指挥官（Macro Governor Implementation） | 完成 | 2024 |
+| 23 | Feb 2024 OOS Stress Test（盲测战役） | 完成 | 2024 |
+| 24 | 精细化执行（Execution Algorithms） | 完成 | 2024 |
+| 2026-01 | Secretary / Mari（桌面助手）+ Live Paper Trading + A2 Migration | 进行中 | 2026-01 |
 
 完整阶段执行入口与验收标准：见工程日志的 **Phase 执行索引**（`docs/engineering_log_phase2_cn_infusion.md`）。
 
@@ -131,6 +132,12 @@ scripts\launch_desktop.ps1
   - 由于 yfinance 常见 15min delay，成交时间可能晚于最后一根 bar。
   - 前端将 BUY/SELL marker 的时间戳 clamp 到最后一根 bar，避免标记跑到最右侧空白处。
 
+- **Live 图表视图跟随最新 + 断层处理 + 长时间运行可回看**
+  - 默认视图自动聚焦“最新连续段”的最近窗口（避免跨日断层把最新走势挤在右侧）。
+  - rangeslider/`ALL` 仍保留完整历史用于回看。
+  - 后端过滤 `NaN/Inf` 的 OHLC bar，避免时间轴被无效点拉长。
+  - 模拟盘长时间运行提高每 ticker 的历史保留上限，避免挂久了前半段走势消失。
+
 - **System2 Debate 稳定性**
   - 增加推理预算控制（`max_time_sec`）与锁等待（`lock_wait_sec`），并在模型繁忙时对 Critic/Judge 做轻量重试。
   - Critic/Judge prompt 强约束：STRICT JSON、无换行、限长。
@@ -177,24 +184,34 @@ scripts\launch_desktop.ps1
 - 原因：yfinance 延迟导致成交时间晚于最后一根 bar。
 - 状态：已通过前端 clamp 修复；若仍出现，请确认桌面端已 Ctrl+F5 刷新 dashboard。
 
-### 3) System2 频繁 parse_failed 或 model busy
+### 3) 图表“挤压 / 必须拖底部条才正常”
+
+- 现象：右侧最新走势被挤到边缘，需要手动拖 rangeslider 才正常。
+- 处理：更新到最新代码并点击 `Reload UI`；该版本默认聚焦最新连续段窗口，rangeslider/`ALL` 仍可回看历史。
+
+### 4) 模拟盘运行太久后，图表历史消失
+
+- 原因：早期版本对每 ticker 的历史 bars 有较小上限，长时间运行会裁剪。
+- 处理：更新到最新代码并重启 live runner；新版本提高了历史保留上限，同时 UI 冷启动会拉取更多 bars 用于回看。
+
+### 5) System2 频繁 parse_failed 或 model busy
 
 - 处理：
   - 先确认已更新到最新代码（System2 已增加重试与更长推理预算）。
   - 若仍偶发 model busy，这是推理锁竞争的正常保护行为；工程日志有进一步的性能/并发策略建议。
 
-### 4) 模型输出非 JSON（parse_failed no_json）导致动作不一致
+### 6) 模型输出非 JSON（parse_failed no_json）导致动作不一致
 
 - 现象：日志里出现 `parse_failed (no_json)`，或曾经出现 `BUY`/`HOLD` 文本冲突。
 - 状态：已修复为“仅接受 JSON 或显式 `Decision:`；否则强制 HOLD 并短时间启用 heuristic-only”，避免误交易。
 
-### 5) vol=300%（VolCap）不清楚怎么来的
+### 7) vol=300%（VolCap）不清楚怎么来的
 
 - 现象：MoE Router 显示 `vol=300.0%`。
 - 解释：年化波动率被 cap 到 300%（保护栏），通常是 bar 间隔太小或价格跳变导致。
 - 诊断：会限频打印 `[VolCap] TICKER raw=... std=... dt_sec=... bars_per_year=...`。
 
-### 6) MoE Router 新闻触发不符合直觉（news_new=0 仍走 analyst）
+### 8) MoE Router 新闻触发不符合直觉（news_new=0 仍走 analyst）
 
 - 状态：已修复。
 - 规则：当 `trading.news.moe_any_news: true` 时，只用 `news_new_count>0` 触发 analyst；否则才使用 `abs(news_score) >= moe_news_threshold`。

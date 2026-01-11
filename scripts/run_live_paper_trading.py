@@ -215,7 +215,7 @@ class MariVoice:
                 data = resp.json()
                 return data["choices"][0]["message"]["content"].strip()
         except Exception as e:
-            print(f"[LLM Error] {e}")
+            print(f"  [LLM Error: {e}]")
         return event_context
 
     def speak(self, text: str, use_llm: bool = True) -> None:
@@ -352,6 +352,7 @@ class LivePaperTradingRunner:
         sim_aggressive_entry = None
         allow_short = None
         broker_cfg = None
+        us_rules_cfg = None
         risk_cfg = None
         data_feed_interval_sec = None
         md_queue_limit = None
@@ -401,6 +402,7 @@ class LivePaperTradingRunner:
                 sim_aggressive_entry = trading_cfg.get("sim_aggressive_entry")
                 allow_short = trading_cfg.get("allow_short")
                 broker_cfg = trading_cfg.get("broker")
+                us_rules_cfg = trading_cfg.get("us_rules")
                 risk_cfg = trading_cfg.get("risk")
                 data_feed_interval_sec = trading_cfg.get("data_feed_interval_sec")
                 md_queue_limit = trading_cfg.get("md_queue_limit")
@@ -485,6 +487,17 @@ class LivePaperTradingRunner:
                     setattr(self.broker, "liquidation_enabled", bool(broker_cfg.get("liquidation_enabled")))
                 if broker_cfg.get("liquidation_commission") is not None:
                     setattr(self.broker, "liquidation_commission", float(broker_cfg.get("liquidation_commission")))
+        except Exception:
+            pass
+
+        # US market rules simulation (optional)
+        try:
+            if isinstance(us_rules_cfg, dict) and us_rules_cfg:
+                for k, v in dict(us_rules_cfg).items():
+                    try:
+                        setattr(self.broker, str(k), v)
+                    except Exception:
+                        pass
         except Exception:
             pass
 
@@ -636,7 +649,18 @@ class LivePaperTradingRunner:
         
         # Online RL learning manager
         self.rl_manager = get_online_learning_manager()
-        self._pending_trades: Dict[str, Dict] = {}  # track open positions for RL
+        self._rl_open: Dict[str, Dict[str, Any]] = {}  # ticker -> open trade state
+        self._rl_last_pos: Dict[str, Dict[str, float]] = {}  # ticker -> {shares, avg_price}
+        try:
+            for tk, pos in (getattr(self.broker, "positions", {}) or {}).items():
+                if pos is None:
+                    continue
+                self._rl_last_pos[str(tk).upper()] = {
+                    "shares": float(getattr(pos, "shares", 0.0) or 0.0),
+                    "avg_price": float(getattr(pos, "avg_price", 0.0) or 0.0),
+                }
+        except Exception:
+            self._rl_last_pos = {}
         
         # Trading mode (online = real-time, offline = backtest playback)
         self.trading_mode = "online"
@@ -646,6 +670,8 @@ class LivePaperTradingRunner:
         self._record_enabled: bool = True
         self._record_path: Optional[Path] = None
         self._record_fp: Any = None
+        self._trade_history_path: Optional[Path] = None
+        self._trade_history_fp: Any = None
         self._record_last_news_keys: set[str] = set()
         self._offline_playback_file: Optional[str] = None
 
@@ -688,6 +714,23 @@ class LivePaperTradingRunner:
             )
         except Exception:
             pass
+
+        try:
+            exp_dir = getattr(getattr(self.rl_manager, "experience_buffer", None), "save_dir", None)
+            exp_path = None
+            if exp_dir is not None:
+                exp_path = Path(exp_dir) / "experiences.jsonl"
+            t_str = datetime.now().strftime("%H:%M:%S")
+            self.agent_logs.append(
+                {
+                    "time": t_str,
+                    "type": "system",
+                    "priority": 2,
+                    "message": f"[OnlineRL] enabled={bool(getattr(self.rl_manager, 'enabled', False))} experiences={(str(exp_path) if exp_path else '?')}",
+                }
+            )
+        except Exception:
+            pass
         
         # Hook into event handling
         self._original_handle = self.engine._handle_event
@@ -711,6 +754,23 @@ class LivePaperTradingRunner:
         except Exception:
             self._record_fp = None
             self._record_path = None
+
+        # Persistent trade history (append-only JSONL)
+        try:
+            data_dir = project_root / "data" / "paper_trading"
+            data_dir.mkdir(parents=True, exist_ok=True)
+            self._trade_history_path = data_dir / "trade_history.jsonl"
+            self._trade_history_fp = self._trade_history_path.open("a", encoding="utf-8")
+            t_str = datetime.now().strftime("%H:%M:%S")
+            self.agent_logs.append({
+                "time": t_str,
+                "type": "system",
+                "priority": 2,
+                "message": f"[TradeHistory] started: {self._trade_history_path.name}",
+            })
+        except Exception:
+            self._trade_history_fp = None
+            self._trade_history_path = None
 
     def _flush_md_pending(self) -> None:
         try:
@@ -850,6 +910,18 @@ class LivePaperTradingRunner:
                 "shares": shares,
             }
             self.trade_log.append(trade_record)
+            try:
+                if len(self.trade_log) > 5000:
+                    self.trade_log = self.trade_log[-3000:]
+            except Exception:
+                pass
+
+            try:
+                if self._trade_history_fp is not None:
+                    self._trade_history_fp.write(json.dumps(trade_record, ensure_ascii=False) + "\n")
+                    self._trade_history_fp.flush()
+            except Exception:
+                pass
 
             try:
                 if self._record_fp is not None and isinstance(fill, dict):
@@ -874,59 +946,11 @@ class LivePaperTradingRunner:
             except Exception:
                 pass
             
-            # Online RL: Track trades for learning
-            if action == "BUY":
-                try:
-                    md = {
-                        "expert": fill.get("expert", "unknown"),
-                        "analysis": fill.get("analysis", ""),
-                        "trace_id": fill.get("trace_id"),
-                        "trace_ids": fill.get("trace_ids"),
-                        "chart_score": fill.get("chart_score"),
-                        "news_score": fill.get("news_score"),
-                        "news_sentiment": fill.get("news_sentiment"),
-                        "news_summary": fill.get("news_summary"),
-                    }
-                except Exception:
-                    md = {}
-                self._pending_trades[ticker] = {
-                    "trade_id": trade_id,
-                    "entry_price": price,
-                    "shares": shares,
-                    "entry_time": datetime.now(),
-                    "state": self._get_current_state(ticker),
-                    "metadata": md,
-                }
-                # Log decision for DPO preference pairs
-                self.rl_manager.preference_logger.log_decision(
-                    trade_id=trade_id,
-                    context={
-                        "ticker": ticker,
-                        "price": price,
-                        "trace_id": fill.get("trace_id"),
-                        "trace_ids": fill.get("trace_ids"),
-                        "chart_score": fill.get("chart_score"),
-                    },
-                    decision=action,
-                    reasoning=fill.get("analysis", ""),
-                    expert=fill.get("expert", "unknown"),
-                )
-            elif action == "SELL" and ticker in self._pending_trades:
-                pending = self._pending_trades.pop(ticker)
-                pnl = (price - pending["entry_price"]) * pending["shares"]
-                hold_bars = 1  # simplified
-                
-                # Record experience for RL
-                self.rl_manager.on_trade_complete(
-                    trade_id=pending["trade_id"],
-                    state=pending["state"],
-                    action="BUY",
-                    pnl=pnl,
-                    drawdown_pct=0,
-                    hold_bars=hold_bars,
-                    exit_reason="signal",
-                    metadata=pending.get("metadata") if isinstance(pending, dict) else None,
-                )
+            # Online RL: record full round-trips based on position changes
+            try:
+                self._rl_track_fill(fill=fill if isinstance(fill, dict) else {})
+            except Exception:
+                pass
             
             # Log to agent_logs
             self.agent_logs.append({
@@ -997,6 +1021,269 @@ class LivePaperTradingRunner:
         state["positions"] = len(getattr(self.broker, "positions", {}))
         return state
 
+    def _rl_seed_open_positions(self) -> None:
+        """Seed current broker positions into RL open-trade state.
+
+        This allows RL to record experiences when closing positions that existed
+        before RL was enabled.
+        """
+        if not bool(getattr(self.rl_manager, "enabled", False)):
+            return
+
+        try:
+            br = getattr(self, "broker", None)
+            pos_map = getattr(br, "positions", None) if br is not None else None
+        except Exception:
+            pos_map = None
+        if not isinstance(pos_map, dict) or (not pos_map):
+            return
+
+        seeded = 0
+        for tk, pos in pos_map.items():
+            try:
+                ticker = str(tk or "").upper().strip()
+                sh = float(getattr(pos, "shares", 0.0) or 0.0) if pos is not None else 0.0
+                avg = float(getattr(pos, "avg_price", 0.0) or 0.0) if pos is not None else 0.0
+            except Exception:
+                continue
+            if (not ticker) or abs(sh) < 1e-12:
+                continue
+            try:
+                if ticker in getattr(self, "_rl_open", {}):
+                    continue
+            except Exception:
+                pass
+
+            entry_px = float(avg)
+            if not (entry_px > 0.0):
+                try:
+                    if ticker in self.price_history and self.price_history[ticker]:
+                        entry_px = float(self.price_history[ticker][-1].get("close") or 0.0)
+                except Exception:
+                    entry_px = 0.0
+            if not (entry_px > 0.0):
+                continue
+
+            try:
+                trade_id = f"{ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S')}_seed"
+                self._rl_open[ticker] = {
+                    "trade_id": trade_id,
+                    "direction": 1 if sh > 0 else -1,
+                    "entry_price": float(entry_px),
+                    "qty": float(abs(sh)),
+                    "realized": 0.0,
+                    "commission": 0.0,
+                    "entry_time": datetime.now(),
+                    "state": self._get_current_state(ticker),
+                    "metadata": {
+                        "expert": "seed",
+                        "analysis": "seed_open_position",
+                    },
+                }
+                try:
+                    if not hasattr(self, "_rl_last_pos") or (getattr(self, "_rl_last_pos", None) is None):
+                        self._rl_last_pos = {}
+                    if isinstance(self._rl_last_pos, dict):
+                        self._rl_last_pos[ticker] = {"shares": float(sh), "avg_price": float(entry_px)}
+                except Exception:
+                    pass
+                seeded += 1
+            except Exception:
+                pass
+
+        if seeded > 0:
+            try:
+                t_str = datetime.now().strftime("%H:%M:%S")
+                self.agent_logs.append({
+                    "time": t_str,
+                    "type": "system",
+                    "priority": 2,
+                    "message": f"[OnlineRL] seeded_open_positions={seeded}",
+                })
+                if len(self.agent_logs) > 500:
+                    self.agent_logs = self.agent_logs[-300:]
+            except Exception:
+                pass
+
+    def _rl_track_fill(self, *, fill: Dict[str, Any]) -> None:
+        """Track fills into full round-trip experiences (supports partial closes and flips)."""
+        if not bool(getattr(self.rl_manager, "enabled", False)):
+            return
+
+        try:
+            ticker = str(fill.get("ticker") or "").upper().strip()
+            action = str(fill.get("action") or "").upper().strip()
+            price = float(fill.get("price") or 0.0)
+            shares = float(fill.get("shares") or 0.0)
+            commission = float(fill.get("commission") or 0.0)
+        except Exception:
+            return
+        if not ticker or action not in {"BUY", "SELL"} or not (price > 0.0) or shares == 0.0:
+            return
+
+        # Convention:
+        # - BUY increases shares (cover short or add long)
+        # - SELL decreases shares (sell long or add short)
+        delta = abs(shares) if action == "BUY" else -abs(shares)
+
+        pos = self._rl_last_pos.get(ticker, {"shares": 0.0, "avg_price": 0.0})
+        prev_sh = float(pos.get("shares", 0.0) or 0.0) if pos is not None else 0.0
+        prev_avg = float(pos.get("avg_price", 0.0) or 0.0) if pos is not None else 0.0
+        next_sh = float(prev_sh + delta)
+        next_avg = float(prev_avg)
+
+        # Open trade lazily when transitioning from flat to non-flat.
+        def _open_new(direction: int, entry_px: float, qty_abs: float, md: Dict[str, Any]) -> None:
+            trade_id = f"{ticker}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            self._rl_open[ticker] = {
+                "trade_id": trade_id,
+                "direction": int(direction),
+                "entry_price": float(entry_px),
+                "qty": float(qty_abs),
+                "realized": 0.0,
+                "commission": 0.0,
+                "entry_time": datetime.now(),
+                "state": self._get_current_state(ticker),
+                "metadata": md,
+            }
+            try:
+                self.rl_manager.preference_logger.log_decision(
+                    trade_id=trade_id,
+                    context={
+                        "ticker": ticker,
+                        "price": float(entry_px),
+                        "trace_id": fill.get("trace_id"),
+                        "trace_ids": fill.get("trace_ids"),
+                        "chart_score": fill.get("chart_score"),
+                    },
+                    decision=("BUY" if direction > 0 else "SELL"),
+                    reasoning=str(fill.get("analysis") or ""),
+                    expert=str(fill.get("expert") or "unknown"),
+                )
+            except Exception:
+                pass
+
+        def _finalize(exit_reason: str) -> None:
+            tr = self._rl_open.pop(ticker, None)
+            if not isinstance(tr, dict):
+                return
+            pnl = float(tr.get("realized", 0.0) or 0.0) - float(tr.get("commission", 0.0) or 0.0)
+            hold_bars = 1
+            try:
+                entry_time = tr.get("entry_time")
+                if isinstance(entry_time, datetime):
+                    dt = max(0.0, (datetime.now() - entry_time).total_seconds())
+                    hold_bars = max(1, int(dt // 60.0))
+            except Exception:
+                hold_bars = 1
+            self.rl_manager.on_trade_complete(
+                trade_id=str(tr.get("trade_id") or ""),
+                state=tr.get("state") if isinstance(tr.get("state"), dict) else {"ticker": ticker},
+                action=("BUY" if int(tr.get("direction", 1) or 1) > 0 else "SELL"),
+                pnl=float(pnl),
+                drawdown_pct=0.0,
+                hold_bars=int(hold_bars),
+                exit_reason=str(exit_reason or "signal"),
+                metadata=tr.get("metadata") if isinstance(tr.get("metadata"), dict) else None,
+            )
+            try:
+                t_str = datetime.now().strftime("%H:%M:%S")
+                self.agent_logs.append({
+                    "time": t_str,
+                    "type": "agent",
+                    "priority": 2,
+                    "message": f"[OnlineRL] recorded trade_id={tr.get('trade_id')} ticker={ticker} pnl={pnl:.2f}",
+                })
+            except Exception:
+                pass
+
+        # Metadata snapshot for RL
+        try:
+            md = {
+                "expert": fill.get("expert", "unknown"),
+                "analysis": fill.get("analysis", ""),
+                "trace_id": fill.get("trace_id"),
+                "trace_ids": fill.get("trace_ids"),
+                "chart_score": fill.get("chart_score"),
+                "news_score": fill.get("news_score"),
+                "news_sentiment": fill.get("news_sentiment"),
+                "news_summary": fill.get("news_summary"),
+            }
+        except Exception:
+            md = {}
+
+        # Update open trade PnL/size based on how this fill changes the position.
+        tr = self._rl_open.get(ticker)
+        if tr is None:
+            # If already holding a position (pre-existing), don't fabricate an entry; wait until flat->nonflat.
+            if abs(prev_sh) < 1e-12 and abs(next_sh) >= 1e-12:
+                _open_new(1 if next_sh > 0 else -1, price, abs(next_sh), md)
+        else:
+            direction = int(tr.get("direction", 1) or 1)
+            entry_px = float(tr.get("entry_price", price) or price)
+            qty_abs = float(tr.get("qty", 0.0) or 0.0)
+
+            # Realized PnL only occurs when reducing exposure in the opposite direction.
+            closing_qty = 0.0
+            if direction > 0 and action == "SELL":
+                closing_qty = min(abs(prev_sh), abs(delta))
+                tr["realized"] = float(tr.get("realized", 0.0) or 0.0) + (price - entry_px) * closing_qty
+            elif direction < 0 and action == "BUY":
+                closing_qty = min(abs(prev_sh), abs(delta))
+                tr["realized"] = float(tr.get("realized", 0.0) or 0.0) + (entry_px - price) * closing_qty
+
+            tr["commission"] = float(tr.get("commission", 0.0) or 0.0) + float(commission)
+
+            # If we partially closed but did not flip/fully close, update remaining qty so later add-ons
+            # compute weighted entry price correctly.
+            try:
+                if closing_qty > 1e-12 and abs(next_sh) >= 1e-12:
+                    if (direction > 0 and next_sh > 0) or (direction < 0 and next_sh < 0):
+                        tr["qty"] = float(abs(next_sh))
+            except Exception:
+                pass
+
+            # If we increased exposure in the same direction, update weighted avg entry price.
+            if closing_qty <= 1e-12:
+                if direction > 0 and action == "BUY":
+                    add_qty = abs(delta)
+                    new_qty = qty_abs + add_qty
+                    if new_qty > 0:
+                        entry_px = (entry_px * qty_abs + price * add_qty) / new_qty
+                        tr["entry_price"] = float(entry_px)
+                        tr["qty"] = float(new_qty)
+                elif direction < 0 and action == "SELL":
+                    add_qty = abs(delta)
+                    new_qty = qty_abs + add_qty
+                    if new_qty > 0:
+                        entry_px = (entry_px * qty_abs + price * add_qty) / new_qty
+                        tr["entry_price"] = float(entry_px)
+                        tr["qty"] = float(new_qty)
+
+            # Close / flip handling.
+            if abs(next_sh) < 1e-12:
+                _finalize(exit_reason="flat")
+            else:
+                # If sign flipped, finalize old trade and open a new one for the remaining exposure.
+                if (direction > 0 and next_sh < 0) or (direction < 0 and next_sh > 0):
+                    _finalize(exit_reason="flip")
+                    _open_new(1 if next_sh > 0 else -1, price, abs(next_sh), md)
+
+        # Update last position snapshot.
+        if abs(next_sh) < 1e-12:
+            self._rl_last_pos[ticker] = {"shares": 0.0, "avg_price": 0.0}
+        else:
+            # Best-effort avg_price update for tracking only.
+            if prev_sh == 0.0:
+                next_avg = float(price)
+            else:
+                # Keep previous avg unless we add in same direction.
+                if prev_sh > 0 and action == "BUY":
+                    next_avg = (prev_avg * abs(prev_sh) + price * abs(delta)) / max(1e-9, abs(next_sh))
+                elif prev_sh < 0 and action == "SELL":
+                    next_avg = (prev_avg * abs(prev_sh) + price * abs(delta)) / max(1e-9, abs(next_sh))
+            self._rl_last_pos[ticker] = {"shares": float(next_sh), "avg_price": float(next_avg)}
+
     def _on_market_data(self, data: Dict) -> None:
         """Handle incoming market data from data feed"""
         ticker = data.get("ticker", "")
@@ -1029,16 +1316,60 @@ class LivePaperTradingRunner:
             src = str(data.get("source") or "").strip().lower()
         except Exception:
             src = ""
+
+        try:
+            ds_sel = str(getattr(self, "data_source", "") or "").strip().lower()
+        except Exception:
+            ds_sel = ""
+
+        keep_src = ""
+        try:
+            df = getattr(self, "data_feed", None)
+            if df is not None:
+                keep_src = str(getattr(df, "source", "") or "").strip().lower()
+        except Exception:
+            keep_src = ""
+        if (not keep_src) and ds_sel in {"yfinance", "simulated"}:
+            keep_src = ds_sel
+
+        if keep_src in {"yfinance", "simulated"} and src and src != keep_src:
+            try:
+                m = getattr(self, "_md_drop_other_source", None)
+                if not isinstance(m, dict):
+                    m = {}
+                    setattr(self, "_md_drop_other_source", m)
+                k = f"{ticker}|{keep_src}|{src}"
+                if not bool(m.get(k)):
+                    m[k] = True
+                    try:
+                        t_str = datetime.now().strftime("%H:%M:%S")
+                        self.agent_logs.append({
+                            "time": t_str,
+                            "type": "agent",
+                            "priority": 2,
+                            "message": f"[MarketData] drop other source ticker={ticker} keep={keep_src} drop={src}",
+                        })
+                        if len(self.agent_logs) > 500:
+                            self.agent_logs = self.agent_logs[-300:]
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            return
+
         try:
             last_src = ""
             if self.price_history[ticker]:
                 last_src = str(self.price_history[ticker][-1].get("source") or "").strip().lower()
             if src and last_src and src != last_src:
-                if src == "yfinance":
-                    self.price_history[ticker] = []
                 if src == "simulated" and last_src == "yfinance":
-                    # Do not pollute real history with simulated fallback ticks
-                    return
+                    # Do not pollute real history with simulated fallback ticks,
+                    # unless the user explicitly switched to simulated mode.
+                    try:
+                        if str(getattr(self, "data_source", "") or "").strip().lower() != "simulated":
+                            return
+                    except Exception:
+                        return
         except Exception:
             pass
 
@@ -1071,8 +1402,8 @@ class LivePaperTradingRunner:
             self.price_history[ticker][-1] = bar
         else:
             self.price_history[ticker].append(bar)
-        if len(self.price_history[ticker]) > 800:
-            self.price_history[ticker] = self.price_history[ticker][-800:]
+        if len(self.price_history[ticker]) > 20000:
+            self.price_history[ticker] = self.price_history[ticker][-20000:]
         
         print(f">> {ticker} @ ${price:.2f}")
 
@@ -1450,7 +1781,7 @@ class LivePaperTradingRunner:
         return ok
 
     def start(self) -> None:
-        """Start the live paper trading engine"""
+        """Start the live trading session"""
         if self._started:
             return
         self._started = True
@@ -1526,11 +1857,35 @@ class LivePaperTradingRunner:
             pass
         
         # Initialize data feed
+        try:
+            ds = str(getattr(self, "data_source", "auto") or "auto").strip().lower()
+        except Exception:
+            ds = "auto"
+
+        base_prices = None
+        try:
+            bp: Dict[str, float] = {}
+            for tk in list(getattr(self.strategy, "tickers", []) or []):
+                k = str(tk or "").upper().strip()
+                if not k:
+                    continue
+                try:
+                    if k in self.price_history and self.price_history[k]:
+                        px = float(self.price_history[k][-1].get("close") or 0.0)
+                        if px > 0:
+                            bp[k] = float(px)
+                except Exception:
+                    continue
+            base_prices = bp if bp else None
+        except Exception:
+            base_prices = None
+
         self.data_feed = create_data_feed(
             self.strategy.tickers,
-            source=self.data_source,
+            source=ds,
             interval_sec=float(getattr(self, "_data_feed_interval_sec", 5.0) or 5.0),
             symbols_per_tick=int(getattr(self, "_md_symbols_per_tick", 0) or 0),
+            base_prices=base_prices,
         )
         self.data_feed.subscribe(self._on_market_data)
         self.data_feed.start()
@@ -1550,11 +1905,6 @@ class LivePaperTradingRunner:
                 self.agent_logs = self.agent_logs[-300:]
         except Exception:
             pass
-
-        try:
-            ds = str(getattr(self, "data_source", "auto") or "auto").lower()
-        except Exception:
-            ds = "auto"
 
         try:
             actual = str(getattr(self.data_feed, "source", "") or "").strip().lower()
@@ -1703,6 +2053,14 @@ class LivePaperTradingRunner:
         except Exception:
             pass
         self._record_fp = None
+
+        try:
+            if self._trade_history_fp is not None:
+                self._trade_history_fp.flush()
+                self._trade_history_fp.close()
+        except Exception:
+            pass
+        self._trade_history_fp = None
         print("System Shutdown.")
         self._started = False
     
@@ -1961,9 +2319,23 @@ class LivePaperTradingRunner:
         """Get price history for UI chart rendering"""
         return self.price_history.get(ticker.upper(), [])
 
-    def get_trade_markers(self) -> List[Dict]:
-        """Get trade markers for chart overlay (buy/sell points)"""
-        return self.trade_log
+    def get_trade_markers(self, limit: Optional[int] = None) -> List[Dict]:
+        """Get trade markers for chart overlay (buy/sell points)."""
+        out = self.trade_log if isinstance(self.trade_log, list) else []
+        try:
+            if limit is not None and int(limit) > 0:
+                return out[-int(limit):]
+        except Exception:
+            pass
+        return out
+
+    def get_trade_history_path(self) -> Optional[str]:
+        try:
+            if self._trade_history_path is None:
+                return None
+            return str(self._trade_history_path)
+        except Exception:
+            return None
 
 
 def main():
