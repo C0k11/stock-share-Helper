@@ -22,16 +22,17 @@ import numpy as np
 class ExperienceBuffer:
     """Stores trading experiences for online learning"""
     
-    def __init__(self, max_size: int = 10000, save_dir: Optional[str] = None):
+    def __init__(self, max_size: int = 10000, save_dir: Optional[str] = None, file_name: str = "experiences.jsonl"):
         self.buffer: deque = deque(maxlen=max_size)
         self.save_dir = Path(save_dir) if save_dir else Path(__file__).parent.parent.parent / "data" / "rl_experiences"
+        self.file_name = str(file_name or "experiences.jsonl")
         self.save_dir.mkdir(parents=True, exist_ok=True)
         self._lock = threading.Lock()
         self._load_existing()
     
     def _load_existing(self) -> None:
         """Load existing experiences from disk"""
-        exp_file = self.save_dir / "experiences.jsonl"
+        exp_file = self.save_dir / str(self.file_name)
         if exp_file.exists():
             try:
                 text = exp_file.read_text(encoding="utf-8")
@@ -81,7 +82,7 @@ class ExperienceBuffer:
             self.buffer.append(exp)
             
             # Append to file
-            exp_file = self.save_dir / "experiences.jsonl"
+            exp_file = self.save_dir / str(self.file_name)
             try:
                 payload = (json.dumps(exp, ensure_ascii=False) + "\n").encode("utf-8")
                 needs_nl = False
@@ -323,7 +324,8 @@ class OnlineLearningManager:
         min_experiences: int = 100,
         enable_updates: bool = False  # Enabled only when explicitly started
     ):
-        self.experience_buffer = ExperienceBuffer()
+        self.experience_buffer = ExperienceBuffer(file_name="experiences.jsonl")
+        self.step_experience_buffer = ExperienceBuffer(max_size=200000, file_name="step_experiences.jsonl")
         self.reward_shaper = RewardShaper()
         self.preference_logger = PreferenceLogger()
 
@@ -335,6 +337,7 @@ class OnlineLearningManager:
         self.enable_updates = enable_updates
 
         self.buffer = self.experience_buffer.buffer
+        self.step_buffer = self.step_experience_buffer.buffer
         self.update_count = 0
         
         self.trade_count = 0
@@ -407,6 +410,28 @@ class OnlineLearningManager:
         # Check if we should trigger an update
         if self.enable_updates and self._should_update():
             self._trigger_update()
+
+    def on_step(
+        self,
+        *,
+        state: Dict[str, Any],
+        action: str,
+        reward: float,
+        next_state: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not bool(getattr(self, "enabled", False)):
+            return
+        try:
+            self.step_experience_buffer.add(
+                state=state,
+                action=str(action or "HOLD"),
+                reward=float(reward),
+                next_state=next_state,
+                metadata=metadata if isinstance(metadata, dict) else None,
+            )
+        except Exception:
+            return
     
     def _should_update(self) -> bool:
         """Check if we should trigger a model update"""

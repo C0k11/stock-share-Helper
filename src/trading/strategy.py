@@ -28,6 +28,7 @@ from .event import Event, EventType
 from src.learning.recorder import recorder as evolution_recorder
 from src.agent.gatekeeper import Gatekeeper
 from src.agent.planner import Planner
+from src.rl.online_learning import get_online_learning_manager
 from src.utils.llm_tools import extract_json_text, repair_and_parse_json
 
 # Default model paths
@@ -213,6 +214,9 @@ class MultiAgentStrategy:
         self.price_history: Dict[str, List[Dict]] = {}
 
         self._hold_diag: Dict[str, int] = {}
+
+        self._step_rl_last: Dict[str, Dict[str, Any]] = {}
+        self._step_rl_peak_equity: float = 0.0
         
         # Load models if requested
         if load_models:
@@ -1295,9 +1299,80 @@ class MultiAgentStrategy:
         
         
         # --- 6. Generate Signal ---
+        br = getattr(self.engine, "broker", None)
+        cash_now = 0.0
+        equity_now = 0.0
+        gross_now = 0.0
+        pos_count = 0
+        cur_sh = 0.0
+        cur_avg = 0.0
+        try:
+            if br is not None:
+                cash_now = float(getattr(br, "cash", 0.0) or 0.0)
+        except Exception:
+            cash_now = 0.0
+        equity_now = float(cash_now)
+        try:
+            if br is not None and isinstance(getattr(br, "positions", None), dict):
+                for tk0, pos0 in br.positions.items():
+                    try:
+                        sh0 = float(getattr(pos0, "shares", 0.0) or 0.0)
+                        if abs(sh0) < 1e-12:
+                            continue
+                        pos_count += 1
+                        ap0 = float(getattr(pos0, "avg_price", 0.0) or 0.0)
+                        mark0 = ap0
+                        try:
+                            if isinstance(getattr(br, "last_price", None), dict) and str(tk0).upper() in br.last_price:
+                                mark0 = float(br.last_price.get(str(tk0).upper()) or mark0)
+                        except Exception:
+                            pass
+                        if str(tk0).upper() == str(ticker).upper():
+                            mark0 = float(price)
+                            cur_sh = float(sh0)
+                            cur_avg = float(ap0)
+                        equity_now += float(sh0) * float(mark0)
+                        gross_now += abs(float(sh0) * float(mark0))
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+        if not (equity_now > 0.0):
+            equity_now = 1.0
+
+        try:
+            if float(equity_now) > float(getattr(self, "_step_rl_peak_equity", 0.0) or 0.0):
+                self._step_rl_peak_equity = float(equity_now)
+        except Exception:
+            pass
+
+        stop_take_enabled = False
+        stop_loss_pct = 0.0
+        take_profit_pct = 0.0
+        try:
+            stop_take_enabled = bool((self._risk_cfg or {}).get("stop_take_enabled", False))
+            stop_loss_pct = float((self._risk_cfg or {}).get("stop_loss_pct", 0.0) or 0.0)
+            take_profit_pct = float((self._risk_cfg or {}).get("take_profit_pct", 0.0) or 0.0)
+        except Exception:
+            stop_take_enabled = False
+            stop_loss_pct = 0.0
+            take_profit_pct = 0.0
+        stop_loss_pct = max(0.0, min(stop_loss_pct, 0.5))
+        take_profit_pct = max(0.0, min(take_profit_pct, 5.0))
+        if stop_take_enabled and float(cur_sh) > 0.0 and float(cur_avg) > 0.0 and float(price) > 0.0:
+            try:
+                ret = (float(price) - float(cur_avg)) / float(cur_avg)
+                if stop_loss_pct > 0.0 and ret <= -float(stop_loss_pct):
+                    action = "SELL"
+                    analysis = f"risk: stop_loss hit ret={ret:.3%} <= -{stop_loss_pct:.1%}"
+                elif take_profit_pct > 0.0 and ret >= float(take_profit_pct):
+                    action = "SELL"
+                    analysis = f"risk: take_profit hit ret={ret:.3%} >= {take_profit_pct:.1%}"
+            except Exception:
+                pass
+
         try:
             if (not bool(getattr(self, "allow_short", False))) and str(action or "").strip().upper() == "SELL":
-                br = getattr(self.engine, "broker", None)
                 pos = None
                 if br is not None and isinstance(getattr(br, "positions", None), dict):
                     pos = br.positions.get(str(ticker).upper())
@@ -1309,11 +1384,173 @@ class MultiAgentStrategy:
         except Exception:
             pass
 
+        # Risk controls: cap new exposure and reduce leverage blowups
+        shares_raw = self._calculate_position_size(ticker, price, confidence)
+        shares_i = int(shares_raw or 0)
+
+        try:
+            max_positions = int((self._risk_cfg or {}).get("max_positions", 0) or 0)
+        except Exception:
+            max_positions = 0
+        try:
+            max_pos_pct = float((self._risk_cfg or {}).get("max_pos_pct", 0.0) or 0.0)
+        except Exception:
+            max_pos_pct = 0.0
+        try:
+            max_gross_pct = float((self._risk_cfg or {}).get("max_gross_exposure_pct", 0.0) or 0.0)
+        except Exception:
+            max_gross_pct = 0.0
+        try:
+            ban_buy_neg_cash = bool((self._risk_cfg or {}).get("ban_buy_when_cash_negative", False))
+        except Exception:
+            ban_buy_neg_cash = False
+
+        if str(action or "").strip().upper() == "BUY":
+            try:
+                if ban_buy_neg_cash and float(cash_now) < 0.0 and float(cur_sh) >= 0.0:
+                    self._log(f"[Risk] {ticker}: block BUY (cash_negative cash={cash_now:.2f})", priority=2)
+                    return None
+            except Exception:
+                pass
+
+            opening_new = bool(abs(float(cur_sh)) < 1e-12)
+            if opening_new and int(max_positions or 0) > 0 and int(pos_count) >= int(max_positions):
+                self._log(f"[Risk] {ticker}: block BUY (max_positions={int(max_positions)} current={int(pos_count)})", priority=2)
+                return None
+
+            if float(max_gross_pct or 0.0) > 0.0:
+                try:
+                    gross_after = float(gross_now) + float(abs(shares_i) * float(price))
+                    if gross_after > float(max_gross_pct) * float(equity_now) + 1e-9:
+                        self._log(
+                            f"[Risk] {ticker}: block BUY (gross_exposure cap gross={gross_now:.2f} add={(abs(shares_i) * float(price)):.2f} eq={equity_now:.2f} cap={max_gross_pct:g}x)",
+                            priority=2,
+                        )
+                        return None
+                except Exception:
+                    pass
+
+            if float(max_pos_pct or 0.0) > 0.0:
+                try:
+                    cur_notional = abs(float(cur_sh) * float(price))
+                    cap_notional = float(max_pos_pct) * float(equity_now)
+                    room = float(cap_notional - cur_notional)
+                    if room <= 0.0:
+                        self._log(
+                            f"[Risk] {ticker}: block BUY (pos_cap cap={cap_notional:.2f} cur={cur_notional:.2f} max_pos_pct={max_pos_pct:.2f})",
+                            priority=2,
+                        )
+                        return None
+                    allow_add = int(max(0.0, math.floor(room / float(price))))
+                    if allow_add <= 0:
+                        self._log(
+                            f"[Risk] {ticker}: block BUY (pos_cap room={room:.2f} price={price:.2f})",
+                            priority=2,
+                        )
+                        return None
+                    if allow_add < int(abs(shares_i)):
+                        shares_i = int(max(1, allow_add))
+                        self._log(
+                            f"[Risk] {ticker}: clamp BUY size -> {shares_i} (max_pos_pct={max_pos_pct:.2f} eq={equity_now:.2f})",
+                            priority=2,
+                        )
+                except Exception:
+                    pass
+
+        if str(action or "").strip().upper() == "SELL":
+            try:
+                if float(cur_sh) > 0.0:
+                    shares_i = int(min(abs(int(shares_i or 0)), int(max(1.0, float(cur_sh)))))
+            except Exception:
+                pass
+
+        # Step-level RL experience collection (periodic, per ticker)
+        try:
+            step_cfg = (self._risk_cfg or {}).get("step_rl") if isinstance(self._risk_cfg, dict) else None
+            step_cfg = step_cfg if isinstance(step_cfg, dict) else {}
+            step_enabled = bool(step_cfg.get("enabled", False))
+            if step_enabled:
+                interval_s = float(step_cfg.get("interval_sec") or 60.0)
+                interval_s = max(5.0, min(interval_s, 3600.0))
+                now_ts = float(time.time())
+                last = self._step_rl_last.get(str(ticker).upper())
+                last_ts = float(last.get("ts", 0.0) or 0.0) if isinstance(last, dict) else 0.0
+                if (now_ts - last_ts) >= interval_s:
+                    vol_ann = float(features.get("volatility_ann_pct") or 0.0) if isinstance(features, dict) else 0.0
+                    news_d = features.get("news") if isinstance(features.get("news"), dict) else {}
+                    news_score0 = float(news_d.get("news_score") or 0.0) if isinstance(news_d, dict) else 0.0
+
+                    peak = float(getattr(self, "_step_rl_peak_equity", 0.0) or 0.0)
+                    dd = 0.0
+                    try:
+                        if peak > 0.0:
+                            dd = (float(equity_now) - peak) / peak
+                    except Exception:
+                        dd = 0.0
+
+                    state_now = {
+                        "ticker": str(ticker).upper(),
+                        "price": float(price),
+                        "volatility_ann_pct": float(vol_ann),
+                        "news_score": float(news_score0),
+                        "regime": str(regime or ""),
+                        "cash": float(cash_now),
+                        "equity": float(equity_now),
+                        "gross_exposure": float(gross_now),
+                        "leverage": float(gross_now / equity_now) if float(equity_now) > 0 else 0.0,
+                        "drawdown_pct": float(dd),
+                        "pos_shares": float(cur_sh),
+                        "pos_avg_price": float(cur_avg),
+                    }
+
+                    if isinstance(last, dict) and isinstance(last.get("state"), dict):
+                        prev_state = dict(last.get("state") or {})
+                        prev_action = str(last.get("action") or "HOLD")
+                        prev_eq = float(last.get("equity") or 0.0)
+                        delta_eq = float(equity_now) - float(prev_eq)
+
+                        pnl_scale = float(step_cfg.get("pnl_scale") or 0.001)
+                        pnl_scale = max(0.0, min(pnl_scale, 1.0))
+                        cash_pen = float(step_cfg.get("cash_penalty") or 0.0)
+                        cash_pen = max(0.0, min(cash_pen, 1.0))
+                        dd_pen = float(step_cfg.get("drawdown_penalty") or 0.0)
+                        dd_pen = max(0.0, min(dd_pen, 10.0))
+                        vol_pen = float(step_cfg.get("vol_penalty") or 0.0)
+                        vol_pen = max(0.0, min(vol_pen, 10.0))
+
+                        reward = (delta_eq * pnl_scale)
+                        if float(cash_now) < 0.0 and cash_pen > 0.0:
+                            reward -= float(abs(cash_now)) * float(cash_pen)
+                        if dd < 0.0 and dd_pen > 0.0:
+                            reward -= float(abs(dd)) * float(dd_pen)
+                        if vol_ann > 0.0 and vol_pen > 0.0:
+                            reward -= float(vol_ann / 100.0) * float(vol_pen)
+
+                        md0 = {
+                            "mode": "step",
+                            "ticker": str(ticker).upper(),
+                            "delta_equity": float(delta_eq),
+                        }
+                        try:
+                            mgr = get_online_learning_manager()
+                            mgr.on_step(state=prev_state, action=prev_action, reward=float(reward), next_state=state_now, metadata=md0)
+                        except Exception:
+                            pass
+
+                    self._step_rl_last[str(ticker).upper()] = {
+                        "ts": float(now_ts),
+                        "state": state_now,
+                        "action": str(action or "HOLD").upper(),
+                        "equity": float(equity_now),
+                    }
+        except Exception:
+            pass
+
         signal = {
             "ticker": ticker,
             "action": action,
             "price": price,
-            "shares": self._calculate_position_size(ticker, price, confidence),
+            "shares": int(shares_i),
             "expert": expert,
             "confidence": confidence,
             "analysis": analysis,
