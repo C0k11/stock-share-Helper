@@ -3475,6 +3475,7 @@ async def stop_nightly_evolution_train():
 async def start_alpha_evolution_train(
     reward_thr: float = 50.0,
     punish_thr: float = -20.0,
+    source: str = "step",
     base_model: str = "Qwen/Qwen2.5-7B-Instruct",
     sft_adapter: str = "models/trader_stock_v1_1_tech_plus_news/lora_weights",
     output_dir: str = "",
@@ -3533,7 +3534,30 @@ async def start_alpha_evolution_train(
     evo_out_dir.mkdir(parents=True, exist_ok=True)
 
     alpha_data_path = evo_out_dir / "dpo_alpha_nightly.jsonl"
-    gen_cmd = [str(python_exe), "scripts/generate_alpha_dataset.py", "--reward-thr", str(float(reward_thr)), "--punish-thr", str(float(punish_thr))]
+    src = str(source or "").strip().lower() or "step"
+    # For step rewards (typically ~1e-4), use tighter thresholds unless explicitly provided.
+    if src != "trajectory":
+        try:
+            if float(reward_thr) == 50.0:
+                reward_thr = 5e-5
+        except Exception:
+            reward_thr = 5e-5
+        try:
+            if float(punish_thr) == -20.0:
+                punish_thr = -5e-5
+        except Exception:
+            punish_thr = -5e-5
+
+    gen_cmd = [
+        str(python_exe),
+        "scripts/generate_alpha_dataset.py",
+        "--source",
+        str(src),
+        "--reward-thr",
+        str(float(reward_thr)),
+        "--punish-thr",
+        str(float(punish_thr)),
+    ]
     try:
         subprocess.run(gen_cmd, cwd=str(REPO_ROOT), check=False, env=env, capture_output=True, text=True, timeout=180)
     except Exception as e:
