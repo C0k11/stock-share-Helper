@@ -3597,8 +3597,8 @@ async def start_alpha_evolution_train(
     evo_out_dir = REPO_ROOT / "data" / "finetune" / "evolution"
     evo_out_dir.mkdir(parents=True, exist_ok=True)
 
-    alpha_data_path = evo_out_dir / "dpo_alpha_nightly.jsonl"
     src = str(source or "").strip().lower() or "step"
+    alpha_data_path = evo_out_dir / ("dpo_alpha_nightly.jsonl" if src == "trajectory" else "dpo_alpha_step.jsonl")
     # For step rewards (typically ~1e-4), use tighter thresholds unless explicitly provided.
     if src != "trajectory":
         try:
