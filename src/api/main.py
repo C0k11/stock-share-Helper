@@ -236,6 +236,35 @@ def _resume_live_after_training() -> None:
         pass
     _set_live_engine_paused(False)
 
+    try:
+        if _live_runner is None:
+            return
+        if not bool(getattr(_live_runner, "load_models", False)):
+            return
+        stg = getattr(_live_runner, "strategy", None)
+        if stg is None:
+            return
+        if bool(getattr(stg, "models_loaded", False)):
+            return
+
+        def _load() -> None:
+            try:
+                fn = getattr(stg, "load_models", None)
+                if callable(fn):
+                    fn()
+            except Exception:
+                return
+            try:
+                fn2 = getattr(stg, "_warmup_kv_cache", None)
+                if callable(fn2):
+                    fn2()
+            except Exception:
+                pass
+
+        threading.Thread(target=_load, daemon=True).start()
+    except Exception:
+        pass
+
 
 def _get_session_id(ctx: Dict[str, Any]) -> Optional[str]:
     try:
@@ -1811,6 +1840,21 @@ def _enqueue_task(*, text: str, ticker: Optional[str], ctx: Dict[str, Any]) -> s
 
 
 def _run_task_job(task_id: str) -> None:
+    while True:
+        try:
+            running, which = _is_training_running()
+        except Exception:
+            running, which = False, ""
+        if not running:
+            break
+        with _AGENT_LOCK:
+            job = _TASKS.get(task_id)
+            if not isinstance(job, dict):
+                return
+            job["status"] = "queued_training"
+            job["error"] = f"training_running:{which}" if which else "training_running"
+        time.sleep(2.0)
+
     with _AGENT_LOCK:
         job = _TASKS.get(task_id)
         if not isinstance(job, dict):
@@ -1912,6 +1956,21 @@ def _run_task_job(task_id: str) -> None:
 
 
 def _run_news_analysis_job(news_id: str) -> None:
+    while True:
+        try:
+            running, which = _is_training_running()
+        except Exception:
+            running, which = False, ""
+        if not running:
+            break
+        with _AGENT_LOCK:
+            job = _NEWS_JOBS.get(news_id)
+            if not isinstance(job, dict):
+                return
+            job["status"] = "queued_training"
+            job["error"] = f"training_running:{which}" if which else "training_running"
+        time.sleep(2.0)
+
     with _AGENT_LOCK:
         job = _NEWS_JOBS.get(news_id)
         if not isinstance(job, dict):
