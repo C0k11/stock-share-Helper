@@ -3510,6 +3510,11 @@ async def start_alpha_evolution_train(
                 _SOVITS_RESTARTED_AFTER_ALPHA = False
 
     try:
+        _suspend_live_inference()
+    except Exception:
+        pass
+
+    try:
         from src.llm.local_chat import unload_model
         await run_in_threadpool(unload_model)
     except Exception:
