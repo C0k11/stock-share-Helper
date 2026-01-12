@@ -244,10 +244,72 @@ def _resume_live_after_training() -> None:
         stg = getattr(_live_runner, "strategy", None)
         if stg is None:
             return
-        if bool(getattr(stg, "models_loaded", False)):
-            return
+
+        changed = False
+        try:
+            p = REPO_ROOT / "data" / "finetune" / "evolution" / "active_trading_models.json"
+            if p.exists():
+                obj = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(obj, dict):
+                    s = str(obj.get("active_moe_scalper") or "").strip()
+                    a = str(obj.get("active_moe_analyst") or "").strip()
+                    if s:
+                        try:
+                            if str(getattr(stg, "moe_scalper", "") or "") != s:
+                                setattr(stg, "moe_scalper", s)
+                                changed = True
+                        except Exception:
+                            pass
+                    if a:
+                        try:
+                            if str(getattr(stg, "moe_analyst", "") or "") != a:
+                                setattr(stg, "moe_analyst", a)
+                                changed = True
+                        except Exception:
+                            pass
+        except Exception:
+            pass
+
+        try:
+            if changed:
+                setattr(stg, "models_loaded", False)
+        except Exception:
+            pass
+
+        try:
+            if (not changed) and bool(getattr(stg, "models_loaded", False)):
+                return
+        except Exception:
+            pass
 
         def _load() -> None:
+            if changed:
+                acquired = False
+                try:
+                    lk = getattr(stg, "_inference_lock", None)
+                    if lk is not None:
+                        acquired = bool(lk.acquire(timeout=3.0))
+                except Exception:
+                    acquired = False
+                if acquired:
+                    try:
+                        try:
+                            setattr(stg, "model", None)
+                        except Exception:
+                            pass
+                        try:
+                            setattr(stg, "tokenizer", None)
+                        except Exception:
+                            pass
+                        try:
+                            setattr(stg, "models_loaded", False)
+                        except Exception:
+                            pass
+                    finally:
+                        try:
+                            lk.release()
+                        except Exception:
+                            pass
             try:
                 fn = getattr(stg, "load_models", None)
                 if callable(fn):
