@@ -1192,7 +1192,7 @@ class MultiAgentStrategy:
                 except Exception:
                     pass
                 proposed_action = str(action or "").strip().upper() or str(action)
-                self._log(f"System 2 Debate: initiated... ticker={ticker} proposed={proposed_action} trace_ids={trace_ids}", priority=2)
+                self._log(f"System 2 Debate: initiated... ticker={ticker} proposed={proposed_action} expert={expert} trace_ids={trace_ids}", priority=2)
                 
                 # Chartist Overlay
                 if skip_vlm:
@@ -1209,6 +1209,7 @@ class MultiAgentStrategy:
                 # System2 Critic -> Judge (LLM via hot-swap); may override or block
                 approved, final_action, reason = self._system2_debate(
                     ticker=ticker,
+                    proposed_expert=str(expert or "").strip() or "unknown",
                     proposed_action=proposed_action,
                     proposed_analysis=analysis,
                     features=features,
@@ -1936,265 +1937,6 @@ class MultiAgentStrategy:
             except Exception:
                 pass
 
-    def _fast_generic_inference(
-        self,
-        user_msg: str,
-        system_prompt: str = "",
-        adapter: Optional[str] = None,
-        temperature: float = 0.0,
-        max_new_tokens: int = 256,
-    ) -> str:
-        if (not self.models_loaded) or (self.model is None) or (self.tokenizer is None):
-            return ""
-
-        target_adapter = str(adapter or "").strip()
-        if target_adapter and target_adapter not in self._adapters_loaded:
-            if "secretary" in self._adapters_loaded:
-                target_adapter = "secretary"
-            else:
-                target_adapter = ""
-
-        acquired = False
-        try:
-            acquired = bool(self._inference_lock.acquire(blocking=False))
-        except Exception:
-            acquired = False
-        if not acquired:
-            return ""
-
-        model0 = None
-        try:
-            self._inference_lock_owner = "fast_generic_inference"
-            self._inference_lock_hold_since_ts = time.time()
-
-            import torch
-            from contextlib import nullcontext
-
-            adapter_ctx = nullcontext()
-            model0 = getattr(self, "model", None)
-            tok0 = getattr(self, "tokenizer", None)
-            if model0 is None or tok0 is None:
-                return ""
-
-            if target_adapter:
-                model0.set_adapter(target_adapter)
-            else:
-                if hasattr(model0, "disable_adapter"):
-                    adapter_ctx = model0.disable_adapter()
-
-            with adapter_ctx:
-                messages = []
-                if system_prompt:
-                    messages.append({"role": "system", "content": system_prompt})
-                messages.append({"role": "user", "content": user_msg})
-
-                text = tok0.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-                tk_kwargs: Dict[str, Any] = {"return_tensors": "pt"}
-                if int(getattr(self, "llm_max_context", 0) or 0) > 0:
-                    tk_kwargs.update({"truncation": True, "max_length": int(self.llm_max_context)})
-                inputs = tok0([text], **tk_kwargs).to(model0.device)
-
-                mn = int(max_new_tokens or 0)
-                if mn <= 0:
-                    mn = 64
-
-                mt = float(getattr(self, "_gen_max_time_sec", 12.0) or 12.0)
-                try:
-                    mt = min(mt, 1.8)
-                except Exception:
-                    pass
-
-                with torch.no_grad():
-                    try:
-                        gen_ids = model0.generate(
-                            **inputs,
-                            max_new_tokens=int(mn),
-                            temperature=float(temperature),
-                            do_sample=(float(temperature) > 0),
-                            top_p=0.9,
-                            max_time=float(mt),
-                            pad_token_id=tok0.eos_token_id,
-                        )
-                    except TypeError as e:
-                        if "max_time" in str(e):
-                            gen_ids = model0.generate(
-                                **inputs,
-                                max_new_tokens=int(mn),
-                                temperature=float(temperature),
-                                do_sample=(float(temperature) > 0),
-                                top_p=0.9,
-                                pad_token_id=tok0.eos_token_id,
-                            )
-                        else:
-                            raise
-
-                try:
-                    out = tok0.decode(gen_ids[0][inputs.input_ids.shape[1]:], skip_special_tokens=True)
-                except Exception:
-                    out = ""
-
-            default = "scalper" if "scalper" in self._adapters_loaded else (list(self._adapters_loaded)[0] if self._adapters_loaded else None)
-            if default:
-                try:
-                    model0.set_adapter(default)
-                except Exception:
-                    pass
-            return str(out or "").strip()
-        except Exception:
-            try:
-                default = "scalper" if "scalper" in self._adapters_loaded else (list(self._adapters_loaded)[0] if self._adapters_loaded else None)
-                if default and model0 is not None:
-                    model0.set_adapter(default)
-            except Exception:
-                pass
-            return ""
-        finally:
-            try:
-                self._inference_lock_owner = ""
-                self._inference_lock_hold_since_ts = 0.0
-            except Exception:
-                pass
-            try:
-                self._inference_lock.release()
-            except Exception:
-                pass
-
-        parsed = []
-        try:
-            from src.llm.news_parser import RuleBasedNewsParser
-
-            parser = RuleBasedNewsParser()
-            for it in items:
-                if not isinstance(it, dict):
-                    continue
-                title = str(it.get("title") or "").strip()
-                content = str(it.get("content") or "").strip()
-                if not title and not content:
-                    continue
-                pn = parser.parse(title=title, content=content)
-                parsed.append(pn)
-        except Exception:
-            parsed = []
-
-        score = 0.0
-        conf_sum = 0.0
-        n = 0
-        titles = []
-        for i, pn in enumerate(parsed[:limit]):
-            try:
-                s = str(getattr(pn, "sentiment", "neutral") or "neutral").strip().lower()
-                conf = float(getattr(pn, "confidence", 0.5) or 0.5)
-                if s == "positive":
-                    score += 1.0 * conf
-                elif s == "negative":
-                    score += -1.0 * conf
-                conf_sum += conf
-                n += 1
-                t0 = str(getattr(pn, "title", "") or "").strip()
-                if t0:
-                    titles.append(t0)
-            except Exception:
-                continue
-
-        avg_score = (score / conf_sum) if (conf_sum > 1e-9) else 0.0
-        sentiment = "neutral"
-        if avg_score >= 0.2:
-            sentiment = "positive"
-        elif avg_score <= -0.2:
-            sentiment = "negative"
-
-        summary = " | ".join(titles[:3]).strip()
-        try:
-            max_titles = int(cfg.get("summary_titles", 6))
-        except Exception:
-            max_titles = 6
-        max_titles = max(3, min(max_titles, 18))
-        summary = " | ".join(titles[:max_titles]).strip()
-        try:
-            maxc = int(cfg.get("summary_max_chars", 800))
-        except Exception:
-            maxc = 800
-        maxc = max(180, min(maxc, 4000))
-        if len(summary) > maxc:
-            summary = summary[: max(0, maxc - 3)] + "..."
-
-        sig = {
-            "news_count": int(len(items) or 0),
-            "news_score": float(avg_score),
-            "news_sentiment": sentiment,
-            "news_confidence": float(conf_sum / n) if n > 0 else 0.0,
-            "news_summary": summary,
-            "news_source": "yahoo+google" if (bool(cfg.get("google_enabled", False))) else "yahoo_rss",
-            "asof": datetime.now().isoformat(),
-        }
-
-        try:
-            if time_mode == "market" and isinstance(asof_time, datetime):
-                sig["asof"] = asof_time.isoformat()
-        except Exception:
-            pass
-
-        self._news_cache[ck] = {"items": items[:limit], "signal": sig}
-        self._news_last_fetch_ts[ck] = time.time()
-        try:
-            self._log(f"[News] {tk} sentiment={sentiment} score={avg_score:.2f} n={len(items) or 0} :: {summary}", priority=2)
-        except Exception:
-            pass
-
-    def _fetch_news_gdelt(self, ticker: str, *, asof_time: datetime, limit: int) -> List[Dict[str, Any]]:
-        tk = str(ticker or "").upper().strip()
-        if not tk:
-            return []
-
-        try:
-            maxrec = int(limit) if limit is not None else 12
-        except Exception:
-            maxrec = 12
-        maxrec = max(3, min(maxrec, 40))
-
-        # GDELT expects UTC-ish yyyymmddHHMMSS. We align to the day boundary of asof_time.
-        try:
-            day0 = asof_time.strftime("%Y%m%d")
-        except Exception:
-            day0 = datetime.now().strftime("%Y%m%d")
-        startdt = f"{day0}000000"
-        enddt = f"{day0}235959"
-
-        q = urllib.parse.quote_plus(f"{tk} stock")
-        url = (
-            "https://api.gdeltproject.org/api/v2/doc/doc?query="
-            + q
-            + f"&mode=ArtList&format=json&startdatetime={startdt}&enddatetime={enddt}&maxrecords={maxrec}"
-        )
-
-        req0 = urllib.request.Request(url, headers={"User-Agent": "StockAppNews/0.1"})
-        with urllib.request.urlopen(req0, timeout=12) as resp:
-            raw = resp.read(2_000_000)
-        try:
-            js = json.loads(raw.decode("utf-8", errors="ignore"))
-        except Exception:
-            js = {}
-
-        arts = []
-        try:
-            arts = js.get("articles") if isinstance(js, dict) else []
-        except Exception:
-            arts = []
-
-        out: List[Dict[str, Any]] = []
-        if not isinstance(arts, list):
-            return out
-        for a in arts[:maxrec]:
-            if not isinstance(a, dict):
-                continue
-            title = str(a.get("title") or "").strip()
-            link = str(a.get("url") or "").strip()
-            seen = str(a.get("seendate") or "").strip()
-            if not title:
-                continue
-            out.append({"title": title, "content": title, "link": link, "published": seen, "source": "gdelt"})
-        return out
-
     def inject_news_signal(self, ticker: str, signal: Dict[str, Any]) -> None:
         """Inject a precomputed news signal into cache (used by offline replay recordings)."""
         tk = str(ticker or "").upper().strip()
@@ -2846,7 +2588,7 @@ class MultiAgentStrategy:
                         pass
                     kw["max_time"] = mt
 
-                    with torch.no_grad():
+                    with torch.inference_mode():
                         try:
                             t0_gen = time.perf_counter()
                             gen_ids0 = model0.generate(**inputs0, **kw)
@@ -3218,6 +2960,7 @@ class MultiAgentStrategy:
         self,
         *,
         ticker: str,
+        proposed_expert: str = "",
         proposed_action: str,
         proposed_analysis: str,
         features: Dict[str, Any],
@@ -3228,7 +2971,7 @@ class MultiAgentStrategy:
         action_up = str(proposed_action or "").strip().upper()
         if action_up not in {"BUY", "SELL", "HOLD"}:
             action_up = "HOLD"
-
+        
         pos_shares = 0.0
         pos_side = "FLAT"
         try:
@@ -3251,7 +2994,7 @@ class MultiAgentStrategy:
 
         lines = []
         try:
-            tech = features.get("technical") if isinstance(features.get("technical"), dict) else {}
+            tech = features.get("technical", {})
             sig = features.get("signal") if isinstance(features.get("signal"), dict) else {}
             lines = [
                 f"Ticker: {str(ticker).upper()}",
@@ -3263,15 +3006,22 @@ class MultiAgentStrategy:
                 f"Volume ratio: {tech.get('vol_ratio', '')}",
                 f"Composite signal: {sig.get('composite', '')}",
                 f"Chartist score: {int(chart_score)}",
-                f"Macro regime: {str(macro_label)} (gear={float(macro_gear)})",
+                f"Macro regime: {str(macro_label)} (gear={macro_gear})",
                 f"Current position shares: {pos_shares:g} ({pos_side})",
                 "Action semantics: BUY increases long / reduces short; SELL reduces long / increases short; HOLD no trade; CLEAR means close position to FLAT.",
                 "",
+                f"Proposed by expert: {str(proposed_expert or '').strip() or 'unknown'}",
                 f"Proposed decision: {action_up}",
                 f"Proposed analysis: {str(proposed_analysis or '').strip()}",
             ]
         except Exception:
-            lines = [f"Ticker: {str(ticker).upper()}", "", f"Proposed decision: {action_up}", f"Proposed analysis: {str(proposed_analysis or '').strip()}"]
+            lines = [
+                f"Ticker: {str(ticker).upper()}",
+                "",
+                f"Proposed by expert: {str(proposed_expert or '').strip() or 'unknown'}",
+                f"Proposed decision: {action_up}",
+                f"Proposed analysis: {str(proposed_analysis or '').strip()}",
+            ]
 
         critic_sys = (
             "You are a strict trading decision critic.\n"

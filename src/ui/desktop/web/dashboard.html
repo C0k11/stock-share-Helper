@@ -1816,10 +1816,10 @@
 
           // Execution should only capture actual execution lines, not generic "signal" words in reasoning.
           const isExec = (
-            (!isBackfill && (msg.includes('[fill]') || msg.includes(' fill ') || msg.startsWith('fill '))) ||
-            msg.includes('[execution]') ||
-            msg.includes(' order ') || msg.startsWith('order ') ||
-            log.type === 'fill'
+            (!isNews && !isBackfill && (msg.includes('[fill]') || msg.includes(' fill ') || msg.startsWith('fill '))) ||
+            (!isNews && msg.includes('[execution]')) ||
+            (!isNews && (msg.includes(' order ') || msg.startsWith('order '))) ||
+            (!isNews && log.type === 'fill')
           );
           if (!isSystem2 && isExec) {
             panels.execution.push(log);

@@ -123,7 +123,7 @@
 | System2 parse_failed / model busy | 推理预算过小 + 推理锁竞争；JSON 截断 | System2 独立预算 + 轻量重试；parse_failed 强制 HOLD；推理锁 timeout 可配 | `src/trading/strategy.py` | 日志出现 parse_failed 时不再误交易；System2 能稳定输出 JSON |
 | Chartist 面板“后面不工作”（HOLD 时不刷新） | Chartist/VLM 只在 System2 路径触发，HOLD 时不会触发 | 增加 `idle_tick`：HOLD 时按 ticker 节流触发一次 Chartist overlay | `src/trading/strategy.py`、`configs/secretary.yaml` | 长时间 HOLD 时 Chartist 仍周期输出（可配置 interval） |
 | 负现金 / 仓位过度集中 / 杠杆飙升 | 缺少硬性风控（负现金加仓、持仓数量、单 ticker 暴露、总暴露） | 新增 risk caps：负现金禁买（不影响回补）、最大持仓数、单 ticker 暴露上限、总暴露上限、止损止盈 | `src/trading/strategy.py`、`configs/secretary.yaml` | 触发条件时日志出现 `[Risk] block/clamp ...`，不会继续加仓 |
-| RL 数据稀疏（只在平仓写 experiences），长持仓学不到 | trade-level experience 频率太低 | 新增 step-level experience：按 ticker 周期采样写入 `step_experiences.jsonl`，含 reward 归一化与风险元数据 | `src/rl/online_learning.py`、`src/trading/strategy.py`、`configs/secretary.yaml` | RL enabled 后：`data/rl_experiences/step_experiences.jsonl` 行数持续增长；metadata 记录 blocked/clamp/stop_loss 等 |
+| RL 数据稀疏（只在平仓写 experiences），长持仓学不到 | trade-level experience 频率太低 | 新增 step-level experience：按 ticker 周期采样（优先对齐 bar.time）写入 `step_experiences.jsonl`；reward 改为按 equity 归一化的 return；默认启用负现金惩罚；metadata 记录 blocked/clamp/stop_loss 等 risk flags | `src/rl/online_learning.py`、`src/trading/strategy.py`、`configs/secretary.yaml` | RL enabled 后：`data/rl_experiences/step_experiences.jsonl` 行数持续增长；metadata 含 blocked/risk_flags；回放模式下 step 采样不漂移；baseline(2026-01-12): rows=721; action SELL=415 HOLD=304 BUY=2; blocked True=302 False=419; blocked_reason top=gross_exposure(187), pos_cap(97), max_positions(18); risk_flags top=gross_exposure_block(283), pos_cap_block(194), pos_cap_clamp(187), max_positions_block(115); reward min=-0.0143 p50=-3.49e-05 p90=0.000707 p99=0.00238 max=0.00493 |
 
 
 

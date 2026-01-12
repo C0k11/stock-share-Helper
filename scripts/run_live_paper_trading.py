@@ -652,6 +652,18 @@ class LivePaperTradingRunner:
         self._rl_open: Dict[str, Dict[str, Any]] = {}  # ticker -> open trade state
         self._rl_last_pos: Dict[str, Dict[str, float]] = {}  # ticker -> {shares, avg_price}
         try:
+            step_cfg = None
+            if isinstance(risk_cfg, dict) and risk_cfg:
+                step_cfg = risk_cfg.get("step_rl")
+            step_cfg = step_cfg if isinstance(step_cfg, dict) else {}
+            if bool(step_cfg.get("enabled", False)):
+                try:
+                    setattr(self.rl_manager, "enabled", True)
+                except Exception:
+                    pass
+        except Exception:
+            pass
+        try:
             for tk, pos in (getattr(self.broker, "positions", {}) or {}).items():
                 if pos is None:
                     continue
@@ -720,13 +732,19 @@ class LivePaperTradingRunner:
             exp_path = None
             if exp_dir is not None:
                 exp_path = Path(exp_dir) / "experiences.jsonl"
+            step_path = None
+            try:
+                if exp_dir is not None:
+                    step_path = Path(exp_dir) / "step_experiences.jsonl"
+            except Exception:
+                step_path = None
             t_str = datetime.now().strftime("%H:%M:%S")
             self.agent_logs.append(
                 {
                     "time": t_str,
                     "type": "system",
                     "priority": 2,
-                    "message": f"[OnlineRL] enabled={bool(getattr(self.rl_manager, 'enabled', False))} experiences={(str(exp_path) if exp_path else '?')}",
+                    "message": f"[OnlineRL] enabled={bool(getattr(self.rl_manager, 'enabled', False))} experiences={(str(exp_path) if exp_path else '?')} step={(str(step_path) if step_path else '?')}",
                 }
             )
         except Exception:
@@ -1218,7 +1236,22 @@ class LivePaperTradingRunner:
             # If already holding a position (pre-existing), don't fabricate an entry; wait until flat->nonflat.
             if abs(prev_sh) < 1e-12 and abs(next_sh) >= 1e-12:
                 _open_new(1 if next_sh > 0 else -1, price, abs(next_sh), md)
-        else:
+            elif abs(prev_sh) >= 1e-12:
+                # Bootstrap tracking for pre-existing positions so we can record a round-trip later.
+                try:
+                    md0 = dict(md or {})
+                    md0.update({
+                        "bootstrap": "preexisting_position",
+                        "bootstrap_prev_shares": float(prev_sh),
+                        "bootstrap_prev_avg_price": float(prev_avg),
+                    })
+                    entry_px0 = float(prev_avg) if float(prev_avg) > 0.0 else float(price)
+                    _open_new(1 if prev_sh > 0 else -1, entry_px0, abs(prev_sh), md0)
+                    tr = self._rl_open.get(ticker)
+                except Exception:
+                    tr = None
+
+        if tr is not None:
             direction = int(tr.get("direction", 1) or 1)
             entry_px = float(tr.get("entry_price", price) or price)
             qty_abs = float(tr.get("qty", 0.0) or 0.0)
