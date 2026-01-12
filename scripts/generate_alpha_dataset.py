@@ -261,7 +261,7 @@ def main() -> None:
     trajectory_dir = repo_root / "data" / "evolution" / "trajectories"
     out_dir = repo_root / "data" / "finetune" / "evolution"
     out_dir.mkdir(parents=True, exist_ok=True)
-    out_path = out_dir / "dpo_alpha_nightly.jsonl"
+    out_path = out_dir / ("dpo_alpha_nightly.jsonl" if str(args.source or "").strip().lower() == "trajectory" else "dpo_alpha_step.jsonl")
 
     src = str(args.source or "").strip().lower() or "step"
     reward_thr = args.reward_thr
