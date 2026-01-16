@@ -105,6 +105,42 @@ scripts\launch_desktop.ps1
 
 只要这些文件的行数持续增长，就说明正在采集训练样本。
 
+另外，step 级别会落盘两份 jsonl（旧版 + 新版环扣）：
+
+- `data/rl_experiences/step_experiences.jsonl`：兼容旧流程的 step-level experience
+- `data/rl_experiences/joint_step_experiences.jsonl`：包含 router + 各专家输出 + system2 + chartist + 风控 trace 的 joint-step experience（用于多专家联合训练）
+
+### Alpha Joint Evolution（一键多专家训练）
+
+API 入口：`/api/v1/evolution/alpha/train/start?source=joint_step`
+
+它会默认读取 `joint_step_experiences.jsonl`，并顺序训练多个专家（DPO）：
+
+- scalper
+- analyst
+- news（若配置了 `trading.moe_news`）
+- system2（若配置了 `trading.moe_system2`）
+
+并且当 `configs/secretary.yaml` 中 `trading.chartist_vlm.enabled: true` 且存在 `trading.chartist_vlm.local_model` 时，会可选训练 chartist（VLM SFT），训练数据来自 `decision_trace.chartist.image_base64`。
+
+关键脚本：
+
+- `scripts/generate_alpha_joint_datasets.py`
+- `scripts/alpha_joint_evolution.py`
+- `scripts/convert_joint_steps_to_chartist_sft.py`
+
+### 热切换与状态验证（Loaded Adapters 可观测）
+
+训练完成后会写两个指针文件：
+
+- `data/finetune/evolution/active_trading_models.json`：scalper/analyst/news/system2 的 active adapter 路径
+- `data/finetune/evolution/active_chartist_adapter.json`：chartist 的 active adapter 路径
+
+然后调用：
+
+- `/api/v1/live/reload_models`：让 live runner 根据指针文件热切换并 reload
+- `/api/v1/live/status`：回显当前已加载的 `moe_scalper/moe_analyst/moe_news/moe_system2/chartist_adapter` 路径
+
 ### 性能/推理参数（常用）
 
 `configs/secretary.yaml`：

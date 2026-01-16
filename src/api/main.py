@@ -3337,6 +3337,13 @@ def _spawn_alpha_train_watcher(proc: subprocess.Popen) -> None:
 
         try:
             if rc == 0:
+                try:
+                    p0 = REPO_ROOT / "data" / "finetune" / "evolution" / "active_trading_models.json"
+                    if p0.exists() and p0.stat().st_size > 10:
+                        return
+                except Exception:
+                    pass
+
                 out_dir = str(_ALPHA_TRAIN_OUTPUT_DIR or "").strip()
                 sft_adapter = str(_ALPHA_TRAIN_SFT_ADAPTER or "").strip()
                 if out_dir:
@@ -3661,7 +3668,6 @@ async def start_alpha_evolution_train(
 
     src = str(source or "").strip().lower() or "step"
     alpha_data_path = evo_out_dir / ("dpo_alpha_nightly.jsonl" if src == "trajectory" else "dpo_alpha_step.jsonl")
-    # For step rewards (typically ~1e-4), use tighter thresholds unless explicitly provided.
     if src != "trajectory":
         try:
             if float(reward_thr) == 50.0:
@@ -3673,6 +3679,118 @@ async def start_alpha_evolution_train(
                 punish_thr = -5e-5
         except Exception:
             punish_thr = -5e-5
+
+    if src == "joint_step":
+        cfg = _get_secretary_config()
+        trading_cfg = cfg.get("trading") if isinstance(cfg, dict) and isinstance(cfg.get("trading"), dict) else {}
+        base_model = str(trading_cfg.get("base_model") or base_model).strip() or str(base_model)
+        out_dir = str(output_dir or "").strip()
+        if not out_dir:
+            out_dir = str(REPO_ROOT / "models" / f"alpha_joint_{datetime.now().strftime('%Y%m%d_%H%M%S')}")
+
+        cmd = [
+            str(python_exe),
+            "scripts/alpha_joint_evolution.py",
+            "--base-model",
+            str(base_model),
+            "--step-path",
+            str((REPO_ROOT / "data" / "rl_experiences" / "joint_step_experiences.jsonl").resolve()),
+            "--reward-thr",
+            str(float(reward_thr)),
+            "--punish-thr",
+            str(float(punish_thr)),
+            "--epochs",
+            "1",
+            "--batch-size",
+            "1",
+            "--grad-accum",
+            "8",
+            "--out-root",
+            str(out_dir),
+        ]
+
+        scalper_adapter = str(trading_cfg.get("moe_scalper") or "").strip()
+        analyst_adapter = str(trading_cfg.get("moe_analyst") or "").strip() or str(sft_adapter)
+        news_adapter = str(trading_cfg.get("moe_news") or "").strip()
+        system2_adapter = str(trading_cfg.get("moe_system2") or "").strip()
+        if scalper_adapter:
+            cmd += ["--scalper-adapter", scalper_adapter]
+        if analyst_adapter:
+            cmd += ["--analyst-adapter", analyst_adapter]
+        if news_adapter:
+            cmd += ["--news-adapter", news_adapter]
+        if system2_adapter:
+            cmd += ["--system2-adapter", system2_adapter]
+
+        try:
+            cv = trading_cfg.get("chartist_vlm") if isinstance(trading_cfg.get("chartist_vlm"), dict) else {}
+            if bool(cv.get("enabled", False)):
+                m = str(cv.get("local_model") or "").strip()
+                if m:
+                    cmd.append("--train-chartist")
+                    cmd += ["--chartist-model", m]
+                    py = str(cv.get("prompt_yaml") or "").strip()
+                    if py:
+                        cmd += ["--chartist-prompt-yaml", py]
+        except Exception:
+            pass
+        if True:
+            cmd.append("--reference-free")
+
+        pairs_count = 0
+        try:
+            p_joint = REPO_ROOT / "data" / "rl_experiences" / "joint_step_experiences.jsonl"
+            if p_joint.exists():
+                pairs_count = 1
+        except Exception:
+            pairs_count = 0
+
+        log_path = evo_out_dir / f"alpha_train_{datetime.now().strftime('%Y%m%d_%H%M%S')}.log"
+
+        fh: Any = None
+        proc: Optional[subprocess.Popen] = None
+        try:
+            fh = log_path.open("w", encoding="utf-8", errors="replace")
+            proc = subprocess.Popen(
+                cmd,
+                cwd=str(REPO_ROOT),
+                stdout=fh,
+                stderr=subprocess.STDOUT,
+                env=env,
+                text=True,
+            )
+        except Exception as e:
+            try:
+                if fh is not None:
+                    fh.close()
+            except Exception:
+                pass
+            return {"ok": False, "running": False, "error": str(e)}
+
+        with _ALPHA_TRAIN_LOCK:
+            _ALPHA_TRAIN_PROC = proc
+            _ALPHA_TRAIN_FH = fh
+            _ALPHA_TRAIN_LOG = log_path
+            _ALPHA_TRAIN_CMD = list(cmd)
+            _ALPHA_TRAIN_STARTED_AT = datetime.now().isoformat()
+            _ALPHA_TRAIN_OUTPUT_DIR = str(out_dir)
+            _ALPHA_TRAIN_SFT_ADAPTER = str(analyst_adapter)
+
+        try:
+            _spawn_alpha_train_watcher(proc)
+        except Exception:
+            pass
+
+        return {
+            "ok": True,
+            "running": True,
+            "pid": int(getattr(proc, "pid", 0) or 0),
+            "pairs": int(pairs_count),
+            "data_path": str((REPO_ROOT / "data" / "rl_experiences" / "joint_step_experiences.jsonl").resolve()),
+            "output_dir": str(out_dir),
+            "log_path": str(log_path),
+            "cmd": " ".join(cmd),
+        }
 
     gen_cmd = [
         str(python_exe),
@@ -5214,6 +5332,7 @@ async def get_live_status():
     
     infer_mode = "REAL" if (bool(getattr(_live_runner, "load_models", False)) and bool(getattr(getattr(_live_runner, "strategy", None), "models_loaded", False))) else "HEURISTIC"
 
+    stg = getattr(_live_runner, "strategy", None)
     return {
         "active": True,
         "tickers": _live_runner.strategy.tickers,
@@ -5227,9 +5346,15 @@ async def get_live_status():
         "mode": getattr(_live_runner, "trading_mode", "online"),
 
         "load_models": bool(getattr(_live_runner, "load_models", False)),
-        "models_loaded": bool(getattr(getattr(_live_runner, "strategy", None), "models_loaded", False)),
-        "models_error": str(getattr(getattr(_live_runner, "strategy", None), "models_error", "") or ""),
+        "models_loaded": bool(getattr(stg, "models_loaded", False)),
+        "models_error": str(getattr(stg, "models_error", "") or ""),
         "infer_mode": infer_mode,
+
+        "moe_scalper": str(getattr(stg, "moe_scalper", "") or "") if stg is not None else "",
+        "moe_analyst": str(getattr(stg, "moe_analyst", "") or "") if stg is not None else "",
+        "moe_news": str(getattr(stg, "moe_news", "") or "") if stg is not None else "",
+        "moe_system2": str(getattr(stg, "moe_system2", "") or "") if stg is not None else "",
+        "chartist_adapter": str((getattr(stg, "_chartist_vlm_cfg", {}) or {}).get("adapter") or "") if stg is not None else "",
 
         # Feed/source diagnostics
         "data_source": feed.get("data_source"),
@@ -5356,6 +5481,8 @@ async def reload_live_models():
             if isinstance(obj, dict):
                 s = str(obj.get("active_moe_scalper") or "").strip()
                 a = str(obj.get("active_moe_analyst") or "").strip()
+                n = str(obj.get("active_moe_news") or "").strip()
+                s2 = str(obj.get("active_moe_system2") or "").strip()
                 if s:
                     try:
                         if str(getattr(stg, "moe_scalper", "") or "") != s:
@@ -5370,6 +5497,45 @@ async def reload_live_models():
                             changed = True
                     except Exception:
                         pass
+                if n:
+                    try:
+                        if str(getattr(stg, "moe_news", "") or "") != n:
+                            setattr(stg, "moe_news", n)
+                            changed = True
+                    except Exception:
+                        pass
+                if s2:
+                    try:
+                        if str(getattr(stg, "moe_system2", "") or "") != s2:
+                            setattr(stg, "moe_system2", s2)
+                            changed = True
+                    except Exception:
+                        pass
+
+        try:
+            p = REPO_ROOT / "data" / "finetune" / "evolution" / "active_chartist_adapter.json"
+            if p.exists():
+                obj = json.loads(p.read_text(encoding="utf-8"))
+                if isinstance(obj, dict):
+                    cap = str(obj.get("active_chartist_adapter") or "").strip()
+                    if cap:
+                        cfg = getattr(stg, "_chartist_vlm_cfg", None)
+                        if isinstance(cfg, dict):
+                            cur = str(cfg.get("adapter") or cfg.get("adapter_path") or "").strip()
+                            if cur != cap:
+                                cfg["adapter"] = cap
+                                cfg.pop("adapter_path", None)
+                                try:
+                                    setattr(stg, "_chartist_vlm_model", None)
+                                except Exception:
+                                    pass
+                                try:
+                                    setattr(stg, "_chartist_vlm_processor", None)
+                                except Exception:
+                                    pass
+                                changed = True
+        except Exception:
+            pass
 
         try:
             need_reload = bool(changed) or (not bool(getattr(stg, "models_loaded", False)))
@@ -5435,7 +5601,7 @@ async def reload_live_models():
                         "time": t_str,
                         "type": "agent",
                         "priority": 2,
-                        "message": f"[ReloadModels] changed={changed} | scalper={getattr(stg, 'moe_scalper', '')} | analyst={getattr(stg, 'moe_analyst', '')}",
+                        "message": f"[ReloadModels] changed={changed} | scalper={getattr(stg, 'moe_scalper', '')} | analyst={getattr(stg, 'moe_analyst', '')} | news={getattr(stg, 'moe_news', '')} | system2={getattr(stg, 'moe_system2', '')}",
                     }
                 )
         except Exception:
@@ -5450,6 +5616,9 @@ async def reload_live_models():
             "error": err,
             "moe_scalper": str(getattr(stg, "moe_scalper", "") or ""),
             "moe_analyst": str(getattr(stg, "moe_analyst", "") or ""),
+            "moe_news": str(getattr(stg, "moe_news", "") or ""),
+            "moe_system2": str(getattr(stg, "moe_system2", "") or ""),
+            "chartist_adapter": str((getattr(stg, "_chartist_vlm_cfg", {}) or {}).get("adapter") or ""),
             "models_loaded": bool(getattr(stg, "models_loaded", False)),
             "message": msg,
             "need_reload": bool(need_reload),
@@ -5460,6 +5629,9 @@ async def reload_live_models():
         "changed": bool(changed),
         "moe_scalper": str(getattr(stg, "moe_scalper", "") or ""),
         "moe_analyst": str(getattr(stg, "moe_analyst", "") or ""),
+        "moe_news": str(getattr(stg, "moe_news", "") or ""),
+        "moe_system2": str(getattr(stg, "moe_system2", "") or ""),
+        "chartist_adapter": str((getattr(stg, "_chartist_vlm_cfg", {}) or {}).get("adapter") or ""),
         "models_loaded": bool(getattr(stg, "models_loaded", False)),
         "message": msg,
         "need_reload": bool(need_reload),
@@ -5578,17 +5750,19 @@ async def restart_live(req: LiveRestartRequest):
         except Exception:
             pass
 
-    # Hot-swap MoE adapters from pointer file (if present) and reload models
     try:
         stg = getattr(_live_runner, "strategy", None)
         if stg is not None:
+            changed = False
+
             p = REPO_ROOT / "data" / "finetune" / "evolution" / "active_trading_models.json"
             if p.exists():
                 obj = json.loads(p.read_text(encoding="utf-8"))
                 if isinstance(obj, dict):
                     s = str(obj.get("active_moe_scalper") or "").strip()
                     a = str(obj.get("active_moe_analyst") or "").strip()
-                    changed = False
+                    n = str(obj.get("active_moe_news") or "").strip()
+                    s2 = str(obj.get("active_moe_system2") or "").strip()
                     if s:
                         try:
                             if str(getattr(stg, "moe_scalper", "") or "") != s:
@@ -5603,66 +5777,105 @@ async def restart_live(req: LiveRestartRequest):
                                 changed = True
                         except Exception:
                             pass
-
-                    if changed:
+                    if n:
                         try:
-                            setattr(_live_runner, "load_models", True)
+                            if str(getattr(stg, "moe_news", "") or "") != n:
+                                setattr(stg, "moe_news", n)
+                                changed = True
+                        except Exception:
+                            pass
+                    if s2:
+                        try:
+                            if str(getattr(stg, "moe_system2", "") or "") != s2:
+                                setattr(stg, "moe_system2", s2)
+                                changed = True
                         except Exception:
                             pass
 
+            try:
+                p = REPO_ROOT / "data" / "finetune" / "evolution" / "active_chartist_adapter.json"
+                if p.exists():
+                    obj = json.loads(p.read_text(encoding="utf-8"))
+                    if isinstance(obj, dict):
+                        cap = str(obj.get("active_chartist_adapter") or "").strip()
+                        if cap:
+                            cfg = getattr(stg, "_chartist_vlm_cfg", None)
+                            if isinstance(cfg, dict):
+                                cur = str(cfg.get("adapter") or cfg.get("adapter_path") or "").strip()
+                                if cur != cap:
+                                    cfg["adapter"] = cap
+                                    cfg.pop("adapter_path", None)
+                                    try:
+                                        setattr(stg, "_chartist_vlm_model", None)
+                                    except Exception:
+                                        pass
+                                    try:
+                                        setattr(stg, "_chartist_vlm_processor", None)
+                                    except Exception:
+                                        pass
+                                    changed = True
+            except Exception:
+                pass
+
+            if changed:
+                try:
+                    setattr(_live_runner, "load_models", True)
+                except Exception:
+                    pass
+
+                try:
+                    import torch
+                    if torch.cuda.is_available():
+                        torch.cuda.empty_cache()
+                except Exception:
+                    pass
+
+                acquired = False
+                try:
+                    lk = getattr(stg, "_inference_lock", None)
+                    if lk is not None:
+                        acquired = bool(lk.acquire(timeout=3.0))
+                except Exception:
+                    acquired = False
+                if acquired:
+                    try:
                         try:
-                            import torch
-                            if torch.cuda.is_available():
-                                torch.cuda.empty_cache()
+                            setattr(stg, "model", None)
+                        except Exception:
+                            pass
+                        try:
+                            setattr(stg, "tokenizer", None)
+                        except Exception:
+                            pass
+                        try:
+                            setattr(stg, "models_loaded", False)
+                        except Exception:
+                            pass
+                    finally:
+                        try:
+                            lk.release()
                         except Exception:
                             pass
 
-                        acquired = False
-                        try:
-                            lk = getattr(stg, "_inference_lock", None)
-                            if lk is not None:
-                                acquired = bool(lk.acquire(timeout=3.0))
-                        except Exception:
-                            acquired = False
-                        if acquired:
-                            try:
-                                try:
-                                    setattr(stg, "model", None)
-                                except Exception:
-                                    pass
-                                try:
-                                    setattr(stg, "tokenizer", None)
-                                except Exception:
-                                    pass
-                                try:
-                                    setattr(stg, "models_loaded", False)
-                                except Exception:
-                                    pass
-                            finally:
-                                try:
-                                    lk.release()
-                                except Exception:
-                                    pass
-
-                            fn = getattr(stg, "load_models", None)
-                            if callable(fn):
-                                fn()
-                        else:
-                            try:
-                                logs = getattr(_live_runner, "agent_logs", None)
-                                if isinstance(logs, list):
-                                    import datetime as _dt
-                                    t_str = _dt.datetime.now().strftime("%H:%M:%S")
-                                    logs.append(
-                                        {
-                                            "time": t_str,
-                                            "type": "agent",
-                                            "priority": 2,
-                                            "message": "[HotSwap] skipped reload (inference_lock_busy)",
-                                        }
-                                    )
-                            except Exception:
-                                pass
+                    fn = getattr(stg, "load_models", None)
+                    if callable(fn):
+                        fn()
+                else:
+                    try:
+                        logs = getattr(_live_runner, "agent_logs", None)
+                        if isinstance(logs, list):
+                            import datetime as _dt
+                            t_str = _dt.datetime.now().strftime("%H:%M:%S")
+                            logs.append(
+                                {
+                                    "time": t_str,
+                                    "type": "agent",
+                                    "priority": 2,
+                                    "message": "[HotSwap] skipped reload (inference_lock_busy)",
+                                }
+                            )
+                    except Exception:
+                        pass
 
                     try:
                         logs = getattr(_live_runner, "agent_logs", None)
@@ -5674,7 +5887,7 @@ async def restart_live(req: LiveRestartRequest):
                                     "time": t_str,
                                     "type": "agent",
                                     "priority": 2,
-                                    "message": f"[HotSwap] scalper={getattr(stg, 'moe_scalper', '')} | analyst={getattr(stg, 'moe_analyst', '')}",
+                                    "message": f"[HotSwap] scalper={getattr(stg, 'moe_scalper', '')} | analyst={getattr(stg, 'moe_analyst', '')} | news={getattr(stg, 'moe_news', '')} | system2={getattr(stg, 'moe_system2', '')}",
                                 }
                             )
                     except Exception:

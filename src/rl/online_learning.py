@@ -326,6 +326,7 @@ class OnlineLearningManager:
     ):
         self.experience_buffer = ExperienceBuffer(file_name="experiences.jsonl")
         self.step_experience_buffer = ExperienceBuffer(max_size=200000, file_name="step_experiences.jsonl")
+        self.joint_step_experience_buffer = ExperienceBuffer(max_size=200000, file_name="joint_step_experiences.jsonl")
         self.reward_shaper = RewardShaper()
         self.preference_logger = PreferenceLogger()
 
@@ -338,6 +339,7 @@ class OnlineLearningManager:
 
         self.buffer = self.experience_buffer.buffer
         self.step_buffer = self.step_experience_buffer.buffer
+        self.joint_step_buffer = self.joint_step_experience_buffer.buffer
         self.update_count = 0
         
         self.trade_count = 0
@@ -424,6 +426,28 @@ class OnlineLearningManager:
             return
         try:
             self.step_experience_buffer.add(
+                state=state,
+                action=str(action or "HOLD"),
+                reward=float(reward),
+                next_state=next_state,
+                metadata=metadata if isinstance(metadata, dict) else None,
+            )
+        except Exception:
+            return
+
+    def on_joint_step(
+        self,
+        *,
+        state: Dict[str, Any],
+        action: str,
+        reward: float,
+        next_state: Optional[Dict[str, Any]] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if not bool(getattr(self, "enabled", False)):
+            return
+        try:
+            self.joint_step_experience_buffer.add(
                 state=state,
                 action=str(action or "HOLD"),
                 reward=float(reward),

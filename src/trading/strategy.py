@@ -10,6 +10,7 @@ Architecture:
 """
 from __future__ import annotations
 
+import base64
 import io
 import json
 import math
@@ -140,6 +141,10 @@ class MultiAgentStrategy:
         self._chartist_vlm_model: Any = None
         self._chartist_vlm_processor: Any = None
         self._chartist_vlm_error: str = ""
+
+        self._chartist_last: Dict[str, Any] = {}
+
+        self._system2_last: Dict[str, Any] = {}
 
         self._news_cfg: Dict[str, Any] = dict(news_cfg or {})
         self._news_cache: Dict[str, Dict[str, Any]] = {}
@@ -1502,6 +1507,53 @@ class MultiAgentStrategy:
             step_cfg = step_cfg if isinstance(step_cfg, dict) else {}
             step_enabled = bool(step_cfg.get("enabled", False))
             if step_enabled:
+                trace_now: Dict[str, Any] = {}
+                try:
+                    trace_now = {
+                        "ticker": str(ticker).upper(),
+                        "time": datetime.now().isoformat(),
+                        "regime": str(regime or ""),
+                        "gatekeeper_approved": bool(approved_by_gatekeeper),
+                        "router": dict(router_meta) if isinstance(router_meta, dict) else {},
+                        "selected_expert": str(expert or ""),
+                        "proposed_action": str(attempted_action),
+                        "proposed_analysis": str(analysis or ""),
+                    }
+                except Exception:
+                    trace_now = {}
+
+                try:
+                    if isinstance(features, dict) and isinstance(features.get("news"), dict):
+                        trace_now["news"] = dict(features.get("news") or {})
+                except Exception:
+                    pass
+
+                try:
+                    if isinstance(self._chartist_last, dict) and self._chartist_last:
+                        trace_now["chartist"] = dict(self._chartist_last)
+                except Exception:
+                    pass
+
+                try:
+                    if isinstance(self._system2_last, dict) and self._system2_last:
+                        trace_now["system2"] = dict(self._system2_last)
+                except Exception:
+                    pass
+
+                try:
+                    trace_now["chart_score"] = int(chart_score) if chart_score is not None else None
+                except Exception:
+                    pass
+
+                try:
+                    trace_now["risk"] = {
+                        "blocked": bool(blocked_by_risk),
+                        "blocked_reason": (str(blocked_reason) if blocked_reason else ""),
+                        "risk_flags": list(risk_flags),
+                    }
+                except Exception:
+                    pass
+
                 interval_s = float(step_cfg.get("interval_sec") or 60.0)
                 interval_s = max(5.0, min(interval_s, 3600.0))
                 now_ts = float(step_now_ts if step_now_ts is not None else time.time())
@@ -1538,6 +1590,7 @@ class MultiAgentStrategy:
                     if isinstance(last, dict) and isinstance(last.get("state"), dict):
                         prev_state = dict(last.get("state") or {})
                         prev_action = str(last.get("action") or "HOLD")
+                        prev_trace = last.get("trace") if isinstance(last.get("trace"), dict) else {}
                         prev_eq = float(last.get("equity") or 0.0)
                         delta_eq = float(equity_now) - float(prev_eq)
 
@@ -1576,11 +1629,29 @@ class MultiAgentStrategy:
                         except Exception:
                             pass
 
+                        md_joint: Dict[str, Any] = {
+                            "mode": "joint_step",
+                            "ticker": str(ticker).upper(),
+                            "delta_equity": float(delta_eq),
+                            "pnl_scale": float(pnl_scale),
+                            "cash_penalty": float(cash_pen),
+                            "drawdown_penalty": float(dd_pen),
+                            "vol_penalty": float(vol_pen),
+                            "decision_trace": dict(prev_trace) if isinstance(prev_trace, dict) else {},
+                            "next_trace": dict(trace_now) if isinstance(trace_now, dict) else {},
+                        }
+                        try:
+                            mgr = get_online_learning_manager()
+                            mgr.on_joint_step(state=prev_state, action=prev_action, reward=float(reward), next_state=state_now, metadata=md_joint)
+                        except Exception:
+                            pass
+
                     self._step_rl_last[str(ticker).upper()] = {
                         "ts": float(now_ts),
                         "state": state_now,
                         "action": ("HOLD" if bool(blocked_by_risk) else str(action or "HOLD").upper()),
                         "equity": float(equity_now),
+                        "trace": dict(trace_now) if isinstance(trace_now, dict) else {},
                     }
         except Exception:
             pass
@@ -2282,8 +2353,9 @@ class MultiAgentStrategy:
             news_count = 0.0
             news_new_count = 0.0
         
-        # Route to Analyst for high volatility or meaningful news signal
+        # Route to Analyst/News for high volatility or meaningful news signal
         use_analyst = False
+        use_news = False
         try:
             thr = float(getattr(self, "moe_vol_threshold", 0.0) or 0.0)
         except Exception:
@@ -2300,8 +2372,20 @@ class MultiAgentStrategy:
                     use_analyst = True
         except Exception:
             pass
+
+        try:
+            if "news" in self._adapters_loaded:
+                any_news = bool(getattr(self, "moe_any_news", True))
+                if any_news and float(news_new_count) > 0.0:
+                    use_news = True
+                else:
+                    nt = float(getattr(self, "moe_news_threshold", 0.8) or 0.8)
+                    if abs(float(news_score)) >= float(nt):
+                        use_news = True
+        except Exception:
+            use_news = False
         
-        expert = "analyst" if use_analyst else "scalper"
+        expert = "news" if use_news else ("analyst" if use_analyst else "scalper")
         meta = {
             "vol": vol_f,
             "expert": expert,
@@ -2324,6 +2408,13 @@ class MultiAgentStrategy:
             if (not any_news) and abs(float(news_score)) >= float(nt):
                 trig.append(f"news_score={news_score:+.2f}>=thr{nt:g}")
             trig_s = " | ".join(trig) if trig else "no_trigger"
+            try:
+                meta["triggers"] = list(trig)
+                meta["any_news"] = bool(any_news)
+                meta["thr_vol"] = float(thr)
+                meta["thr_news"] = float(nt)
+            except Exception:
+                pass
             self._log(
                 f"MoE Router: {ticker} -> [{expert}] (vol={vol_f:.1f}% news_new={int(news_new_count)} news_score={news_score:+.2f} trig={trig_s})",
                 priority=2,
@@ -2379,7 +2470,15 @@ class MultiAgentStrategy:
     def _model_infer(self, ticker: str, features: Dict, expert: str) -> Dict:
         """Real model inference using MoE"""
         # Set adapter based on expert
-        adapter_name = "analyst" if expert == "analyst" else "scalper"
+        expert_l = str(expert or "").strip().lower()
+        adapter_name = expert_l
+        if adapter_name not in getattr(self, "_adapters_loaded", set()):
+            if expert_l == "analyst":
+                adapter_name = "analyst"
+            elif expert_l == "scalper":
+                adapter_name = "scalper"
+            else:
+                adapter_name = "scalper"
 
         t0_all = time.perf_counter()
         try:
@@ -2806,6 +2905,10 @@ class MultiAgentStrategy:
     def _chartist_overlay(self, ticker: str, proposed_action: str) -> int:
         """Chartist overlay: visual pattern analysis score"""
         cfg = self._chartist_vlm_cfg if isinstance(self._chartist_vlm_cfg, dict) else {}
+        try:
+            self._chartist_last = {}
+        except Exception:
+            pass
         if bool(cfg.get("enabled", False)):
             try:
                 self._maybe_load_chartist_vlm()
@@ -2821,6 +2924,16 @@ class MultiAgentStrategy:
                         if (now2 - last2) >= 30.0:
                             setattr(self, "_chartist_noimg_last_ts", now2)
                             self._log(f"Chartist (VLM): no_image (ticker={str(ticker).upper()})", priority=2)
+                    except Exception:
+                        pass
+                    try:
+                        self._chartist_last = {
+                            "ticker": str(ticker).upper(),
+                            "signal": "",
+                            "confidence": 0.0,
+                            "reasoning": "no_image",
+                            "confidence_threshold": float(cfg.get("confidence_threshold") or 0.7),
+                        }
                     except Exception:
                         pass
                     return 0
@@ -2912,6 +3025,29 @@ class MultiAgentStrategy:
                 except Exception:
                     conf = 0.0
                 thr = float(cfg.get("confidence_threshold") or 0.7)
+                try:
+                    self._chartist_last = {
+                        "ticker": str(ticker).upper(),
+                        "signal": str(sig),
+                        "confidence": float(conf),
+                        "confidence_threshold": float(thr),
+                        "reasoning": str(obj.get("reasoning") or obj.get("analysis") or obj.get("reason") or ""),
+                    }
+                except Exception:
+                    pass
+
+                try:
+                    if bool(cfg.get("record_image_base64", False)):
+                        buf = io.BytesIO()
+                        try:
+                            img.save(buf, format="PNG")
+                            b64 = base64.b64encode(buf.getvalue()).decode("utf-8")
+                            if isinstance(self._chartist_last, dict):
+                                self._chartist_last["image_base64"] = b64
+                        except Exception:
+                            pass
+                except Exception:
+                    pass
                 try:
                     reason = str(obj.get("reasoning") or obj.get("analysis") or obj.get("reason") or "").replace("\n", " ").strip()
                     if len(reason) > 220:
@@ -3065,6 +3201,11 @@ class MultiAgentStrategy:
                     pass
             return last
 
+        try:
+            self._system2_last = {}
+        except Exception:
+            pass
+
         critic_raw = _infer_retry(critic_user, critic_sys, max_new_tokens=768, max_time_sec=10.0)
         critic_json = None
         err = ""
@@ -3149,6 +3290,15 @@ class MultiAgentStrategy:
 
         final_dec = str(judge_json.get("final_decision") or "").strip().upper()
         rationale = str(judge_json.get("rationale") or "").strip()
+        try:
+            self._system2_last = {
+                "critic": dict(critic_json),
+                "judge": dict(judge_json),
+                "final_decision": str(final_dec),
+                "rationale": str(rationale),
+            }
+        except Exception:
+            pass
         try:
             msg = f"System 2 (Judge): final={final_dec} rationale={rationale}"
             self._log(msg[:1600], priority=2)
