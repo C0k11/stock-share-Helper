@@ -1,0 +1,89 @@
+# QuantAI 默认全局配置（quantai.config.AppConfig 的数据来源）
+# -------------------------------------------------------------------
+# 加载顺序（见 quantai/config/loader.py）：
+#   default.yaml  ->  default.local.yaml(被 gitignore)  ->  环境变量(QUANTAI__a__b=...)
+# 本文件由旧 config/settings.yaml 迁移而来；收敛为「只支持 US」。
+# 任何不在 schema 中的键都会在加载时报错（extra="forbid"，用于揪出拼写错误）。
+
+project:
+  name: "QuantAI"
+  version: "0.2.0"
+  description: "多 Agent LLM 量化交易与自进化系统"
+
+market:
+  primary: "US"               # 只支持 US（schema 为 Literal["US"]，填 HK/CN 会报错）
+  timezone: "America/New_York"
+  currency: "USD"
+
+data:
+  price_source: "yfinance"    # US-only（旧 akshare/CN 路径已移除）
+  news_source: "rss"
+  news_feeds:
+    - "https://feeds.finance.yahoo.com/rss/2.0/headline"
+    - "https://www.cnbc.com/id/100003114/device/rss/rss.html"
+  storage:
+    type: "parquet"
+    path: "data/"
+  cache:
+    enabled: true
+    ttl_hours: 24
+
+backtest:
+  start_date: "2010-01-01"
+  end_date: null              # null = 到今天
+  costs:
+    commission_rate: 0.0005   # 0.05% 佣金
+    min_commission: 1.0       # 最低 $1
+    slippage_bps: 5.0         # 5 bps 滑点
+  rebalance:
+    frequency: "weekly"
+    threshold: 0.05
+  initial_capital: 100000.0
+  fill_timing: "next_open"    # 修 lookahead —— d 日决策、open[d+1] 成交
+
+strategy:
+  trend:
+    ma_short: 20
+    ma_long: 200
+    momentum_lookback: 63
+  volatility:
+    target_annual: 0.10
+    lookback_days: 20
+    vol_ceiling: 0.25
+  regime:
+    vix_threshold_high: 25
+    vix_threshold_low: 15
+    trend_ma: 50
+
+risk:
+  max_drawdown_halt: 0.25
+  max_single_position: 0.5
+  min_cash: 0.05
+
+llm:
+  model_name: "Qwen/Qwen2.5-7B-Instruct"
+  inference:
+    device: "cuda"
+    load_in_4bit: false
+    max_new_tokens: 512
+  finetune:
+    method: "lora"
+    lora_r: 16
+    lora_alpha: 32
+    lora_dropout: 0.05
+    target_modules: ["q_proj", "k_proj", "v_proj", "o_proj"]
+    learning_rate: 0.0002
+    num_epochs: 3
+    batch_size: 4
+    gradient_accumulation_steps: 4
+
+api:
+  host: "0.0.0.0"
+  port: 8000
+  debug: true
+
+logging:
+  level: "INFO"
+  format: "{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}"
+  file: "logs/quantai.log"
+  rotation: "10 MB"

@@ -1,0 +1,95 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quantai"
+version = "0.2.0"
+description = "QuantAI - 多 Agent LLM 量化交易与自进化系统（refactor/v2 干净重构）"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+
+# ----------------------------------------------------------------------
+# 核心依赖：业务代码直接 import、且无 GPU/重型负担的库。
+# numpy 在此显式声明（旧 requirements.txt 已有，迁移时保留显式声明）。
+# ----------------------------------------------------------------------
+dependencies = [
+    "numpy>=1.24.0",          # 数值地基（pandas/scipy 的底座）
+    "pandas>=2.0.0",          # 表格/时间序列
+    "pyarrow>=14.0.0",        # parquet 读写
+    "scipy>=1.11.0",          # 科学计算
+    "ta>=0.11.0",             # 技术指标
+    "yfinance>=0.2.36",       # 美股行情（US-only）
+    "requests>=2.31.0",       # HTTP
+    "feedparser>=6.0.0",      # RSS 新闻解析
+    "pydantic>=2.5.0",        # 配置/数据校验（本模块用它）
+    "pyyaml>=6.0.0",          # YAML 配置
+    "python-dotenv>=1.0.0",   # .env 加载
+    "loguru>=0.7.0",          # 日志
+    "tqdm>=4.66.0",           # 进度条
+]
+
+[project.optional-dependencies]
+# LLM 训练/推理（需要 GPU/CUDA）
+llm = [
+    "torch>=2.1.0",
+    "transformers>=4.36.0",
+    "peft>=0.7.0",
+    "trl>=0.8.0",
+    "accelerate>=0.25.0",
+    "datasets>=2.16.0",
+    "bitsandbytes>=0.41.0",
+    "sentencepiece>=0.1.99",
+]
+# HTTP 服务
+serve = [
+    "fastapi>=0.108.0",
+    "uvicorn>=0.25.0",
+    "openai>=1.12.0",         # OpenAI 兼容客户端（本地 vLLM/Ollama）
+]
+# 桌面/可视化
+ui = [
+    "PySide6>=6.6.0",
+    "pywebview>=5.0.0",
+    "streamlit>=1.31.0",
+    "plotly>=5.18.0",
+    "matplotlib>=3.8.0",
+    "mplfinance>=0.12.10b0",  # K 线图（Chartist VLM 的输入图）
+    "edge-tts>=6.1.12",
+    "pygame>=2.5.2",
+]
+# 仅个别离线脚本使用（验证后归此组，非核心）
+research = [
+    "scikit-learn>=1.3.0",    # scripts/process_rag_data.py: train_test_split
+    "newspaper3k>=0.2.8",     # scripts/fetch_historical_news.py（可选历史新闻）
+    "lxml_html_clean>=0.4.1", # newspaper3k 依赖
+]
+dev = [
+    "pytest>=7.4.0",
+    "ruff>=0.4.0",
+    "mypy>=1.8.0",
+    "jupyter>=1.0.0",
+    "ipywidgets>=8.1.0",
+]
+
+# 注：旧 requirements.txt 中的 lightgbm / xgboost / statsmodels 经 grep 确认
+# 在 src/ 与 scripts/ 中无任何 import，重构中不再声明（如后续需要再加回）。
+
+[tool.setuptools.packages.find]
+include = ["quantai*"]
+
+[tool.pytest.ini_options]
+# 让 `pytest` 从仓库根目录就能 `import quantai`，无需先 pip install -e .
+pythonpath = ["."]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+
+[tool.mypy]
+python_version = "3.10"
+ignore_missing_imports = true
+warn_unused_ignores = true
