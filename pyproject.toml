@@ -21,6 +21,7 @@ dependencies = [
     "scipy>=1.11.0",          # 科学计算
     "ta>=0.11.0",             # 技术指标
     "yfinance>=0.2.36",       # 美股行情（US-only）
+    "pandas_market_calendars>=4.0",  # NYSE 交易日历（含一次性休市/半日市，胜过手搓规则）
     "requests>=2.31.0",       # HTTP
     "feedparser>=6.0.0",      # RSS 新闻解析
     "pydantic>=2.5.0",        # 配置/数据校验（本模块用它）

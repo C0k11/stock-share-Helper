@@ -79,3 +79,36 @@ def test_market_hours_is_us() -> None:
     hours = _cal().market_hours()
     assert hours["timezone"] == "America/New_York"
     assert hours["market_open"] == "09:30"
+
+
+# --- pandas_market_calendars 才覆盖得到的「一次性休市 / 半日市」--- #
+
+def test_one_off_full_day_closure_bush_mourning_2018() -> None:
+    """2018-12-05 老布什国丧日：手搓规则会漏，库能识别为休市。"""
+    assert not _cal().is_trading_day(date(2018, 12, 5))
+
+
+def test_hurricane_sandy_closures_2012() -> None:
+    """飓风 Sandy：2012-10-29/30 全日休市。"""
+    cal = _cal()
+    assert not cal.is_trading_day(date(2012, 10, 29))
+    assert not cal.is_trading_day(date(2012, 10, 30))
+
+
+def test_thanksgiving_friday_is_early_close_but_trading() -> None:
+    """感恩节翌日(2023-11-24)是半日市：仍是交易日，但提前收盘。"""
+    cal = _cal()
+    friday = date(2023, 11, 24)
+    assert cal.is_trading_day(friday) is True
+    assert cal.is_early_close(friday) is True
+
+
+def test_regular_day_is_not_early_close() -> None:
+    assert _cal().is_early_close(date(2024, 1, 2)) is False
+
+
+def test_early_closes_maps_to_one_pm_et() -> None:
+    """半日市收盘时刻为美东 13:00。"""
+    early = _cal().early_closes(date(2023, 1, 1), date(2023, 12, 31))
+    assert date(2023, 11, 24) in early
+    assert early[date(2023, 11, 24)] == "13:00"

@@ -7,7 +7,7 @@ US-only：只支持美股（yfinance）；旧 akshare/CN 与 HK/CN 日历已移�
     from quantai.data import PriceFetcher, ParquetStorage, TradingCalendar
 """
 
-from .calendar import TradingCalendar, USMarketHolidayCalendar
+from .calendar import TradingCalendar
 from .prices import DEFAULT_US_ETFS, PriceFetcher, download_us_etfs
 from .storage import ParquetStorage
 
@@ -17,5 +17,4 @@ __all__ = [
     "DEFAULT_US_ETFS",
     "ParquetStorage",
     "TradingCalendar",
-    "USMarketHolidayCalendar",
 ]
