@@ -14,6 +14,12 @@
     from quantai.llm import LocalLLM                          # 推理（用到时才加载 torch）
 """
 
+from .finetune import (
+    QLoRAFineTuner,
+    build_lora_config_dict,
+    build_training_arguments_dict,
+    build_training_texts,
+)
 from .inference import LocalLLM, decode_new_tokens
 from .prompts import (
     DECISIONS,
@@ -43,4 +49,9 @@ __all__ = [
     # inference（lazy torch）
     "LocalLLM",
     "decode_new_tokens",
+    # finetune（QLoRA，lazy torch/peft）
+    "QLoRAFineTuner",
+    "build_lora_config_dict",
+    "build_training_arguments_dict",
+    "build_training_texts",
 ]
