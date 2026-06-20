@@ -19,7 +19,7 @@ import pandas as pd
 # 让脚本可独立运行：把仓库根加入 sys.path（pytest 走 pyproject 的 pythonpath，脚本没有）。
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from quantai.backtest import compare_fill_timings, format_comparison_markdown
+from quantai.backtest import buy_and_hold, compare_fill_timings, format_comparison_markdown
 from quantai.config import load_config
 from quantai.signals import SignalGenerator
 
@@ -61,17 +61,22 @@ def main() -> None:
     weight = (signals["composite_signal"] > 0).astype(float)  # 长/平仓
 
     results = compare_fill_timings(prices, weight, cost_per_turnover=cost_per_turnover)
+    benchmark = buy_and_hold(prices, cost_per_turnover=cost_per_turnover)
     table = format_comparison_markdown(
-        results, title=f"{args.symbol}（综合信号长/平仓，含成本 {cost_per_turnover*1e4:.0f}bps/换手）"
+        results,
+        benchmark=benchmark,
+        title=f"{args.symbol}（综合信号长/平仓，含成本 {cost_per_turnover*1e4:.0f}bps/换手）",
     )
 
     print("\n" + table)
     REPORT_PATH.write_text(
-        "# 回测：lookahead 修复前后对比（次日开盘成交）\n\n"
-        "> 由 `scripts/lookahead_compare.py` 生成。两列用**同一信号、同一成本**，唯一差别是成交时点。\n\n"
+        "# 回测：lookahead 修复前后对比（次日开盘成交）+ 大盘对标\n\n"
+        "> 由 `scripts/lookahead_compare.py` 生成。前两列用**同一信号、同一成本**，唯一差别是成交时点；\n"
+        "> 第三列 Buy&Hold 是「首日满仓 SPY 持有到底」的市场基准（同一引擎/成本）。\n\n"
         + table
         + "\n说明：旧版用 close[t] 决策又用 close[t] 成交（同根 K 线），系统性高估；"
-        "新版 close[t] 决策、open[t+1] 成交，消除该未来函数。\n",
+        "新版 close[t] 决策、open[t+1] 成交，消除该未来函数。\n"
+        "**诚实结论**：修复后策略 PnL（CAGR）跑输直接持有 SPY——它不是 alpha，卖点是工程与风控（回撤更浅）+ 自查并修复 lookahead 的 integrity 故事。\n",
         encoding="utf-8",
     )
     print(f"[report] 已写入 {REPORT_PATH}")

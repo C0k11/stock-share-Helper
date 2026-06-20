@@ -84,7 +84,9 @@ include = ["quantai*"]
 # 让 `pytest` 从仓库根目录就能 `import quantai`，无需先 pip install -e .
 pythonpath = ["."]
 testpaths = ["tests"]
-addopts = "-q"
+# importlib 导入模式：允许不同目录下同名测试文件（如各模块各自的 test_no_lookahead.py）
+# 共存而不冲突，无需到处加 __init__.py（pytest 官方推荐的现代方式）。
+addopts = "-q --import-mode=importlib"
 
 [tool.ruff]
 line-length = 120
