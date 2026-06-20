@@ -192,6 +192,79 @@ class LLMConfig(_Base):
 
 
 # --------------------------------------------------------------------------- #
+# agents（多 Agent 大脑，拆自 150KB strategy.py）
+# --------------------------------------------------------------------------- #
+class RouterConfig(_Base):
+    """MoE 路由阈值（诚实命名 HeuristicRouter：是规则路由，不是学习到的门控网络）。"""
+
+    # 年化波动 % >= 此值 -> 路由到 analyst（高波动用更稳的分析专家）。
+    vol_threshold: float = Field(default=60.0, ge=0)
+    # |news_score| >= 此值视为强新闻信号。
+    news_threshold: float = Field(default=0.8, ge=0)
+    # True: 任意一条新新闻即路由到 analyst/news；False: 用 news_threshold 判定。
+    any_news: bool = True
+
+
+class PlannerConfig(_Base):
+    """Planner：日级市场状态评估（rule 规则 / sft 轻量 MLP）。"""
+
+    policy: Literal["rule", "sft"] = "rule"
+    sft_model_path: str = "models/planner_sft_v1.pt"
+    # 规则阈值（年化波动 %、5 日收益 %）：高波动/大跌 -> cash_preservation/defensive。
+    cash_vol_ann_pct: float = 120.0
+    cash_ret_5d_pct: float = -10.0
+    defensive_vol_ann_pct: float = 80.0
+    defensive_ret_5d_pct: float = -5.0
+
+
+class GatekeeperConfig(_Base):
+    """Gatekeeper：RL 门控 MLP（Q 值阈值过滤交易）。"""
+
+    model_path: str = "models/rl_gatekeeper_v2.pt"
+    threshold: float = 0.0
+    # 无 RL 模型时的兜底（旧版用 random.random()>0.3，已删）：
+    # True  -> 无模型即拒绝（架构建议，最诚实）；
+    # False -> 用确定性波动门（vol <= vol_trigger_ann_pct 才放行），无随机。
+    require_model: bool = True
+    vol_trigger_ann_pct: float = 120.0
+
+
+class System2Config(_Base):
+    """System2 辩论（Critic + Judge）：高风险决策的二次复核。"""
+
+    enabled: bool = True
+    # 只对 BUY 提案触发辩论（省推理预算）。
+    buy_only: bool = True
+    lenient: bool = False
+
+
+class ChartistConfig(_Base):
+    """Chartist overlay：VLM 看 K 线图给方向分（默认关闭，重依赖）。"""
+
+    enabled: bool = False
+    confidence_threshold: float = Field(default=0.7, ge=0, le=1)
+    vlm_model: str = "Qwen2.5-VL-3B-Instruct-4bit"
+    max_new_tokens: int = Field(default=256, gt=0)
+    temperature: float = Field(default=0.2, ge=0)
+
+
+class AgentsConfig(_Base):
+    """多 Agent 大脑配置。编排顺序：Planner -> Gatekeeper -> Router -> Expert
+    -> Chartist -> Macro -> System2。"""
+
+    router: RouterConfig = Field(default_factory=RouterConfig)
+    planner: PlannerConfig = Field(default_factory=PlannerConfig)
+    gatekeeper: GatekeeperConfig = Field(default_factory=GatekeeperConfig)
+    system2: System2Config = Field(default_factory=System2Config)
+    chartist: ChartistConfig = Field(default_factory=ChartistConfig)
+    # Macro Governor：当前为诚实中性占位（旧版 _macro_governor_assess 是 random.uniform，
+    # 已移除）。enabled=False -> 恒返回 NEUTRAL；真实宏观信号未实现（见 backlog.md）。
+    macro_enabled: bool = False
+    # all_agents_mode：同时跑 scalper+analyst 再合议（旧版委员会模式）。
+    all_agents_mode: bool = False
+
+
+# --------------------------------------------------------------------------- #
 # api / logging
 # --------------------------------------------------------------------------- #
 class APIConfig(_Base):
@@ -220,5 +293,6 @@ class AppConfig(_Base):
     strategy: StrategyConfig = Field(default_factory=StrategyConfig)
     risk: RiskConfig = Field(default_factory=RiskConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
+    agents: AgentsConfig = Field(default_factory=AgentsConfig)
     api: APIConfig = Field(default_factory=APIConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
