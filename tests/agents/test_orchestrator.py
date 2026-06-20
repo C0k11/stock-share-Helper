@@ -151,6 +151,27 @@ def test_trace_populated():
     assert out.trace["expert_action"] == "BUY"
 
 
+def test_macro_label_flows_into_trace():
+    orch = AgentOrchestrator(
+        planner=Planner(policy="rule"),
+        gatekeeper=Gatekeeper(model_path="", require_model=False, vol_trigger_ann_pct=120.0),
+        router=HeuristicRouter(vol_threshold=60.0),
+        system2=System2Debate(enabled=False),
+        chartist=ChartistOverlay(enabled=False),
+        macro=MacroGovernor(enabled=True, vix_risk_off=28.0),
+    )
+    ctx = AgentContext(
+        ticker="NVDA",
+        features={
+            "technical": {"return_5d": 5.0, "price_vs_ma20": 3.0, "volatility_20d": 20.0},
+            "macro": {"vix": 35.0},
+        },
+    )
+    out = orch.decide(ctx)
+    assert out.macro_label == "RISK_OFF"
+    assert out.trace["macro_label"] == "RISK_OFF"
+
+
 def test_from_config_builds_and_runs():
     cfg = AppConfig()
     orch = AgentOrchestrator.from_config(cfg)

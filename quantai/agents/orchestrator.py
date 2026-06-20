@@ -72,7 +72,7 @@ class AgentOrchestrator:
             ),
             system2=System2Debate.from_config(a.system2),
             chartist=ChartistOverlay.from_config(a.chartist),
-            macro=MacroGovernor.from_config(a.macro_enabled),
+            macro=MacroGovernor.from_config(a.macro),
             all_agents_mode=a.all_agents_mode,
             chartist_analyzer=chartist_analyzer,
         )
@@ -119,7 +119,10 @@ class AgentOrchestrator:
         chart_score = self.chartist.assess(
             ctx.ticker, action, analyzer=self.chartist_analyzer, asof=ctx.asof
         )
-        macro_gear, macro_label = self.macro.assess()
+        macro = ctx.macro
+        macro_gear, macro_label = self.macro.assess(
+            vix=macro.get("vix"), tnx=macro.get("tnx")
+        )
         trace["chart_score"] = chart_score
         trace["macro_label"] = macro_label
 

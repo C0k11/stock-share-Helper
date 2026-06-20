@@ -239,13 +239,43 @@ class System2Config(_Base):
 
 
 class ChartistConfig(_Base):
-    """Chartist overlay：VLM 看 K 线图给方向分（默认关闭，重依赖）。"""
+    """Chartist overlay：VLM（Qwen2.5-VL）看 K 线图给方向分（默认关闭，重依赖）。
+
+    打分逻辑常驻（纯逻辑）；VLM 后端（mplfinance 渲染 + 推理）懒加载，缺权重/缺 GPU
+    自动降级为不评分（返回 0），不影响主管线。
+    """
 
     enabled: bool = False
     confidence_threshold: float = Field(default=0.7, ge=0, le=1)
-    vlm_model: str = "Qwen2.5-VL-3B-Instruct-4bit"
+    # VLM 模型名/路径（HF repo 或本地目录）。
+    vlm_model: str = "Qwen/Qwen2.5-VL-3B-Instruct"
+    load_4bit: bool = True
     max_new_tokens: int = Field(default=256, gt=0)
     temperature: float = Field(default=0.2, ge=0)
+    # processor 像素上限/下限（0 = 用模型默认）。
+    min_image_pixels: int = Field(default=0, ge=0)
+    max_image_pixels: int = Field(default=0, ge=0)
+    # 可选 LoRA adapter 路径。
+    adapter: str = ""
+    # 渲染用的回看 bar 数。
+    lookback: int = Field(default=60, gt=0)
+
+
+class MacroConfig(_Base):
+    """Macro Governor：基于 VIX / 10Y 收益率的**确定性**宏观风险闸。
+
+    B-2：旧 `_macro_governor_assess` 是 `random.uniform(0.3,0.8)`（纯随机，已删）。
+    现接 `PriceFetcher` 已在抓的 ^VIX / ^TNX，按阈值确定性映射 gear/label：
+    VIX 高 -> RISK_OFF(gear=-1)；VIX 低且非 risk-off -> RISK_ON(gear=+1)；否则 NEUTRAL(0)。
+    """
+
+    enabled: bool = False
+    # VIX >= 此值 -> RISK_OFF（缩风险）。
+    vix_risk_off: float = Field(default=28.0, gt=0)
+    # VIX <= 此值（且非 risk_off）-> RISK_ON。
+    vix_risk_on: float = Field(default=15.0, gt=0)
+    # 10Y 收益率(%) >= 此值 -> 也偏 RISK_OFF（利率冲击）。
+    tnx_risk_off: float = Field(default=4.8, gt=0)
 
 
 class AgentsConfig(_Base):
@@ -257,9 +287,8 @@ class AgentsConfig(_Base):
     gatekeeper: GatekeeperConfig = Field(default_factory=GatekeeperConfig)
     system2: System2Config = Field(default_factory=System2Config)
     chartist: ChartistConfig = Field(default_factory=ChartistConfig)
-    # Macro Governor：当前为诚实中性占位（旧版 _macro_governor_assess 是 random.uniform，
-    # 已移除）。enabled=False -> 恒返回 NEUTRAL；真实宏观信号未实现（见 backlog.md）。
-    macro_enabled: bool = False
+    # Macro Governor：确定性 VIX/10Y 风险闸（B-2，已接真实信号；默认关闭）。
+    macro: MacroConfig = Field(default_factory=MacroConfig)
     # all_agents_mode：同时跑 scalper+analyst 再合议（旧版委员会模式）。
     all_agents_mode: bool = False
 

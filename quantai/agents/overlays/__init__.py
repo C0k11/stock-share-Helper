@@ -7,5 +7,6 @@ from __future__ import annotations
 
 from quantai.agents.overlays.chartist import ChartistOverlay
 from quantai.agents.overlays.macro_governor import MacroGovernor
+from quantai.agents.overlays.vlm_chartist import QwenVLChartist, render_candles
 
-__all__ = ["ChartistOverlay", "MacroGovernor"]
+__all__ = ["ChartistOverlay", "MacroGovernor", "QwenVLChartist", "render_candles"]

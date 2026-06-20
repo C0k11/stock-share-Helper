@@ -93,6 +93,12 @@ class AgentContext:
         return s if isinstance(s, dict) else {}
 
     @property
+    def macro(self) -> Dict[str, Any]:
+        """全局宏观快照 {"vix": float, "tnx": float}（由集成层按日填入；缺省空 dict）。"""
+        m = self.features.get("macro")
+        return m if isinstance(m, dict) else {}
+
+    @property
     def volatility_ann_pct(self) -> float:
         try:
             return float(self.features.get("volatility_ann_pct", 0.0) or 0.0)

@@ -110,18 +110,44 @@ def test_macro_disabled_is_neutral():
 
 
 def test_macro_is_deterministic_no_random():
-    # 旧版 random.uniform(0.3,0.8)：现在必须确定性
+    # 旧版 random.uniform(0.3,0.8)：现在必须确定性（同输入恒同输出）
+    m = MacroGovernor(enabled=True, vix_risk_off=28.0, vix_risk_on=15.0)
+    assert {m.assess(vix=22.0) for _ in range(50)} == {(0.0, "NEUTRAL")}
+
+
+def test_macro_risk_off_on_high_vix():
+    m = MacroGovernor(enabled=True, vix_risk_off=28.0)
+    assert m.assess(vix=35.0) == (-1.0, "RISK_OFF")
+
+
+def test_macro_risk_off_on_high_tnx():
+    m = MacroGovernor(enabled=True, tnx_risk_off=4.8)
+    assert m.assess(vix=12.0, tnx=5.2) == (-1.0, "RISK_OFF")  # 利率冲击压过低 VIX
+
+
+def test_macro_risk_on_low_vix():
+    m = MacroGovernor(enabled=True, vix_risk_on=15.0)
+    assert m.assess(vix=12.0) == (1.0, "RISK_ON")
+
+
+def test_macro_neutral_mid_vix():
+    m = MacroGovernor(enabled=True, vix_risk_off=28.0, vix_risk_on=15.0)
+    assert m.assess(vix=20.0) == (0.0, "NEUTRAL")
+
+
+def test_macro_no_data_is_neutral():
     m = MacroGovernor(enabled=True)
-    assert {m.assess() for _ in range(50)} == {(0.0, "NEUTRAL")}
+    assert m.assess(vix=None, tnx=None) == (0.0, "NEUTRAL")
+    assert m.assess(vix="bad") == (0.0, "NEUTRAL")
 
 
-def test_macro_risk_map_lookup():
-    m = MacroGovernor(enabled=True, risk_map={"DRIVE": 1.0})
-    assert m.assess("DRIVE") == (1.0, "DRIVE")
-    assert m.assess("UNKNOWN") == (0.0, "NEUTRAL")
+def test_macro_disabled_ignores_signal():
+    m = MacroGovernor(enabled=False)
+    assert m.assess(vix=99.0) == (0.0, "NEUTRAL")
 
 
 def test_macro_from_config():
     cfg = AppConfig()
-    m = MacroGovernor.from_config(cfg.agents.macro_enabled)
-    assert m.enabled == cfg.agents.macro_enabled
+    m = MacroGovernor.from_config(cfg.agents.macro)
+    assert m.enabled == cfg.agents.macro.enabled
+    assert m.vix_risk_off == cfg.agents.macro.vix_risk_off
