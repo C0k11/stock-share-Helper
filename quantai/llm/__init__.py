@@ -14,6 +14,7 @@
     from quantai.llm import LocalLLM                          # 推理（用到时才加载 torch）
 """
 
+from .inference import LocalLLM, decode_new_tokens
 from .prompts import (
     DECISIONS,
     build_messages,
@@ -28,6 +29,7 @@ from .prompts import (
 )
 
 __all__ = [
+    # prompts（纯逻辑）
     "DECISIONS",
     "build_messages",
     "with_no_think_suffix",
@@ -38,4 +40,7 @@ __all__ = [
     "parse_decision",
     "select_quantization",
     "resolve_adapter_path",
+    # inference（lazy torch）
+    "LocalLLM",
+    "decode_new_tokens",
 ]
