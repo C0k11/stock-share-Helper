@@ -26,7 +26,17 @@ from quantai.agents.base import (
     Regime,
     flatten_features,
 )
+from quantai.agents.debate import System2Debate
+from quantai.agents.experts import (
+    AnalystExpert,
+    LLMExpert,
+    NewsExpert,
+    ScalperExpert,
+    make_expert,
+)
 from quantai.agents.gatekeeper import GateDecision, Gatekeeper
+from quantai.agents.orchestrator import AgentOrchestrator
+from quantai.agents.overlays import ChartistOverlay, MacroGovernor
 from quantai.agents.planner import (
     Planner,
     PlannerDecision,
@@ -57,4 +67,17 @@ __all__ = [
     # gatekeeper
     "Gatekeeper",
     "GateDecision",
+    # experts
+    "LLMExpert",
+    "ScalperExpert",
+    "AnalystExpert",
+    "NewsExpert",
+    "make_expert",
+    # overlays
+    "ChartistOverlay",
+    "MacroGovernor",
+    # debate
+    "System2Debate",
+    # orchestrator
+    "AgentOrchestrator",
 ]
