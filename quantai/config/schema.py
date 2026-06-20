@@ -129,8 +129,17 @@ class RiskConfig(_Base):
 # --------------------------------------------------------------------------- #
 class LLMInferenceConfig(_Base):
     device: str = "cuda"
-    load_in_4bit: bool = False
+    # 量化模式：4bit(省显存) / 8bit(速度质量平衡，旧默认) / fp16(全质量)。
+    # 取代旧 local_chat.py 里 use_4bit/use_8bit 两个互斥布尔（4bit 优先）的脆弱写法。
+    quantization: Literal["4bit", "8bit", "fp16"] = "8bit"
+    temperature: float = Field(default=0.7, ge=0)
     max_new_tokens: int = Field(default=512, gt=0)
+    # 0 = 不截断上下文；>0 时对输入做 truncation。
+    max_context: int = Field(default=0, ge=0)
+    # generate 的墙钟超时（秒），桌面端防卡死。
+    gen_max_time_sec: float = Field(default=12.0, gt=0)
+    # MoE 多 adapter 时推理后复位到的默认专家。
+    default_adapter: str = "scalper"
 
 
 class LLMFinetuneConfig(_Base):
@@ -145,12 +154,41 @@ class LLMFinetuneConfig(_Base):
     num_epochs: int = Field(default=3, gt=0)
     batch_size: int = Field(default=4, gt=0)
     gradient_accumulation_steps: int = Field(default=4, gt=0)
+    max_seq_length: int = Field(default=2048, gt=0)
+    warmup_ratio: float = Field(default=0.03, ge=0, le=1)
+    save_steps: int = Field(default=100, gt=0)
+    save_total_limit: int = Field(default=3, gt=0)
+    gradient_checkpointing: bool = False
+    # QLoRA：4-bit NF4 基座 + LoRA 适配器（省显存的微调）。
+    load_in_4bit: bool = False
+
+
+class LLMDPOConfig(_Base):
+    """DPO（直接偏好优化）对齐训练参数。"""
+
+    beta: float = Field(default=0.1, gt=0)
+    # DPO 比 SFT 用更低的 LR 以稳住偏好对齐。
+    learning_rate: float = Field(default=5e-6, gt=0)
+    num_epochs: int = Field(default=1, gt=0)
+    batch_size: int = Field(default=1, gt=0)
+    gradient_accumulation_steps: int = Field(default=8, gt=0)
+    max_prompt_length: int = Field(default=1024, gt=0)
+    max_length: int = Field(default=2048, gt=0)
+    save_steps: int = Field(default=50, gt=0)
+    logging_steps: int = Field(default=10, gt=0)
+    # reference_free：跳过参考模型（dry-run/冒烟用；正式对齐应为 False）。
+    reference_free: bool = False
 
 
 class LLMConfig(_Base):
     model_name: str = "Qwen/Qwen2.5-7B-Instruct"
+    # HuggingFace 模型/权重缓存目录（取代旧 local_chat.py 硬编码的 "D:/Project/ml_cache/models"）。
+    cache_dir: str = "models/hf_cache"
+    # MoE 适配器：专家名 -> LoRA 权重路径（如 {"scalper": "...", "analyst": "..."}）。
+    adapters: dict[str, str] = Field(default_factory=dict)
     inference: LLMInferenceConfig = Field(default_factory=LLMInferenceConfig)
     finetune: LLMFinetuneConfig = Field(default_factory=LLMFinetuneConfig)
+    dpo: LLMDPOConfig = Field(default_factory=LLMDPOConfig)
 
 
 # --------------------------------------------------------------------------- #

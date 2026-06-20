@@ -62,9 +62,12 @@ risk:
 
 llm:
   model_name: "Qwen/Qwen2.5-7B-Instruct"
+  cache_dir: "models/hf_cache"   # HF 权重缓存（取代旧硬编码 D:/Project/ml_cache/models）
+  # adapters: { scalper: "models/.../lora_weights", analyst: "models/..." }  # MoE 专家 -> LoRA 路径
   inference:
     device: "cuda"
-    load_in_4bit: false
+    quantization: "8bit"         # 4bit | 8bit | fp16（取代旧 load_in_4bit 布尔）
+    temperature: 0.7
     max_new_tokens: 512
   finetune:
     method: "lora"
@@ -76,6 +79,11 @@ llm:
     num_epochs: 3
     batch_size: 4
     gradient_accumulation_steps: 4
+    load_in_4bit: false          # QLoRA：true=4-bit NF4 基座微调
+  dpo:
+    beta: 0.1
+    learning_rate: 0.000005      # DPO 用更低 LR 稳住偏好对齐
+    reference_free: false
 
 api:
   host: "0.0.0.0"
