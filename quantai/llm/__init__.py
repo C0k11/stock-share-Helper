@@ -14,6 +14,13 @@
     from quantai.llm import LocalLLM                          # 推理（用到时才加载 torch）
 """
 
+from .dpo import (
+    DPORunner,
+    build_dpo_config_dict,
+    format_prompt_messages,
+    has_chat_template,
+    validate_dpo_columns,
+)
 from .finetune import (
     QLoRAFineTuner,
     build_lora_config_dict,
@@ -54,4 +61,10 @@ __all__ = [
     "build_lora_config_dict",
     "build_training_arguments_dict",
     "build_training_texts",
+    # dpo（偏好对齐，lazy trl）
+    "DPORunner",
+    "validate_dpo_columns",
+    "format_prompt_messages",
+    "has_chat_template",
+    "build_dpo_config_dict",
 ]
