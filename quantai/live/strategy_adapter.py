@@ -13,6 +13,7 @@
 """
 from __future__ import annotations
 
+import json
 from collections import deque
 from datetime import datetime
 from typing import Any, Deque, Dict, Optional
@@ -47,10 +48,12 @@ class AgentStrategy:
         allow_short: bool = False,
         macro: Optional[Dict[str, float]] = None,
         on_log: Optional[Any] = None,
+        recorder: Any = None,
     ) -> None:
         self.orchestrator = orchestrator
         self.broker = broker
         self.llm = llm
+        self.recorder = recorder
         self.max_history = max(2, int(max_history))
         self.min_history = max(2, int(min_history))
         self.position_risk_pct = max(0.005, min(float(position_risk_pct), 0.5))
@@ -123,7 +126,7 @@ class AgentStrategy:
             if shares <= 0:
                 return None
 
-        return {
+        signal: Dict[str, Any] = {
             "ticker": ticker,
             "action": action,
             "price": price,
@@ -134,6 +137,25 @@ class AgentStrategy:
             "regime": getattr(decision, "regime", ""),
             "macro_label": getattr(decision, "macro_label", "NEUTRAL"),
         }
+
+        # 数据飞轮：记录决策 -> 拿 ref_id 塞进信号；broker 平仓时回填实现盈亏到此 ref_id。
+        if self.recorder is not None:
+            try:
+                ref = self.recorder.record(
+                    agent_id=str(getattr(decision, "expert", "") or "agent"),
+                    context=json.dumps(
+                        {"ticker": ticker, "price": price, "regime": getattr(decision, "regime", ""), "action": action},
+                        ensure_ascii=False,
+                    ),
+                    action=str(getattr(decision, "reason", "") or ""),
+                    feedback="pending_pnl",
+                )
+                if ref:
+                    signal["trace_id"] = ref
+            except Exception as exc:
+                self._on_log(f"[Strategy] recorder error: {exc}", 1)
+
+        return signal
 
     # ----------------------------------------------------------------- #
     # 内部辅助

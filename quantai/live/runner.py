@@ -39,7 +39,16 @@ class LiveRunner:
         seed: Optional[int] = None,
         base_prices: Optional[Dict[str, float]] = None,
         recorder: Any = None,
+        collect: bool = False,
     ) -> None:
+        # 数据飞轮采集（opt-in）：collect=True 时按 cfg 建 EvolutionRecorder 注入券商+策略，
+        # 形成"决策 record -> 平仓 log_outcome 回填盈亏"的闭环。默认关（不产生磁盘写）。
+        if recorder is None and collect:
+            from quantai.evolution import EvolutionRecorder
+
+            recorder = EvolutionRecorder.from_config((cfg or AppConfig()).evolution)
+        self.recorder = recorder
+
         self.engine = TradingEngine()
         self.broker = PaperBroker(
             cash=cash,
@@ -58,6 +67,7 @@ class LiveRunner:
             llm=llm,
             allow_short=allow_short,
             on_log=lambda msg, prio=2: self.engine.push(EventType.LOG, msg, prio),
+            recorder=recorder,
         )
 
         self.feed = create_data_feed(

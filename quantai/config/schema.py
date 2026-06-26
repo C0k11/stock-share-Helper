@@ -294,6 +294,42 @@ class AgentsConfig(_Base):
 
 
 # --------------------------------------------------------------------------- #
+# evolution（数据飞轮：采集 → 建数据集 → 离线训练 → 热切换）
+# --------------------------------------------------------------------------- #
+class EvolutionConfig(_Base):
+    """数据飞轮配置。
+
+    **诚实命名**（B-1）：本层只做"采集 + 离线训练编排"。在线实时梯度更新**未实现**，
+    `online_gradient_enabled` 永远 False（占位标注），真训练走离线 DPO（`scripts/train_dpo.py`）。
+    路径全部 config 驱动，替换旧代码里的硬编码 `data/rl_experiences` 等。
+    """
+
+    # 落盘目录（config 驱动，替换硬编码路径）
+    trajectories_dir: str = "data/evolution/trajectories"
+    experiences_dir: str = "data/evolution/experiences"
+    preferences_dir: str = "data/evolution/preferences"
+    adapters_dir: str = "data/evolution/adapters"
+    active_pointer: str = "data/evolution/active_adapters.json"
+
+    # 采集器
+    max_experiences: int = Field(default=100_000, gt=0)
+    update_interval_trades: int = Field(default=50, gt=0)
+    min_experiences: int = Field(default=100, ge=0)
+
+    # 偏好对（DPO 数据集）
+    min_pnl_diff: float = Field(default=100.0, ge=0)
+
+    # 奖励整形
+    reward_pnl_scale: float = Field(default=0.001, ge=0)
+    reward_sharpe_weight: float = Field(default=0.3, ge=0)
+    reward_drawdown_penalty: float = Field(default=-2.0, le=0)
+    reward_max_drawdown_trigger: float = Field(default=-0.05, le=0)
+
+    # 在线实时梯度：未实现（B-1 诚实占位）。保持 False。
+    online_gradient_enabled: bool = False
+
+
+# --------------------------------------------------------------------------- #
 # api / logging
 # --------------------------------------------------------------------------- #
 class APIConfig(_Base):
@@ -323,5 +359,6 @@ class AppConfig(_Base):
     risk: RiskConfig = Field(default_factory=RiskConfig)
     llm: LLMConfig = Field(default_factory=LLMConfig)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
+    evolution: EvolutionConfig = Field(default_factory=EvolutionConfig)
     api: APIConfig = Field(default_factory=APIConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
