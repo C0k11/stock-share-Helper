@@ -7,6 +7,7 @@ US-only：成本模型移除 HK/CN（印花税/平台费）。
     from quantai.execution import TransactionCosts, TradingRules, Action, TickerExecutionState, ExecutionSimulator
 """
 
+from .broker import PaperBroker, Position
 from .costs import TransactionCosts
 from .rules import Action, TradeSignal, TradingRules
 from .simulator import ExecutionResult, ExecutionSimulator
@@ -20,4 +21,6 @@ __all__ = [
     "TickerExecutionState",
     "ExecutionSimulator",
     "ExecutionResult",
+    "PaperBroker",
+    "Position",
 ]
