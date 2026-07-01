@@ -83,15 +83,26 @@ class TestMACD:
         with pytest.raises(ValueError):
             macd(_series([1, 2, 3]), fast=26, slow=12)
 
-    def test_v_shape_produces_death_then_golden_cross(self):
-        down = np.linspace(100, 80, 40)
-        up = np.linspace(80, 130, 60)
-        s = _series(np.concatenate([down, up[1:]]))
+    def test_up_down_up_produces_death_then_golden_cross(self):
+        # warmup(前 slow=26 根被抑制)之后：上升->下跌段出死叉，再反转出金叉
+        up1 = np.linspace(100, 130, 50)
+        down = np.linspace(130, 100, 40)
+        up2 = np.linspace(100, 140, 50)
+        s = _series(np.concatenate([up1, down[1:], up2[1:]]))
         out = macd_cross(s)
-        assert out["death_cross"].iloc[:40].any()  # 下跌段出死叉
-        assert out["golden_cross"].iloc[40:].any()  # 反转段出金叉
+        assert out["death_cross"].iloc[50:90].any()  # 下跌段出死叉
+        assert out["golden_cross"].iloc[90:].any()  # 反转段出金叉
         # 金叉死叉不能同一天同时为 True
         assert not (out["golden_cross"] & out["death_cross"]).any()
+
+    def test_warmup_period_suppressed(self):
+        # 多轮审计实锤的 bar-1 假信号：EMA 种子期 macd≈signal，bar 1 任何
+        # 变动都"穿越"。前 slow 根必须恒 False——用 50 个随机序列扫。
+        rng = np.random.default_rng(0)
+        for _ in range(50):
+            s = _series(100 * np.exp(np.cumsum(rng.normal(0.0003, 0.01, 60))))
+            out = macd_cross(s)
+            assert not out.iloc[:26].any().any(), "warmup 期不得产信号"
 
     def test_first_row_no_cross(self):
         out = macd_cross(_series(np.linspace(1, 2, 50)))
@@ -224,7 +235,7 @@ class TestPullback:
 
 
 # --------------------------------------------------------------------------- #
-# NaN 传播（全函数不崩）
+# NaN 洞口径（多轮审计后收紧：洞上必须 NaN，不许穿透旧值"编数字"）
 # --------------------------------------------------------------------------- #
 class TestNaNSafety:
     def test_functions_survive_nan_holes(self, prices):
@@ -239,3 +250,64 @@ class TestNaNSafety:
             macd(close)["macd"],
         ):
             assert len(out) == len(close)
+
+    def test_ewm_family_nan_at_holes(self, prices):
+        """EWM 族（ema/macd/rsi）洞上输出 NaN——pandas ewm 默认穿透旧值，已显式掩掉。"""
+        close = prices["close"].copy()
+        close.iloc[50:53] = np.nan
+        assert ema(close, 12).iloc[50:53].isna().all()
+        m = macd(close)
+        assert m.iloc[50:53].isna().all().all()
+        # RSI：洞上 + 洞后首根（跨洞差分未知）都 NaN
+        r = rsi(close, 14)
+        assert r.iloc[50:54].isna().all()
+        assert r.iloc[55:].notna().all()  # 洞后恢复递推
+
+    def test_rsi_hole_does_not_freeze_at_stale_value(self):
+        """审查场景：涨到顶 -> 洞 -> 崩盘。旧实现 RSI 永远停在 100；新实现洞区 NaN。"""
+        up = np.linspace(100, 130, 30)
+        s = _series(np.concatenate([up, [np.nan], [90.0] * 20]))
+        r = rsi(s, 14)
+        assert np.isnan(r.iloc[30])  # 洞上 NaN（旧实现 = 100.0 假数字）
+        assert np.isnan(r.iloc[31])  # 洞后首根差分未知 -> NaN
+        assert r.iloc[35:].notna().all()
+
+    def test_macd_cross_no_signal_at_or_after_hole(self, prices):
+        close = prices["close"].copy()
+        close.iloc[100:103] = np.nan
+        out = macd_cross(close)
+        assert not out.iloc[100:104].any().any()  # 洞及洞后首根不产信号
+
+
+# --------------------------------------------------------------------------- #
+# 参数校验（window=0 家族：拒绝而非静默全 NaN / ZeroDivisionError）
+# --------------------------------------------------------------------------- #
+class TestParamValidation:
+    def test_window_zero_or_negative_raises(self):
+        s = _series(np.linspace(1, 2, 30))
+        with pytest.raises(ValueError):
+            sma(s, 0)
+        with pytest.raises(ValueError):
+            ema(s, 0)
+        with pytest.raises(ValueError):
+            rsi(s, 0)
+        with pytest.raises(ValueError):
+            roc(s, 0)
+        with pytest.raises(ValueError):
+            momentum(s, -5)  # 负窗口 = lookahead，必须拒绝
+        with pytest.raises(ValueError):
+            stochastic(s, s, s, k_window=0)
+        with pytest.raises(ValueError):
+            stochastic(s, s, s, smooth_k=0)
+        with pytest.raises(ValueError):
+            pullback(s, s, lookback=0)
+        with pytest.raises(ValueError):
+            moving_average_system(s, windows=(0, 5))
+
+    def test_ma_alignment_column_always_present(self):
+        s = _series(np.linspace(1, 2, 30))
+        out = moving_average_system(s, windows=(5,))
+        assert "ma_alignment" in out.columns  # 单窗口：列存在、全 NaN（schema 稳定）
+        assert out["ma_alignment"].isna().all()
+        out2 = moving_average_system(s, windows=(5, 5, 5))  # 去重后单窗口同理
+        assert out2["ma_alignment"].isna().all()

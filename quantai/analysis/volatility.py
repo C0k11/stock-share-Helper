@@ -9,6 +9,8 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
+from quantai.analysis.trend import _require_positive
+
 TRADING_DAYS = 252
 
 
@@ -83,22 +85,25 @@ def atr(
 ) -> pd.Series:
     """平均真实波幅（Average True Range，Wilder 口径）。
 
-    TR_t = max(high_t − low_t, |high_t − close_{t-1}|, |low_t − close_{t-1}|)
-    （首日无前收，TR_0 = high_0 − low_0）；
+    TR_t = max(high_t − low_t, |high_t − close_{t-1}|, |low_t − close_{t-1}|)；
     ATR = Wilder 平滑(TR, w) = `ewm(alpha=1/w, adjust=False)`（与 RSI 同一平滑）。
 
-    前 window 个值置 NaN（平滑热身，口径与 :func:`quantai.analysis.trend.rsi` 一致）。
+    边界口径（多轮审计后收紧，2026-07-01）：
+    - 无前收（首日，或前一日 close 缺失）→ 回落 TR = high − low（首日惯例的推广，
+      跳空分量不可知就不计，**不再用 skipna 静默吞掉**旧实现会把 NaN 行低估成数值）。
+    - 当日 high 或 low 缺失 → 该日区间不可知，TR 与 ATR 输出 **NaN**；平滑在洞后
+      从上一有效状态恢复递推（同 :func:`quantai.analysis.trend.rsi` 的洞口径）。
+    - 前 window 个值置 NaN（平滑热身）。
     """
+    _require_positive(window=window)
     prev_close = close.shift(1)
-    tr = pd.concat(
-        [
-            high - low,
-            (high - prev_close).abs(),
-            (low - prev_close).abs(),
-        ],
-        axis=1,
-    ).max(axis=1, skipna=True)
-    out = tr.ewm(alpha=1.0 / window, adjust=False).mean()
+    base = high - low  # 当日区间：h/l 任一缺失 -> NaN（诚实）
+    gap = pd.concat(
+        [(high - prev_close).abs(), (low - prev_close).abs()], axis=1
+    ).max(axis=1)  # 无前收 -> NaN -> 回落用 base
+    tr = pd.Series(np.fmax(base.to_numpy(), gap.to_numpy()), index=base.index)
+    tr = tr.where(base.notna())  # 区间不可知的行强制 NaN（fmax 会偏袒非 NaN 一侧）
+    out = tr.ewm(alpha=1.0 / window, adjust=False).mean().where(tr.notna())
     out.iloc[: min(window, len(out))] = np.nan
     return out.rename(f"atr_{window}")
 
@@ -119,7 +124,8 @@ def rolling_correlation(
     `on_returns=False` 保留价格相关（诊断用）。
 
     索引按交集对齐（inner join）后计算；窗口内任一侧方差为 0 → 相关未定义，pandas
-    给 NaN（保留该口径）。前 window(+1 若取收益) 个位置 NaN。
+    给 NaN（保留该口径）。前导 NaN 数：收益口径恰 window 个（首收益 NaN 与窗口热身
+    重叠）、价格口径恰 window−1 个（实测校正过的精确计数）。
     """
     if window < 2:
         raise ValueError(f"window 需 >= 2，收到 {window}")

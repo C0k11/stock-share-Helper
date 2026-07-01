@@ -105,6 +105,31 @@ class TestATR:
         out = atr(prices["high"], prices["low"], prices["close"]).dropna()
         assert (out >= 0).all()
 
+    def test_missing_high_gives_nan_not_understated_tr(self):
+        """审查实锤：旧实现 skipna 把「高点缺失」行低估成 |low-prev_close|。"""
+        high = pd.Series([102.0, np.nan, 104.0, 104.0, 104.0] + [104.0] * 10)
+        low = pd.Series([100.0, 99.0, 101.0, 101.0, 101.0] + [101.0] * 10)
+        close = pd.Series([101.0, 100.0, 103.0, 103.0, 103.0] + [103.0] * 10)
+        out = atr(high, low, close, window=3)
+        assert np.isnan(out.iloc[1])  # 区间不可知 -> NaN（旧实现 = 2.0 假数字）
+        assert out.iloc[5:].notna().all()  # 洞后恢复
+
+    def test_prev_close_missing_falls_back_to_range(self):
+        """前收缺失（close 洞的次日）：TR 回落为 high-low（首日口径推广），非 NaN。"""
+        n = 20
+        high = pd.Series([102.0] * n)
+        low = pd.Series([100.0] * n)
+        close = pd.Series([101.0] * n)
+        close.iloc[10] = np.nan
+        out = atr(high, low, close, window=3)
+        # 第 11 行 prev_close NaN，但 h/l 都在 -> TR=2 照常，ATR 不断
+        assert out.iloc[11] == pytest.approx(2.0)
+
+    def test_window_zero_raises(self):
+        s = pd.Series([1.0, 2.0, 3.0])
+        with pytest.raises(ValueError):
+            atr(s, s, s, window=0)
+
 
 # --------------------------------------------------------------------------- #
 # rolling correlation

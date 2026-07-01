@@ -4,8 +4,14 @@
 - **纯函数**：输入 `pd.Series`/`pd.DataFrame`，输出新对象，不修改输入、无 IO、无全局状态。
 - **因果性**：所有窗口只用 <= t 的数据（`rolling`/`ewm`/`shift(+n)`），无 lookahead；
   由 `tests/analysis/test_no_lookahead.py` 的截断不变性测试保证。
-- **边界诚实**：数据不足（len < window）返回全 NaN 而非报错；输入含 NaN 时受影响的
-  位置传播 NaN；数学上未定义处（如分母为 0）按各函数 docstring 标注的口径处理。
+- **边界诚实**：数据不足（len < window）返回全 NaN 而非报错；参数非法（如 window<1）
+  一律 `ValueError`；数学上未定义处（如分母为 0）按各函数 docstring 标注的口径处理。
+- **NaN 洞口径**（多轮审计后收紧，2026-07-01）：输入为 NaN 的位置**输出 NaN**
+  （rolling 族由 pandas 天然保证；EWM 族 EMA/MACD/RSI/ATR 显式掩掉——pandas `ewm`
+  默认会把上一状态穿透 NaN，属"编数字"，已修）。EWM 族在洞后从**上一有效状态恢复
+  递推**、跨洞差分不计入（诚实断点：洞后首个差分未知的位置也输出 NaN，各 docstring
+  标注）。注意洞后的值与"无洞的完整序列"必然有差异——缺数据本身不可修复，本约定
+  只保证不在洞上编造数值。
 - **口径**：日频、NYSE 交易日；年化因子 252（见 `modules/analysis.md`「美股规则」一节）。
 """
 
@@ -22,8 +28,16 @@ _DEFAULT_MA_WINDOWS: tuple[int, ...] = (5, 10, 20, 50, 200)
 # --------------------------------------------------------------------------- #
 # 均线
 # --------------------------------------------------------------------------- #
+def _require_positive(**windows: int) -> None:
+    """窗口/跨度参数必须 >= 1，否则 ValueError（防 window=0 静默全 NaN 与负窗口 lookahead）。"""
+    for name, value in windows.items():
+        if int(value) < 1:
+            raise ValueError(f"{name} 需 >= 1，收到 {value}")
+
+
 def sma(close: pd.Series, window: int) -> pd.Series:
     """简单移动平均。SMA_t = mean(close[t-w+1 .. t])。前 w-1 个值为 NaN。"""
+    _require_positive(window=window)
     return close.rolling(window).mean().rename(f"sma_{window}")
 
 
@@ -32,8 +46,10 @@ def ema(close: pd.Series, span: int) -> pd.Series:
 
     EMA_t = α·close_t + (1-α)·EMA_{t-1}，α = 2/(span+1)，EMA_0 = close_0。
     与 TradingView/常见图表软件的 EMA 一致；只依赖 <= t 的数据（因果）。
+    NaN 洞：洞上输出 NaN（不穿透旧值），洞后从上一有效状态恢复递推。
     """
-    return close.ewm(span=span, adjust=False).mean().rename(f"ema_{span}")
+    _require_positive(span=span)
+    return close.ewm(span=span, adjust=False).mean().where(close.notna()).rename(f"ema_{span}")
 
 
 def moving_average_system(
@@ -45,10 +61,12 @@ def moving_average_system(
     - `ma_alignment` ∈ [0, 1]：相邻均线对中「短均线 > 长均线」的占比
       （windows 升序两两比较）。1.0 = 完美多头排列，0.0 = 完美空头排列。
       任一参与比较的均线为 NaN 时该行为 NaN（不足以判断，不装懂）。
+      去重后不足 2 个窗口时无均线对可比 -> 该列**全 NaN**（列本身恒存在）。
     """
     ws = sorted(set(int(w) for w in windows))
     if len(ws) == 0:
         raise ValueError("windows 不能为空")
+    _require_positive(**{f"windows[{w}]": w for w in ws})
     out = pd.DataFrame(index=close.index)
     for w in ws:
         out[f"sma_{w}"] = close.rolling(w).mean()
@@ -61,6 +79,10 @@ def moving_average_system(
             acc = acc + (s > l).astype(float)
             valid = valid & s.notna() & l.notna()
         out["ma_alignment"] = (acc / len(pairs)).where(valid)
+    else:
+        # 单一（去重后）窗口没有"相邻均线对"，排列度数学未定义 -> 全 NaN 列。
+        # 列恒存在（schema 稳定，下游 out["ma_alignment"] 不会 KeyError）。
+        out["ma_alignment"] = pd.Series(np.nan, index=close.index)
     return out
 
 
@@ -76,12 +98,16 @@ def macd(
     - signal_line = EMA(macd_line, signal)
     - histogram = macd_line − signal_line
 
-    经典参数 (12, 26, 9)。EMA 为 `adjust=False` 递推口径（见 :func:`ema`）。
+    经典参数 (12, 26, 9)。EMA 为 `adjust=False` 递推口径（见 :func:`ema`），
+    自 bar 0 起即有值（TradingView 同口径）——warmup 期数值受种子主导，产**信号**
+    请用 :func:`macd_cross`（有 warmup 抑制），别直接比较 warmup 期的线。
+    NaN 洞：洞上三列输出 NaN，洞后从上一有效状态恢复递推。
     """
     if not (fast < slow):
         raise ValueError(f"要求 fast < slow，收到 fast={fast}, slow={slow}")
+    _require_positive(fast=fast, signal=signal)
     macd_line = ema(close, fast) - ema(close, slow)
-    signal_line = macd_line.ewm(span=signal, adjust=False).mean()
+    signal_line = macd_line.ewm(span=signal, adjust=False).mean().where(close.notna())
     return pd.DataFrame(
         {
             "macd": macd_line,
@@ -99,13 +125,19 @@ def macd_cross(
     - golden_cross_t：macd 在 t 上穿 signal，即 macd_{t-1} <= signal_{t-1} 且 macd_t > signal_t。
     - death_cross_t ：macd 在 t 下穿 signal，即 macd_{t-1} >= signal_{t-1} 且 macd_t < signal_t。
 
-    任一参与比较的值为 NaN 时判 False（warmup 期不产信号）。第 0 行恒 False（无前值）。
+    warmup 抑制：前 `slow` 根恒 False——EMA 种子期 macd≈signal≈0，bar 1 的任何
+    价格变动都会造出一次"穿越"假信号（多轮审计实锤：200/200 个随机序列
+    在 bar 1-2 出信号），故整段种子期不产信号。任一参与比较的值为 NaN 时判 False
+    （数据洞及洞后首根不产信号）。
     """
     m = macd(close, fast=fast, slow=slow, signal=signal)
     line, sig = m["macd"], m["macd_signal"]
     prev_line, prev_sig = line.shift(1), sig.shift(1)
     golden = (prev_line <= prev_sig) & (line > sig)
     death = (prev_line >= prev_sig) & (line < sig)
+    warmup = min(slow, len(close))
+    golden.iloc[:warmup] = False
+    death.iloc[:warmup] = False
     return pd.DataFrame({"golden_cross": golden, "death_cross": death})
 
 
@@ -113,12 +145,20 @@ def macd_cross(
 # 动量
 # --------------------------------------------------------------------------- #
 def roc(close: pd.Series, window: int = 10) -> pd.Series:
-    """变动率（Rate of Change，百分比）。ROC_t = (close_t / close_{t-w} − 1) × 100。"""
+    """变动率（Rate of Change，百分比）。ROC_t = (close_t / close_{t-w} − 1) × 100。
+
+    window 必须 >= 1：负窗口等价 `shift(-n)` 即 lookahead，直接拒绝。
+    """
+    _require_positive(window=window)
     return (close.pct_change(window, fill_method=None) * 100.0).rename(f"roc_{window}")
 
 
 def momentum(close: pd.Series, window: int = 10) -> pd.Series:
-    """价差动量。MOM_t = close_t − close_{t-w}（与 ROC 的比值口径相对，保留量纲）。"""
+    """价差动量。MOM_t = close_t − close_{t-w}（与 ROC 的比值口径相对，保留量纲）。
+
+    window 必须 >= 1（同 :func:`roc`，负窗口 = lookahead，拒绝）。
+    """
+    _require_positive(window=window)
     return (close - close.shift(window)).rename(f"momentum_{window}")
 
 
@@ -137,7 +177,10 @@ def rsi(close: pd.Series, window: int = 14) -> pd.Series:
     - avg_gain = avg_loss = 0（价格纹丝不动）→ RS 为 0/0 数学未定义，按**中性 50** 处理
       （多数图表软件口径；比返回 NaN 更利于下游布尔判定，已在测试固定该行为）。
     - 前 window 个值为 NaN（平滑未热身）。
+    - NaN 洞：洞上以及**洞后首根**（跨洞差分未知）输出 NaN；平滑状态在洞后从
+      上一有效状态恢复递推，跨洞的价格变动不计入（诚实断点，不编数字）。
     """
+    _require_positive(window=window)
     delta = close.diff()
     gain = delta.clip(lower=0.0)
     loss = (-delta).clip(lower=0.0)
@@ -152,6 +195,8 @@ def rsi(close: pd.Series, window: int = 14) -> pd.Series:
     # RSI = 100·avg_gain/(avg_gain+avg_loss) 与 100−100/(1+RS) 代数等价，且天然处理 avg_loss=0。
     out[normal] = 100.0 * avg_gain[normal] / denom[normal]
     out[flat] = 50.0
+    # NaN 洞掩码：close 为 NaN（洞上）或 delta 为 NaN（洞后首根，差分不可知）-> NaN。
+    out = out.where(close.notna() & (delta.notna() | (np.arange(len(close)) == 0)))
     # 热身期：Wilder 平滑前 window 步仍受初值主导，按惯例置 NaN。
     out.iloc[: min(window, len(out))] = np.nan
     return out
@@ -194,6 +239,7 @@ def stochastic(
     边界口径：HH_w = LL_w（w 日内价格区间为零）→ 0/0 未定义，置 NaN（诚实缺数据，
     不猜方向）；随 SMA 传播。
     """
+    _require_positive(k_window=k_window, d_window=d_window, smooth_k=smooth_k)
     hh = high.rolling(k_window).max()
     ll = low.rolling(k_window).min()
     span = hh - ll
@@ -232,6 +278,7 @@ def pullback(
     """
     if not 0 <= min_retrace < max_retrace:
         raise ValueError(f"要求 0 <= min_retrace < max_retrace，收到 {min_retrace} / {max_retrace}")
+    _require_positive(ma_fast=ma_fast, ma_slow=ma_slow, lookback=lookback)
     fast_ma = close.rolling(ma_fast).mean()
     slow_ma = close.rolling(ma_slow).mean()
     rolling_high = high.rolling(lookback).max()
