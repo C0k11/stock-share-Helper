@@ -1,4 +1,4 @@
-"""volatility.py 单测：已知值手算、边界（常数序列 / 数据不足 / 零方差）。"""
+﻿"""volatility.py 单测：已知值手算、边界（常数序列 / 数据不足 / 零方差）。"""
 
 from __future__ import annotations
 
@@ -106,7 +106,7 @@ class TestATR:
         assert (out >= 0).all()
 
     def test_missing_high_gives_nan_not_understated_tr(self):
-        """审查实锤：旧实现 skipna 把「高点缺失」行低估成 |low-prev_close|。"""
+        """审计实锤：旧实现 skipna 把「高点缺失」行低估成 |low-prev_close|。"""
         high = pd.Series([102.0, np.nan, 104.0, 104.0, 104.0] + [104.0] * 10)
         low = pd.Series([100.0, 99.0, 101.0, 101.0, 101.0] + [101.0] * 10)
         close = pd.Series([101.0, 100.0, 103.0, 103.0, 103.0] + [103.0] * 10)

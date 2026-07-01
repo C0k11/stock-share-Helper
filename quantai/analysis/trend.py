@@ -1,4 +1,4 @@
-"""趋势 / 动量指标：MACD（金叉/死叉）、均线体系、ROC/动量、RSI（超卖）、随机指标、回踩检测。
+﻿"""趋势 / 动量指标：MACD（金叉/死叉）、均线体系、ROC/动量、RSI（超卖）、随机指标、回踩检测。
 
 设计约定（全模块一致）：
 - **纯函数**：输入 `pd.Series`/`pd.DataFrame`，输出新对象，不修改输入、无 IO、无全局状态。
@@ -6,7 +6,7 @@
   由 `tests/analysis/test_no_lookahead.py` 的截断不变性测试保证。
 - **边界诚实**：数据不足（len < window）返回全 NaN 而非报错；参数非法（如 window<1）
   一律 `ValueError`；数学上未定义处（如分母为 0）按各函数 docstring 标注的口径处理。
-- **NaN 洞口径**（多轮审计后收紧，2026-07-01）：输入为 NaN 的位置**输出 NaN**
+- **NaN 洞口径**（审计后收紧，2026-07-01）：输入为 NaN 的位置**输出 NaN**
   （rolling 族由 pandas 天然保证；EWM 族 EMA/MACD/RSI/ATR 显式掩掉——pandas `ewm`
   默认会把上一状态穿透 NaN，属"编数字"，已修）。EWM 族在洞后从**上一有效状态恢复
   递推**、跨洞差分不计入（诚实断点：洞后首个差分未知的位置也输出 NaN，各 docstring
@@ -126,7 +126,7 @@ def macd_cross(
     - death_cross_t ：macd 在 t 下穿 signal，即 macd_{t-1} >= signal_{t-1} 且 macd_t < signal_t。
 
     warmup 抑制：前 `slow` 根恒 False——EMA 种子期 macd≈signal≈0，bar 1 的任何
-    价格变动都会造出一次"穿越"假信号（多轮审计实锤：200/200 个随机序列
+    价格变动都会造出一次"穿越"假信号（审计实锤：200/200 个随机序列
     在 bar 1-2 出信号），故整段种子期不产信号。任一参与比较的值为 NaN 时判 False
     （数据洞及洞后首根不产信号）。
     """

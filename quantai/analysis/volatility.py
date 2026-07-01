@@ -1,4 +1,4 @@
-"""波动 / 通道指标：realized & annualized 波动率、Bollinger、ATR、rolling 相关性。
+﻿"""波动 / 通道指标：realized & annualized 波动率、Bollinger、ATR、rolling 相关性。
 
 同 `trend.py` 的约定：纯函数、因果窗口、边界诚实（数据不足给 NaN 不报错）。
 年化因子 252（NYSE 交易日，见 `modules/analysis.md`）。
@@ -88,7 +88,7 @@ def atr(
     TR_t = max(high_t − low_t, |high_t − close_{t-1}|, |low_t − close_{t-1}|)；
     ATR = Wilder 平滑(TR, w) = `ewm(alpha=1/w, adjust=False)`（与 RSI 同一平滑）。
 
-    边界口径（多轮审计后收紧，2026-07-01）：
+    边界口径（审计后收紧，2026-07-01）：
     - 无前收（首日，或前一日 close 缺失）→ 回落 TR = high − low（首日惯例的推广，
       跳空分量不可知就不计，**不再用 skipna 静默吞掉**旧实现会把 NaN 行低估成数值）。
     - 当日 high 或 low 缺失 → 该日区间不可知，TR 与 ATR 输出 **NaN**；平滑在洞后
