@@ -127,3 +127,6 @@ htmlcov/
 warehouse/target/
 warehouse/dbt_packages/
 warehouse/.user.yml
+
+# Tableau 导出数据源（可再生，scripts/warehouse.py --export）
+tableau/exports/

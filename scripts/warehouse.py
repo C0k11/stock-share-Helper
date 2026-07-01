@@ -44,6 +44,7 @@ def _load_raw(db_path: Path, portfolio_file: str, years: int, benchmark: str) ->
         connect, load_backtest, load_positions, load_prices,
         load_signals, load_trading_days,
     )
+    from quantai.warehouse.etl import init_raw_tables
     import pandas as pd
 
     portfolio = load_portfolio(portfolio_file)
@@ -55,6 +56,7 @@ def _load_raw(db_path: Path, portfolio_file: str, years: int, benchmark: str) ->
     prices = PriceFetcher().fetch_prices(symbols, start)
     con = connect(db_path)
     try:
+        init_raw_tables(con)  # 全部 raw 表建齐（含还没有数据的，如 trades）——dbt 才能全模型编译
         n = load_prices(con, prices)
         print(f"[etl] raw.prices          +{n}")
         n = load_trading_days(con, start, end)
