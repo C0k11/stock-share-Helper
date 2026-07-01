@@ -330,6 +330,22 @@ class EvolutionConfig(_Base):
 
 
 # --------------------------------------------------------------------------- #
+# portfolio（真实持仓分析）
+# --------------------------------------------------------------------------- #
+class PortfolioConfig(_Base):
+    """真实持仓录入 + 组合分析配置。
+
+    `file` 指向真实持仓（`*.local.yaml`，被 .gitignore 排除、永不入库）；
+    仓库只带 `portfolio.example.yaml` 示例。
+    """
+
+    file: str = "portfolio.local.yaml"
+    benchmark: str = "SPY"
+    # 分析用的历史回看年数（beta/波动/回撤的合成历史长度）。
+    history_years: int = Field(default=2, gt=0)
+
+
+# --------------------------------------------------------------------------- #
 # api / logging
 # --------------------------------------------------------------------------- #
 class APIConfig(_Base):
@@ -360,5 +376,6 @@ class AppConfig(_Base):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     evolution: EvolutionConfig = Field(default_factory=EvolutionConfig)
+    portfolio: PortfolioConfig = Field(default_factory=PortfolioConfig)
     api: APIConfig = Field(default_factory=APIConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)

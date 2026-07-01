@@ -1,0 +1,19 @@
+# QuantAI 真实持仓示例（把这份复制成 portfolio.local.yaml 再填真实数据）
+#
+#   copy portfolio.example.yaml portfolio.local.yaml
+#
+# portfolio.local.yaml 已被 .gitignore 的 *.local.yaml 规则排除，不会进版本库。
+# 同一 symbol 可以写多条（分批建仓的 lot），分析时自动聚合为加权平均成本。
+
+cash: 5000.00
+
+positions:
+  - symbol: NVDA
+    shares: 10          # 股数（>0 多头；<0 空头需显式负数）
+    cost_basis: 450.50  # 每股成本（USD）
+    open_date: 2025-11-03
+
+  - symbol: SPY
+    shares: 20
+    cost_basis: 520.00
+    open_date: 2025-08-15
