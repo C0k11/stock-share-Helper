@@ -26,6 +26,7 @@ dependencies = [
     "feedparser>=6.0.0",      # RSS 新闻解析
     "pydantic>=2.5.0",        # 配置/数据校验（本模块用它）
     "pyyaml>=6.0.0",          # YAML 配置
+    "duckdb>=1.0.0",          # 本地数据仓库（嵌入式列存 SQL，warehouse/ 层）
     "python-dotenv>=1.0.0",   # .env 加载
     "loguru>=0.7.0",          # 日志
     "tqdm>=4.66.0",           # 进度条
@@ -59,6 +60,10 @@ ui = [
     "mplfinance>=0.12.10b0",  # K 线图（Chartist VLM 的输入图）
     "edge-tts>=6.1.12",
     "pygame>=2.5.2",
+]
+# 数据仓库 SQL 转换层（dbt CLI 工具链，业务代码不 import 它）
+warehouse = [
+    "dbt-duckdb>=1.9.0",      # raw(parquet/ETL) -> staging -> marts 的 SQL 转换 + 断言测试
 ]
 # 仅个别离线脚本使用（验证后归此组，非核心）
 research = [

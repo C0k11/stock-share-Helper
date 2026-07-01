@@ -1,0 +1,22 @@
+# QuantAI local warehouse - dbt project (dbt-duckdb).
+# Layers: raw (loaded by pandas ETL, quantai/warehouse/etl.py)
+#      -> staging (views, cleaning only)
+#      -> marts (tables, star schema; BI/Tableau reads this layer only).
+# NOTE: keep this file ASCII-only - dbt on Windows may read it with the
+# locale codec (gbk) and non-ASCII bytes break the build.
+name: quantai_warehouse
+version: "1.0.0"
+profile: quantai
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+
+models:
+  quantai_warehouse:
+    staging:
+      +materialized: view
+      +schema: staging
+    marts:
+      +materialized: table
+      +schema: marts
