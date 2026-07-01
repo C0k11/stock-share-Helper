@@ -330,6 +330,31 @@ class EvolutionConfig(_Base):
 
 
 # --------------------------------------------------------------------------- #
+# distill（教师-学生蒸馏管线）
+# --------------------------------------------------------------------------- #
+class DistillConfig(_Base):
+    """DeepSeek 教师蒸馏配置。
+
+    - `model`：DeepSeek 官方**稳定别名**（deepseek-chat=最新 V3 系 / deepseek-reasoner=
+      推理系），不写死带日期的版本号。
+    - key **只从环境变量**（`api_key_env`）读，永不入配置文件/代码。
+    - 真实生成只走 `scripts/distill.py --run --confirm-spend`（手动，成本闸）。
+    """
+
+    model: str = "deepseek-chat"
+    base_url: str = "https://api.deepseek.com"
+    api_key_env: str = "DEEPSEEK_API_KEY"
+    temperature: float = Field(default=0.7, ge=0)
+    max_tokens: int = Field(default=1024, gt=0)
+    out_dir: str = "data/distill"
+    # 单次运行的场景数硬上限（额度保险丝）。
+    max_scenarios: int = Field(default=200, gt=0)
+    # 场景构造：最少 K 线根数 / 回看年数
+    min_bars: int = Field(default=60, gt=0)
+    history_years: int = Field(default=2, gt=0)
+
+
+# --------------------------------------------------------------------------- #
 # portfolio（真实持仓分析）
 # --------------------------------------------------------------------------- #
 class PortfolioConfig(_Base):
@@ -376,6 +401,7 @@ class AppConfig(_Base):
     llm: LLMConfig = Field(default_factory=LLMConfig)
     agents: AgentsConfig = Field(default_factory=AgentsConfig)
     evolution: EvolutionConfig = Field(default_factory=EvolutionConfig)
+    distill: DistillConfig = Field(default_factory=DistillConfig)
     portfolio: PortfolioConfig = Field(default_factory=PortfolioConfig)
     api: APIConfig = Field(default_factory=APIConfig)
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
