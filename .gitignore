@@ -122,3 +122,8 @@ htmlcov/
 .coverage
 .coverage.*
 .pytest_cache/
+
+# dbt 生成物（可再生）
+warehouse/target/
+warehouse/dbt_packages/
+warehouse/.user.yml
