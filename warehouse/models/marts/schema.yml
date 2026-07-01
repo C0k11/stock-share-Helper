@@ -1,0 +1,84 @@
+version: 2
+
+models:
+  - name: dim_date
+    description: 日期维度（日历日 spine；is_trading_day 标 NYSE 交易日）。
+    columns:
+      - name: date
+        tests: [not_null, unique]
+      - name: day_of_week
+        tests:
+          - accepted_values:
+              values: [1, 2, 3, 4, 5, 6, 7]
+              quote: false
+
+  - name: dim_symbol
+    description: 标的维度（自然键 symbol；成员为所有 fact 源的并集）。
+    columns:
+      - name: symbol
+        tests: [not_null, unique]
+
+  - name: fact_prices
+    description: 日行情事实（symbol×date；daily_return / 52 周高点距离在 SQL 层派生）。
+    columns:
+      - name: symbol
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_symbol')
+              field: symbol
+      - name: date
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_date')
+              field: date
+      - name: close
+        tests: [not_null]
+
+  - name: fact_positions
+    description: 持仓事实（as_of×symbol；lots 聚合 + ASOF 估值；与 pandas 有对账测试）。
+    columns:
+      - name: symbol
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_symbol')
+              field: symbol
+      - name: shares
+        tests: [not_null]
+
+  - name: fact_trades
+    description: 成交事实（run_id×seq）。
+    columns:
+      - name: action
+        tests:
+          - accepted_values:
+              values: ["BUY", "SELL"]
+      - name: symbol
+        tests:
+          - relationships:
+              to: ref('dim_symbol')
+              field: symbol
+
+  - name: fact_signals
+    description: 信号事实（symbol×date；warmup 空信号已滤）。
+    columns:
+      - name: composite_signal
+        tests: [not_null]
+      - name: signal_strength
+        tests:
+          - accepted_values:
+              values: ["strong_short", "weak_short", "neutral", "weak_long", "strong_long"]
+
+  - name: fact_backtest_results
+    description: 回测结果事实（run_id 粒度，指标与 quantai.backtest.metrics 同口径）。
+    columns:
+      - name: run_id
+        tests: [not_null, unique]
+
+  - name: fact_backtest_equity
+    description: 回测净值曲线（run_id×date；drawdown 由 SQL 窗口派生）。
+    columns:
+      - name: equity
+        tests: [not_null]

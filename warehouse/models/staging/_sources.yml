@@ -1,0 +1,56 @@
+version: 2
+
+# raw 层：pandas ETL（quantai/warehouse/etl.py）装载的原始数据。
+# 在源头就挂 not_null 测试——脏数据在进 staging 前被拦下。
+sources:
+  - name: raw
+    schema: raw
+    tables:
+      - name: prices
+        columns:
+          - name: symbol
+            tests: [not_null]
+          - name: date
+            tests: [not_null]
+          - name: close
+            tests: [not_null]
+      - name: trading_days
+        columns:
+          - name: date
+            tests: [not_null, unique]
+      - name: positions
+        columns:
+          - name: as_of
+            tests: [not_null]
+          - name: symbol
+            tests: [not_null]
+          - name: shares
+            tests: [not_null]
+      - name: portfolio_cash
+        columns:
+          - name: as_of
+            tests: [not_null, unique]
+      - name: trades
+        columns:
+          - name: run_id
+            tests: [not_null]
+          - name: action
+            tests:
+              - accepted_values:
+                  values: ["BUY", "SELL"]
+      - name: signals
+        columns:
+          - name: symbol
+            tests: [not_null]
+          - name: date
+            tests: [not_null]
+      - name: backtest_runs
+        columns:
+          - name: run_id
+            tests: [not_null, unique]
+      - name: backtest_equity
+        columns:
+          - name: run_id
+            tests: [not_null]
+          - name: equity
+            tests: [not_null]

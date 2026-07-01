@@ -62,10 +62,10 @@ backtest_result.csv
 backtest_result.png
 
 # ====================
-# 模型文件（不提交）
+# 模型文件（不提交）——锚定仓库根：无斜杠前缀会误杀 warehouse/models/（dbt SQL 模型）
 # ====================
-models/
-!models/.gitkeep
+/models/
+!/models/.gitkeep
 
 # ====================
 # 日志
