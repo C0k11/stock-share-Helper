@@ -6,8 +6,8 @@
 > layer with an offline teacher-student distillation pipeline, and a professional
 > dark-theme dashboard. US equities (NYSE calendar), honest by design.
 
-`refactor/v2` — the codebase was rebuilt bottom-up into the typed, tested
-`quantai/` package (620+ tests). Legacy code stays in `src/` untouched.
+The codebase was rebuilt bottom-up into the typed, tested `quantai/` package
+(630+ tests). Legacy code stays in `src/` untouched.
 
 ---
 
