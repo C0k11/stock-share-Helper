@@ -1,4 +1,4 @@
-"""真实持仓录入：`portfolio.local.yaml`（或 CSV）→ 类型化 `Portfolio`。
+﻿"""真实持仓录入：`portfolio.local.yaml`（或 CSV）→ 类型化 `Portfolio`。
 
 隐私边界（硬要求）：真实持仓文件是 `portfolio.local.yaml`，被仓库 `.gitignore` 的
 `*.local.yaml` 规则排除，**永不入库**；仓库只带 `portfolio.example.yaml` 示例。

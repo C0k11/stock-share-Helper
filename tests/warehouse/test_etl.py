@@ -1,4 +1,4 @@
-"""etl.py 单测：装载正确性 + 幂等性（delete-then-insert by batch key）。全部 :memory:。"""
+﻿"""etl.py 单测：装载正确性 + 幂等性（delete-then-insert by batch key）。全部 :memory:。"""
 
 from __future__ import annotations
 
@@ -60,7 +60,7 @@ class TestLoadPrices:
 
     def test_failed_insert_rolls_back_old_batch(self, con, prices):
         """事务原子性：坏数据重载失败时，旧批次必须原样保留（旧实现 DELETE 先
-        autocommit，INSERT 再炸 -> 旧数据清零，审查 3/3 票实锤）。"""
+        autocommit，INSERT 再炸 -> 旧数据清零，审计实锤）。"""
         load_prices(con, {"XXX": prices})
         n_before = _count(con, "raw.prices")
         bad = prices.copy()

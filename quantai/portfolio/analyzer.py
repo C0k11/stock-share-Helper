@@ -1,4 +1,4 @@
-"""组合分析器：真实持仓 × 价格历史 → 盈亏 / 暴露 / 风险 / 技术指标快照。
+﻿"""组合分析器：真实持仓 × 价格历史 → 盈亏 / 暴露 / 风险 / 技术指标快照。
 
 **可测性**：`PortfolioAnalyzer` 只吃注入的价格数据（`dict[symbol, DataFrame]`），
 不碰网络；联网抓数在 `scripts/analyze.py` / api 层用 `PriceFetcher` 完成后注入。
@@ -11,7 +11,7 @@
     前缀明示假设；它不是你的真实历史 PnL 曲线。
 - 缺价的标的**不静默丢弃**：列入 `missing_prices` 并从持仓与统计中**整体剔除**
   （不产生持仓行、不进任何总计；报告顶部醒目列出）。close 列存在但**全 NaN**
-  同样按缺价处理（yfinance 退市/坏抓取的常见形状，审查确认后收紧）。
+  同样按缺价处理（yfinance 退市/坏抓取的常见形状，审计确认后收紧）。
 """
 
 from __future__ import annotations
@@ -219,14 +219,14 @@ class PortfolioAnalyzer:
 
         # 权重回填（分母 = 总值含现金，带符号=暴露方向）；
         # 集中度改用 **gross** 口径（|mv|/Σ|mv|）——净分母在含空头时权重会 >1、
-        # HHI 无界、近似美元中性组合直接爆表（审查确认后修正）。
+        # HHI 无界、近似美元中性组合直接爆表（审计确认后修正）。
         for s in snapshots:
             s.weight = s.market_value / total_value if total_value else float("nan")
         gross_mv = float(sum(abs(s.market_value) for s in snapshots))
         inner_w = [abs(s.market_value) / gross_mv for s in snapshots] if gross_mv else []
         # 组合日变动 = Σ shares·(last−prev) / |Σ shares·prev|（**前收市值**加权。
         # 旧实现用当日市值加权：+5%/−5% 等权组合会报 +0.25% 的系统性正偏、
-        # 净空头账本符号还会翻转——审查 3/3 票确认后重写）。分母含空头取 abs
+        # 净空头账本符号还会翻转——审计确认后重写）。分母含空头取 abs
         # 保证「亏=负」；净暴露≈0 时数学未定义 → NaN。
         day_change = (
             delta_value_total / abs(prev_value_total)

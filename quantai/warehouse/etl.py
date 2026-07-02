@@ -1,4 +1,4 @@
-"""pandas ETL：把项目数据（价格 / 日历 / 持仓 / 成交 / 信号 / 回测）装载进 `raw` 层。
+﻿"""pandas ETL：把项目数据（价格 / 日历 / 持仓 / 成交 / 信号 / 回测）装载进 `raw` 层。
 
 分工（ELT，非 ETL 的 T 在这里）：
 - **这里只做 Extract + Load**：接收 DataFrame/领域对象 → 原样写 `raw.*`（附 `loaded_at`
@@ -18,13 +18,17 @@ from typing import Iterable, Mapping
 import pandas as pd
 from duckdb import DuckDBPyConnection
 
+from quantai.backtest.engine import BacktestResult
+from quantai.data.calendar import TradingCalendar
+from quantai.portfolio.loader import Portfolio
+
 
 @contextmanager
 def _tx(con: DuckDBPyConnection):
     """显式事务：delete-then-insert 必须原子。
 
     DuckDB Python 连接默认逐语句 autocommit——DELETE 先落盘、INSERT 再失败会
-    **永久毁掉上一批数据**（审查 3/3 票实测确认：坏 volume 值重载 → 旧批次清零）。
+    **永久毁掉上一批数据**（审计实测确认：坏 volume 值重载 → 旧批次清零）。
     包上 BEGIN/COMMIT，失败 ROLLBACK 保旧批。
     """
     con.execute("BEGIN")
@@ -35,9 +39,6 @@ def _tx(con: DuckDBPyConnection):
         con.execute("ROLLBACK")
         raise
 
-from quantai.backtest.engine import BacktestResult
-from quantai.data.calendar import TradingCalendar
-from quantai.portfolio.loader import Portfolio
 
 _AUDIT = "loaded_at TIMESTAMP DEFAULT current_timestamp"
 

@@ -1,4 +1,4 @@
--- dim_symbol：标的维度（自然键 = symbol）。
+﻿-- dim_symbol：标的维度（自然键 = symbol）。
 -- 成员 = 出现在任何 fact 源里的标的并集；价格覆盖范围与「当前是否持有」为属性。
 with universe as (
     select distinct symbol from {{ ref('stg_prices') }}
@@ -24,7 +24,7 @@ latest_positions as (
     -- 最新快照日仍有净持仓的标的。
     -- 「最新快照」锚定 stg_portfolio_cash（**每次**快照都写、as_of 唯一有测试）——
     -- 若锚定 stg_positions，全现金快照（清仓）写不进 positions 表，max(as_of)
-    -- 会退回上一个快照，把早已卖光的标的标成 is_currently_held（审查实锤修复）。
+    -- 会退回上一个快照，把早已卖光的标的标成 is_currently_held（审计实锤修复）。
     select p.symbol
     from {{ ref('stg_positions') }} p
     where p.as_of = (select max(as_of) from {{ ref('stg_portfolio_cash') }})
