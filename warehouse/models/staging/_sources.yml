@@ -12,8 +12,9 @@ sources:
             tests: [not_null]
           - name: date
             tests: [not_null]
-          - name: close
-            tests: [not_null]
+          # close 不在 raw 层断言 not_null：raw 原样保留源数据（yfinance 偶发
+          # NaN 行是常态），清洗职责在 staging 的 where 过滤——在源头断言会让
+          # 一行脏数据 fail 整个 build，staging 的清洗永远轮不到执行。
       - name: trading_days
         columns:
           - name: date

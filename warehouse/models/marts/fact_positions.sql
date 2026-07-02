@@ -40,7 +40,10 @@ select
     shares * last_close                                as market_value,
     shares * (last_close - avg_cost)                   as unrealized_pnl,
     case
-        when avg_cost > 0 and shares <> 0
+        -- 守卫与 pandas 完全一致（cost_value <> 0；分母 abs 已处理负成本符号）。
+        -- 旧守卫 avg_cost > 0 会把混合多空 lot 聚出的负 avg_cost 判成 NULL，
+        -- 与 PortfolioAnalyzer 分叉（对账测试现已覆盖 pct）。
+        when shares <> 0 and avg_cost <> 0
         then (shares * (last_close - avg_cost)) / abs(shares * avg_cost)
     end                                                as unrealized_pnl_pct
 from priced

@@ -96,8 +96,9 @@ def _export(db_path: Path) -> None:
     try:
         for t in _MARTS:
             out = _EXPORT_DIR / f"{t}.csv"
+            path_sql = out.as_posix().replace("'", "''")  # 路径含单引号时转义（SQL 字面量）
             con.execute(
-                f"COPY (SELECT * FROM marts.{t}) TO '{out.as_posix()}' (HEADER, DELIMITER ',')"
+                f"COPY (SELECT * FROM marts.{t}) TO '{path_sql}' (HEADER, DELIMITER ',')"
             )
             n = con.execute(f"SELECT count(*) FROM marts.{t}").fetchone()[0]
             print(f"[export] {out.name:<28} {n:>8} rows")
@@ -107,11 +108,16 @@ def _export(db_path: Path) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from quantai.config import load_config
+
+    # 默认值统一从 PortfolioConfig 取（与 scripts/analyze.py 同源）——否则用户在
+    # config/env 覆盖 portfolio.file/benchmark 后，两个 CLI 会静默分析不同的组合。
+    cfg = load_config().portfolio
     p = argparse.ArgumentParser(description="QuantAI warehouse orchestrator")
     p.add_argument("--db", default=str(_DEFAULT_DB), help="DuckDB 文件路径")
-    p.add_argument("--portfolio", default="portfolio.local.yaml", help="持仓文件")
-    p.add_argument("--benchmark", default="SPY")
-    p.add_argument("--years", type=int, default=2)
+    p.add_argument("--portfolio", default=cfg.file, help=f"持仓文件（默认 {cfg.file}）")
+    p.add_argument("--benchmark", default=cfg.benchmark)
+    p.add_argument("--years", type=int, default=cfg.history_years)
     p.add_argument("--load", action="store_true", help="pandas ETL 装载 raw 层")
     p.add_argument("--dbt", action="store_true", help="跑 dbt build（staging+marts+tests）")
     p.add_argument("--export", action="store_true", help="导出 marts -> tableau/exports/*.csv")

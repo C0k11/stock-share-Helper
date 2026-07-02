@@ -52,10 +52,25 @@ def main(argv: list[str] | None = None) -> int:
 
     snap = PortfolioAnalyzer(prices, bench, benchmark=args.benchmark).analyze(portfolio)
     if args.json:
-        print(json.dumps(snap.as_dict(), ensure_ascii=False, indent=2, default=str))
+        # NaN -> null：json.dumps 默认吐裸 NaN token，是非法 JSON（RFC 8259），
+        # JSON.parse/jq 直接炸——而 NaN 恰恰是本快照的常规字段值（无下行样本的
+        # Sortino、单根 K 线的 day_change 等）。allow_nan=False 兜底防回归。
+        print(json.dumps(_nan_to_none(snap.as_dict()), ensure_ascii=False, indent=2,
+                         default=str, allow_nan=False))
     else:
         print(format_snapshot_text(snap))
     return 0
+
+
+def _nan_to_none(obj):
+    """递归把 float NaN/Inf 替换成 None（JSON null）。"""
+    if isinstance(obj, float):
+        return obj if obj == obj and abs(obj) != float("inf") else None
+    if isinstance(obj, dict):
+        return {k: _nan_to_none(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_nan_to_none(v) for v in obj]
+    return obj
 
 
 if __name__ == "__main__":

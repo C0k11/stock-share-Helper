@@ -9,8 +9,9 @@
   - 组合风险统计（波动/Sharpe/Sortino/回撤/beta）基于**当前持仓固定不变**的
     合成历史（industry 标准的 holdings-based analysis），字段名带 `current_holdings_`
     前缀明示假设；它不是你的真实历史 PnL 曲线。
-- 缺价的标的**不静默丢弃**：列入 `missing_prices`，其市值按 NaN 处理并从
-  组合统计中剔除（报告顶部可见）。
+- 缺价的标的**不静默丢弃**：列入 `missing_prices` 并从持仓与统计中**整体剔除**
+  （不产生持仓行、不进任何总计；报告顶部醒目列出）。close 列存在但**全 NaN**
+  同样按缺价处理（yfinance 退市/坏抓取的常见形状，审查确认后收紧）。
 """
 
 from __future__ import annotations
@@ -133,28 +134,56 @@ class PortfolioAnalyzer:
         self.benchmark = benchmark
 
     # ------------------------------------------------------------------ #
+    @staticmethod
+    def _clean_frame(df: pd.DataFrame) -> pd.DataFrame:
+        """入口卫生：tz-aware 索引剥 tz（yfinance 默认带 America/New_York，与合成
+        tz-naive 数据混用会让 pandas align 直接 TypeError）；重复日期保留最后一条
+        （yfinance 已知毛刺：盘中条+结算条同日重复）。"""
+        out = df
+        if getattr(out.index, "tz", None) is not None:
+            out = out.tz_localize(None)
+        if out.index.has_duplicates:
+            out = out[~out.index.duplicated(keep="last")]
+        return out
+
     def analyze(self, portfolio: Portfolio) -> PortfolioSnapshot:
         lots = _aggregate_lots(portfolio)
-        bench_close = (
-            self.benchmark_prices["close"]
-            if len(self.benchmark_prices)
-            else pd.Series(dtype=float)
-        )
+        bench_df = self.benchmark_prices
+        if len(bench_df) and "close" in bench_df.columns:
+            bench_close = self._clean_frame(bench_df)["close"].astype(float)
+        else:
+            # 缺 close 列与空 df 同等对待：无基准（beta 全 NaN），不 KeyError 崩掉
+            bench_close = pd.Series(dtype=float)
         bench_returns = returns_from_prices(bench_close) if len(bench_close) else pd.Series(dtype=float)
 
         snapshots: list[PositionSnapshot] = []
         missing: list[str] = []
         value_series: dict[str, pd.Series] = {}  # symbol -> shares×close 历史
+        prev_value_total = 0.0  # Σ shares×前收（组合日变动的正确分母）
+        delta_value_total = 0.0  # Σ shares×(last−prev)
+        day_change_ok = True
 
         for sym, shares, avg_cost, open_date in lots:
             df = self.prices.get(sym)
             if df is None or len(df) == 0 or "close" not in df.columns:
                 missing.append(sym)
                 continue
+            df = self._clean_frame(df)
             close = df["close"].astype(float)
+            valid_close = close.dropna()
+            if valid_close.empty:
+                # close 列全 NaN（退市/坏抓取的常见形状）：等同缺价，进 missing，
+                # 绝不让 NaN 毒化总计（诚实契约，有测试）。
+                missing.append(sym)
+                continue
             high = df["high"].astype(float) if "high" in df.columns else close
-            last = float(close.iloc[-1])
-            prev = float(close.iloc[-2]) if len(close) >= 2 else float("nan")
+            last = float(valid_close.iloc[-1])
+            prev = float(valid_close.iloc[-2]) if len(valid_close) >= 2 else float("nan")
+            if prev == prev:
+                prev_value_total += shares * prev
+                delta_value_total += shares * (last - prev)
+            else:
+                day_change_ok = False
             mv = shares * last
             cost_value = shares * avg_cost
             pnl = mv - cost_value
@@ -188,22 +217,31 @@ class PortfolioAnalyzer:
         total_cost = float(sum(s.cost_value for s in snapshots))
         total_pnl = total_mv - total_cost
 
-        # 权重回填 + 集中度（权重分母 = 总值含现金；集中度用持仓内权重）
+        # 权重回填（分母 = 总值含现金，带符号=暴露方向）；
+        # 集中度改用 **gross** 口径（|mv|/Σ|mv|）——净分母在含空头时权重会 >1、
+        # HHI 无界、近似美元中性组合直接爆表（审查确认后修正）。
         for s in snapshots:
             s.weight = s.market_value / total_value if total_value else float("nan")
-        inner_w = [s.market_value / total_mv for s in snapshots] if total_mv else []
+        gross_mv = float(sum(abs(s.market_value) for s in snapshots))
+        inner_w = [abs(s.market_value) / gross_mv for s in snapshots] if gross_mv else []
+        # 组合日变动 = Σ shares·(last−prev) / |Σ shares·prev|（**前收市值**加权。
+        # 旧实现用当日市值加权：+5%/−5% 等权组合会报 +0.25% 的系统性正偏、
+        # 净空头账本符号还会翻转——审查 3/3 票确认后重写）。分母含空头取 abs
+        # 保证「亏=负」；净暴露≈0 时数学未定义 → NaN。
         day_change = (
-            float(sum(s.day_change_pct * s.market_value for s in snapshots) / total_mv)
-            if total_mv and all(s.day_change_pct == s.day_change_pct for s in snapshots)
+            delta_value_total / abs(prev_value_total)
+            if day_change_ok and snapshots and abs(prev_value_total) > 1e-12
             else float("nan")
         )
 
-        # 当前持仓固定的合成历史（holdings-based；交易日索引取各标的交集）
+        # 当前持仓固定的合成历史（holdings-based；交易日索引取各标的交集）。
+        # 合成净值 <= 0（深度净空头 + 低现金）时 pct_change 收益无意义
+        # （符号翻转、Sharpe 垃圾值）→ 统计全 NaN（诚实拒算）。
         vol = sharpe = sortino = mdd = float("nan")
         if value_series:
             values = pd.concat(value_series.values(), axis=1, join="inner").sum(axis=1)
             values = values + portfolio.cash
-            if len(values) >= 3:
+            if len(values) >= 3 and bool((values > 0).all()):
                 rets = returns_from_prices(values)
                 vol = float(rets.std() * np.sqrt(252))
                 sharpe = float(sharpe_ratio(rets))
@@ -268,11 +306,16 @@ def format_snapshot_text(snap: PortfolioSnapshot) -> str:
     )
     lines.append(header)
     lines.append("-" * len(header))
+    def cell(x: float, width: int, spec: str = ",.2f") -> str:
+        # NaN 统一渲染 n/a（与 pct()/num() 同一约定；旧实现直接打 'nan'）
+        return f"{x:>{width}{spec}}" if x == x else f"{'n/a':>{width}}"
+
     for s in sorted(snap.positions, key=lambda x: -abs(x.market_value)):
         lines.append(
-            f"{s.symbol:<6}{s.shares:>9.2f}{s.avg_cost:>10.2f}{s.last_price:>10.2f}"
-            f"{s.market_value:>12,.2f}{s.unrealized_pnl:>12,.2f}{pct(s.unrealized_pnl_pct):>9}"
-            f"{s.weight * 100 if s.weight == s.weight else float('nan'):>7.1f}"
-            f"{s.rsi_14:>6.1f}{'UP' if s.in_uptrend else '--':>7}{'Y' if s.is_pullback else '':>4}"
+            f"{s.symbol:<6}{cell(s.shares, 9, '.2f')}{cell(s.avg_cost, 10, '.2f')}"
+            f"{cell(s.last_price, 10, '.2f')}{cell(s.market_value, 12)}"
+            f"{cell(s.unrealized_pnl, 12)}{pct(s.unrealized_pnl_pct):>9}"
+            f"{cell(s.weight * 100 if s.weight == s.weight else float('nan'), 7, '.1f')}"
+            f"{cell(s.rsi_14, 6, '.1f')}{'UP' if s.in_uptrend else '--':>7}{'Y' if s.is_pullback else '':>4}"
         )
     return "\n".join(lines)

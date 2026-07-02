@@ -118,13 +118,22 @@ class TestSqlVsPandasReconciliation:
         con, prices, portfolio = warehouse["con"], warehouse["prices"], warehouse["portfolio"]
         bench = _make_prices(9)
         snap = PortfolioAnalyzer(prices, bench).analyze(portfolio)
-        pandas_pnl = {s.symbol: s.unrealized_pnl for s in snap.positions}
-        sql_pnl = dict(
-            con.execute("SELECT symbol, unrealized_pnl FROM marts.fact_positions").fetchall()
-        )
-        assert set(sql_pnl) == set(pandas_pnl)
-        for sym in pandas_pnl:
-            assert sql_pnl[sym] == pytest.approx(pandas_pnl[sym], abs=1e-6), sym
+        pandas_pnl = {s.symbol: (s.unrealized_pnl, s.unrealized_pnl_pct) for s in snap.positions}
+        sql_rows = {
+            r[0]: (r[1], r[2])
+            for r in con.execute(
+                "SELECT symbol, unrealized_pnl, unrealized_pnl_pct FROM marts.fact_positions"
+            ).fetchall()
+        }
+        assert set(sql_rows) == set(pandas_pnl)
+        for sym, (pnl, pct) in pandas_pnl.items():
+            assert sql_rows[sym][0] == pytest.approx(pnl, abs=1e-6), sym
+            # pct 也纳入对账（曾因 SQL 守卫 avg_cost>0 与 pandas 分叉而漏检）
+            sql_pct = sql_rows[sym][1]
+            if pct == pct:
+                assert sql_pct == pytest.approx(pct, abs=1e-9), sym
+            else:
+                assert sql_pct is None, sym
 
     def test_daily_return_matches_pct_change(self, warehouse):
         con, prices = warehouse["con"], warehouse["prices"]

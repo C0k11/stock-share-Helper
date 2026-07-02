@@ -12,7 +12,8 @@ positions:
     cost_basis: 450.50  # 每股成本
     open_date: 2025-11-03
 ```
-CSV 等价列：`symbol,shares,cost_basis,open_date`（无 cash 行，现金用 YAML 或 --cash）。
+CSV 等价列：`symbol,shares,cost_basis,open_date`（CSV 无现金概念，加载后 cash=0；
+要录现金请用 YAML 格式）。
 
 同一 symbol 允许多条（分批建仓的 lot），分析层聚合为加权平均成本。
 """
@@ -95,10 +96,12 @@ def load_portfolio(path: str | Path) -> Portfolio:
         return Portfolio(**raw)
     if suffix == ".csv":
         with p.open(newline="", encoding="utf-8-sig") as f:
+            # 值侧 (v or "")：行尾字段缺失时 DictReader 填 None，裸 .strip() 会
+            # AttributeError；归一成空串让 pydantic 报干净的 ValidationError。
             rows = [
-                {k.strip(): v.strip() for k, v in row.items() if k is not None}
+                {k.strip(): (v or "").strip() for k, v in row.items() if k is not None}
                 for row in csv.DictReader(f)
-                if any((v or "").strip() for v in row.values())
+                if any((v or "").strip() for v in row.values() if not isinstance(v, list))
             ]
         return Portfolio(positions=[Position(**row) for row in rows])
     raise ValueError(f"不支持的持仓文件格式 {suffix!r}（支持 .yaml/.yml/.csv）")

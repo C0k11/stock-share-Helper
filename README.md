@@ -83,8 +83,9 @@ tableau/         DASHBOARD_SPEC.md — connection guide + 5 dashboard view specs
   daily returns, 52-week-high distance), `fact_positions` (lot aggregation +
   ASOF-join valuation), `fact_trades`, `fact_signals`, `fact_backtest_results`,
   `fact_backtest_equity` (SQL drawdown).
-- **dbt tests**: 58 assertions (not-null/enums/relationships/grain uniqueness/
-  OHLC sanity/PnL consistency/drawdown ≤ 0) — all passing on real market data.
+- **dbt tests**: 68 assertions (not-null/enums/relationships/grain uniqueness on
+  every fact/OHLC sanity/PnL consistency/drawdown ≤ 0/warn on unpriceable
+  positions) — all passing on real market data.
 - **Reconciliation**: pytest runs a real `dbt build` and asserts SQL and pandas
   compute identical numbers (PnL to 1e-6, returns/drawdown to 1e-12).
 - **Tableau**: connect via exported CSVs or DuckDB JDBC; build per

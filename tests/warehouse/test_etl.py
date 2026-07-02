@@ -58,6 +58,29 @@ class TestLoadPrices:
         ).df()["close"]
         assert np.allclose(got.to_numpy(), prices["close"].to_numpy())
 
+    def test_failed_insert_rolls_back_old_batch(self, con, prices):
+        """事务原子性：坏数据重载失败时，旧批次必须原样保留（旧实现 DELETE 先
+        autocommit，INSERT 再炸 -> 旧数据清零，审查 3/3 票实锤）。"""
+        load_prices(con, {"XXX": prices})
+        n_before = _count(con, "raw.prices")
+        bad = prices.copy()
+        bad["volume"] = 1e300  # BIGINT 溢出 -> INSERT ConversionException
+        with pytest.raises(Exception):
+            load_prices(con, {"XXX": bad})
+        assert _count(con, "raw.prices") == n_before  # 旧批次没丢
+
+    def test_missing_close_column_rejected(self, con):
+        df = pd.DataFrame({"open": [1.0, 2.0]}, index=pd.bdate_range("2024-01-01", periods=2))
+        with pytest.raises(ValueError, match="close"):
+            load_prices(con, {"X": df})
+
+    def test_duplicate_dates_deduped_keep_last(self, con):
+        df = pd.DataFrame({"close": [1.0, 2.0]}, index=pd.bdate_range("2024-01-01", periods=2))
+        dup = pd.concat([df, df.iloc[[-1]].assign(close=99.0)])
+        load_prices(con, {"X": dup})
+        got = con.execute("SELECT close FROM raw.prices ORDER BY date").df()["close"].tolist()
+        assert got == [1.0, 99.0]  # 同日保留最后一条
+
 
 class TestLoadTradingDays:
     def test_nyse_days(self, con):

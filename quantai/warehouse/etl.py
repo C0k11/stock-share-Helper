@@ -4,17 +4,36 @@
 - **这里只做 Extract + Load**：接收 DataFrame/领域对象 → 原样写 `raw.*`（附 `loaded_at`
   审计列），**不做业务变换**——清洗/改名/建模全部在 dbt SQL（staging → marts），
   变换逻辑因此可被 dbt test 断言、可被 SQL 阅读者审计。
-- **幂等**：每个 loader 都是「先删本批次键，再插入」（delete-then-insert by batch key），
-  重跑不产生重复行（测试断言）。
+- **幂等 + 原子**：每个 loader 都是「先删本批次键，再插入」（delete-then-insert by
+  batch key），且整段包在显式事务里（`_tx`）——重跑不产生重复行，**中途失败回滚、
+  旧批次不丢**（两者都有测试断言）。
 - **可测**：全部函数吃注入的连接（`connect(":memory:")`）+ 合成数据，离线单测。
 """
 
 from __future__ import annotations
 
+from contextlib import contextmanager
 from typing import Iterable, Mapping
 
 import pandas as pd
 from duckdb import DuckDBPyConnection
+
+
+@contextmanager
+def _tx(con: DuckDBPyConnection):
+    """显式事务：delete-then-insert 必须原子。
+
+    DuckDB Python 连接默认逐语句 autocommit——DELETE 先落盘、INSERT 再失败会
+    **永久毁掉上一批数据**（审查 3/3 票实测确认：坏 volume 值重载 → 旧批次清零）。
+    包上 BEGIN/COMMIT，失败 ROLLBACK 保旧批。
+    """
+    con.execute("BEGIN")
+    try:
+        yield
+        con.execute("COMMIT")
+    except BaseException:
+        con.execute("ROLLBACK")
+        raise
 
 from quantai.backtest.engine import BacktestResult
 from quantai.data.calendar import TradingCalendar
@@ -108,19 +127,24 @@ def load_prices(con: DuckDBPyConnection, prices: Mapping[str, pd.DataFrame]) -> 
     for symbol, df in prices.items():
         if df is None or len(df) == 0:
             continue
-        frame = pd.DataFrame(index=df.index)
+        if "close" not in df.columns:
+            # docstring 承诺"需含 close"就 fail-fast，不静默灌 NULL 让 dbt 晚炸。
+            raise ValueError(f"{symbol}: 价格 DataFrame 缺 close 列，拒绝装载")
+        src = df[~df.index.duplicated(keep="last")] if df.index.has_duplicates else df
+        frame = pd.DataFrame(index=src.index)
         for col in ("open", "high", "low", "close", "volume"):
-            frame[col] = df[col] if col in df.columns else None
+            frame[col] = src[col] if col in src.columns else None
         frame = frame.reset_index(names="date")
         frame.insert(0, "symbol", str(symbol).upper())
         frame["date"] = pd.to_datetime(frame["date"]).dt.tz_localize(None).dt.date
-        con.execute("DELETE FROM raw.prices WHERE symbol = ?", [str(symbol).upper()])
-        con.register("_stg_prices", frame)
-        con.execute(
-            """INSERT INTO raw.prices (symbol, date, open, high, low, close, volume)
-               SELECT symbol, date, open, high, low, close, volume FROM _stg_prices"""
-        )
-        con.unregister("_stg_prices")
+        with _tx(con):
+            con.execute("DELETE FROM raw.prices WHERE symbol = ?", [str(symbol).upper()])
+            con.register("_stg_prices", frame)
+            con.execute(
+                """INSERT INTO raw.prices (symbol, date, open, high, low, close, volume)
+                   SELECT symbol, date, open, high, low, close, volume FROM _stg_prices"""
+            )
+            con.unregister("_stg_prices")
         total += len(frame)
     return total
 
@@ -148,12 +172,13 @@ def load_trading_days(con: DuckDBPyConnection, start: str, end: str) -> int:
     frame = pd.DataFrame(
         {"date": list(days), "is_early_close": [d in early for d in days]}
     )
-    con.execute("DELETE FROM raw.trading_days")
-    con.register("_stg_days", frame)
-    con.execute(
-        "INSERT INTO raw.trading_days (date, is_early_close) SELECT date, is_early_close FROM _stg_days"
-    )
-    con.unregister("_stg_days")
+    with _tx(con):
+        con.execute("DELETE FROM raw.trading_days")
+        con.register("_stg_days", frame)
+        con.execute(
+            "INSERT INTO raw.trading_days (date, is_early_close) SELECT date, is_early_close FROM _stg_days"
+        )
+        con.unregister("_stg_days")
     return len(frame)
 
 
@@ -186,16 +211,17 @@ def load_positions(
             {_AUDIT}
         )""",
     )
-    con.execute("DELETE FROM raw.positions WHERE as_of = ?", [as_of])
-    con.execute("DELETE FROM raw.portfolio_cash WHERE as_of = ?", [as_of])
-    for p in portfolio.positions:
+    with _tx(con):
+        con.execute("DELETE FROM raw.positions WHERE as_of = ?", [as_of])
+        con.execute("DELETE FROM raw.portfolio_cash WHERE as_of = ?", [as_of])
+        for p in portfolio.positions:
+            con.execute(
+                "INSERT INTO raw.positions (as_of, symbol, shares, cost_basis, open_date) VALUES (?,?,?,?,?)",
+                [as_of, p.symbol, p.shares, p.cost_basis, str(p.open_date)],
+            )
         con.execute(
-            "INSERT INTO raw.positions (as_of, symbol, shares, cost_basis, open_date) VALUES (?,?,?,?,?)",
-            [as_of, p.symbol, p.shares, p.cost_basis, str(p.open_date)],
+            "INSERT INTO raw.portfolio_cash (as_of, cash) VALUES (?,?)", [as_of, portfolio.cash]
         )
-    con.execute(
-        "INSERT INTO raw.portfolio_cash (as_of, cash) VALUES (?,?)", [as_of, portfolio.cash]
-    )
     return len(portfolio.positions)
 
 
@@ -222,22 +248,23 @@ def load_trades(
             {_AUDIT}
         )""",
     )
-    con.execute("DELETE FROM raw.trades WHERE run_id = ?", [run_id])
     n = 0
-    for i, t in enumerate(trades):
-        con.execute(
-            "INSERT INTO raw.trades (run_id, seq, symbol, action, price, shares, trace_id) VALUES (?,?,?,?,?,?,?)",
-            [
-                run_id,
-                i,
-                str(t.get("ticker", "")).upper(),
-                str(t.get("action", "")),
-                t.get("price"),
-                t.get("shares"),
-                t.get("trace_id"),
-            ],
-        )
-        n += 1
+    with _tx(con):
+        con.execute("DELETE FROM raw.trades WHERE run_id = ?", [run_id])
+        for i, t in enumerate(trades):
+            con.execute(
+                "INSERT INTO raw.trades (run_id, seq, symbol, action, price, shares, trace_id) VALUES (?,?,?,?,?,?,?)",
+                [
+                    run_id,
+                    i,
+                    str(t.get("ticker", "")).upper(),
+                    str(t.get("action", "")),
+                    t.get("price"),
+                    t.get("shares"),
+                    t.get("trace_id"),
+                ],
+            )
+            n += 1
     return n
 
 
@@ -266,17 +293,18 @@ def load_signals(
     frame = frame.reset_index(names="date")
     frame["date"] = pd.to_datetime(frame["date"]).dt.tz_localize(None).dt.date
     frame.insert(0, "symbol", str(symbol).upper())
-    con.execute("DELETE FROM raw.signals WHERE symbol = ?", [str(symbol).upper()])
-    con.register("_stg_signals", frame)
-    con.execute(
-        """INSERT INTO raw.signals
-           (symbol, date, trend_signal, momentum_signal, ma_cross_signal,
-            breakout_signal, composite_signal, signal_strength)
-           SELECT symbol, date, trend_signal, momentum_signal, ma_cross_signal,
-                  breakout_signal, composite_signal, signal_strength
-           FROM _stg_signals"""
-    )
-    con.unregister("_stg_signals")
+    with _tx(con):
+        con.execute("DELETE FROM raw.signals WHERE symbol = ?", [str(symbol).upper()])
+        con.register("_stg_signals", frame)
+        con.execute(
+            """INSERT INTO raw.signals
+               (symbol, date, trend_signal, momentum_signal, ma_cross_signal,
+                breakout_signal, composite_signal, signal_strength)
+               SELECT symbol, date, trend_signal, momentum_signal, ma_cross_signal,
+                      breakout_signal, composite_signal, signal_strength
+               FROM _stg_signals"""
+        )
+        con.unregister("_stg_signals")
     return len(frame)
 
 
@@ -316,20 +344,6 @@ def load_backtest(
         )""",
     )
     m = result.metrics
-    con.execute("DELETE FROM raw.backtest_runs WHERE run_id = ?", [run_id])
-    con.execute("DELETE FROM raw.backtest_equity WHERE run_id = ?", [run_id])
-    con.execute(
-        """INSERT INTO raw.backtest_runs
-           (run_id, strategy, symbol, fill_timing, total_return, cagr, annual_volatility,
-            sharpe, max_drawdown, win_rate, total_turnover, start_date, end_date, trading_days)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
-        [
-            run_id, strategy, str(symbol).upper(), result.fill_timing,
-            m.total_return, m.cagr, m.annual_volatility, m.sharpe,
-            m.max_drawdown, m.win_rate, result.total_turnover,
-            m.start, m.end, m.trading_days,
-        ],
-    )
     eq = result.equity
     rets = result.returns.reindex(eq.index)
     frame = pd.DataFrame(
@@ -340,10 +354,25 @@ def load_backtest(
         }
     )
     frame.insert(0, "run_id", run_id)
-    con.register("_stg_bt", frame)
-    con.execute(
-        "INSERT INTO raw.backtest_equity (run_id, date, equity, daily_return) "
-        "SELECT run_id, date, equity, daily_return FROM _stg_bt"
-    )
-    con.unregister("_stg_bt")
+    with _tx(con):
+        con.execute("DELETE FROM raw.backtest_runs WHERE run_id = ?", [run_id])
+        con.execute("DELETE FROM raw.backtest_equity WHERE run_id = ?", [run_id])
+        con.execute(
+            """INSERT INTO raw.backtest_runs
+               (run_id, strategy, symbol, fill_timing, total_return, cagr, annual_volatility,
+                sharpe, max_drawdown, win_rate, total_turnover, start_date, end_date, trading_days)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            [
+                run_id, strategy, str(symbol).upper(), result.fill_timing,
+                m.total_return, m.cagr, m.annual_volatility, m.sharpe,
+                m.max_drawdown, m.win_rate, result.total_turnover,
+                m.start, m.end, m.trading_days,
+            ],
+        )
+        con.register("_stg_bt", frame)
+        con.execute(
+            "INSERT INTO raw.backtest_equity (run_id, date, equity, daily_return) "
+            "SELECT run_id, date, equity, daily_return FROM _stg_bt"
+        )
+        con.unregister("_stg_bt")
     return 1 + len(frame)

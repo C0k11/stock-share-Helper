@@ -9,10 +9,16 @@ select
     p.close,
     p.volume,
     p.close / lag(p.close) over w - 1                            as daily_return,
-    p.close / max(p.high) over (
-        partition by p.symbol
-        order by p.date
-        rows between 251 preceding and current row
-    ) - 1                                                        as pct_from_52w_high
+    -- 不足 252 根时窗口只是"上市以来高点"，冒充 52 周高点会误导 -> 诚实置 NULL。
+    case
+        when count(*) over (
+            partition by p.symbol order by p.date
+            rows between 251 preceding and current row
+        ) >= 252
+        then p.close / max(p.high) over (
+            partition by p.symbol order by p.date
+            rows between 251 preceding and current row
+        ) - 1
+    end                                                          as pct_from_52w_high
 from {{ ref('stg_prices') }} p
 window w as (partition by p.symbol order by p.date)

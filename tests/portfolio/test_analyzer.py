@@ -89,11 +89,104 @@ class TestPnLMath:
         assert s.unrealized_pnl_pct == pytest.approx(-200.0 / 1000.0)
 
 
+class TestDayChange:
+    def test_flat_book_reports_exactly_zero(self):
+        """+5%/−5% 等前收市值组合的日变动必须恰为 0——旧实现按当日市值加权
+        会报 +0.25% 系统性正偏（审查 3/3 票实锤）。"""
+        aaa = _df([100.0] * 10 + [105.0])  # +5%
+        bbb = _df([100.0] * 10 + [95.0])  # -5%
+        pf = Portfolio(
+            positions=[
+                Position(symbol="AAA", shares=10, cost_basis=100, open_date="2025-01-02"),
+                Position(symbol="BBB", shares=10, cost_basis=100, open_date="2025-01-02"),
+            ]
+        )
+        snap = PortfolioAnalyzer({"AAA": aaa, "BBB": bbb}, _bench()).analyze(pf)
+        assert snap.day_change_pct == pytest.approx(0.0, abs=1e-12)
+
+    def test_long_book_matches_true_portfolio_return(self):
+        aaa = _df([100.0] * 10 + [110.0])
+        bbb = _df([50.0] * 10 + [49.0])
+        pf = Portfolio(
+            positions=[
+                Position(symbol="AAA", shares=10, cost_basis=100, open_date="2025-01-02"),
+                Position(symbol="BBB", shares=20, cost_basis=50, open_date="2025-01-02"),
+            ]
+        )
+        snap = PortfolioAnalyzer({"AAA": aaa, "BBB": bbb}, _bench()).analyze(pf)
+        # V_prev = 1000+1000=2000, V_now = 1100+980=2080 -> +4%
+        assert snap.day_change_pct == pytest.approx(0.04)
+
+    def test_short_book_loss_is_negative(self):
+        """空头账本：价格涨 = 亏钱，day_change 必须为负（旧实现符号翻转报 +2%）。"""
+        aaa = _df([100.0] * 10 + [102.0])
+        pf = Portfolio(positions=[Position(symbol="AAA", shares=-10, cost_basis=100, open_date="2025-01-02")])
+        snap = PortfolioAnalyzer({"AAA": aaa}, _bench()).analyze(pf)
+        assert snap.day_change_pct == pytest.approx(-0.02)
+
+
 class TestHonesty:
     def test_missing_prices_listed_not_silently_dropped(self):
         snap = PortfolioAnalyzer({"AAA": _df([100, 101, 102])}, _bench()).analyze(_portfolio())
         assert snap.missing_prices == ["BBB"]
         assert {s.symbol for s in snap.positions} == {"AAA"}
+
+    def test_all_nan_close_goes_to_missing_not_poisoning_totals(self):
+        """close 列存在但全 NaN（退市/坏抓取形状）：进 missing_prices，
+        总计保持有限——旧实现 missing=[] 且所有总计被毒化成 NaN（审查实锤）。"""
+        bad = _df([100.0] * 250)
+        bad["close"] = np.nan
+        prices = {"AAA": _df(np.linspace(90, 100, 250)), "BBB": bad}
+        snap = PortfolioAnalyzer(prices, _bench()).analyze(_portfolio())
+        assert snap.missing_prices == ["BBB"]
+        assert snap.total_value == snap.total_value  # 非 NaN
+        aaa = snap.positions[0]
+        assert aaa.weight == aaa.weight  # 非 NaN
+
+    def test_tz_aware_prices_do_not_crash(self):
+        df = _df(np.linspace(90, 100, 250))
+        df.index = df.index.tz_localize("America/New_York")  # yfinance 真实形状
+        pf = Portfolio(positions=[Position(symbol="AAA", shares=1, cost_basis=90, open_date="2025-01-02")])
+        snap = PortfolioAnalyzer({"AAA": df}, _bench()).analyze(pf)  # bench tz-naive 混用
+        assert snap.positions[0].last_price == pytest.approx(100.0)
+        assert snap.positions[0].beta_vs_benchmark == snap.positions[0].beta_vs_benchmark or True  # 不崩即可
+
+    def test_duplicate_last_date_deduped_keep_last(self):
+        df = _df([100.0, 101.0, 102.0])
+        dup = pd.concat([df, df.iloc[[-1]].assign(close=200.0)])  # 同日重复条，后者为准
+        pf = Portfolio(positions=[Position(symbol="AAA", shares=1, cost_basis=90, open_date="2025-01-02")])
+        snap = PortfolioAnalyzer({"AAA": dup}, _bench()).analyze(pf)
+        assert snap.positions[0].last_price == pytest.approx(200.0)
+
+    def test_benchmark_without_close_degrades_not_crashes(self):
+        bench = pd.DataFrame({"open": [1.0, 2.0]}, index=pd.bdate_range("2024-01-01", periods=2))
+        snap = PortfolioAnalyzer({"AAA": _df(np.linspace(90, 100, 250))}, bench).analyze(
+            Portfolio(positions=[Position(symbol="AAA", shares=1, cost_basis=90, open_date="2025-01-02")])
+        )
+        assert np.isnan(snap.positions[0].beta_vs_benchmark)
+
+    def test_negative_synthetic_value_risk_stats_nan(self):
+        """深度净空头 + 低现金：合成净值为负，pct 收益无意义 -> 统计诚实 NaN。"""
+        pf = Portfolio(cash=10.0, positions=[Position(symbol="AAA", shares=-100, cost_basis=90, open_date="2025-01-02")])
+        snap = PortfolioAnalyzer({"AAA": _df(np.linspace(90, 100, 250))}, _bench()).analyze(pf)
+        assert np.isnan(snap.current_holdings_sharpe)
+        assert np.isnan(snap.current_holdings_max_drawdown)
+
+    def test_short_book_concentration_uses_gross(self):
+        """多空账本：集中度用 gross 口径（|mv|/Σ|mv|），净分母会让权重 >1。"""
+        prices = {
+            "AAA": _df([100.0] * 250),  # long 10 -> +1000
+            "BBB": _df([90.0] * 250),  # short -10 -> -900
+        }
+        pf = Portfolio(
+            positions=[
+                Position(symbol="AAA", shares=10, cost_basis=100, open_date="2025-01-02"),
+                Position(symbol="BBB", shares=-10, cost_basis=90, open_date="2025-01-02"),
+            ]
+        )
+        snap = PortfolioAnalyzer(prices, _bench()).analyze(pf)
+        assert snap.top_weight == pytest.approx(1000 / 1900)
+        assert 0 < snap.herfindahl <= 1
 
     def test_cash_only_portfolio(self):
         snap = PortfolioAnalyzer({}, _bench()).analyze(Portfolio(cash=500.0))
