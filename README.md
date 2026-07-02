@@ -48,32 +48,115 @@ python scripts/distill.py --dry-run --symbols SPY NVDA
 
 ## Architecture
 
+```mermaid
+flowchart TB
+    subgraph L0["Foundation"]
+        CFG["config/ — typed pydantic settings, extra=forbid"]
+        DAT["data/ — yfinance · parquet · NYSE calendar"]
+    end
+    subgraph L1["Pure computation — causal, no lookahead"]
+        FEA["features/ — causal model features"]
+        ANA["analysis/ — indicators + financial stats"]
+        SIG["signals/ — rule signal generator"]
+        RSK["risk/ — sizing · vol targeting · drawdown gate"]
+    end
+    subgraph L2["Simulation & execution"]
+        BTE["backtest/ — vectorized, fills at NEXT OPEN"]
+        EXE["execution/ — costs · rules · PaperBroker"]
+    end
+    subgraph L3["Decision & runtime"]
+        AGT["agents/ — LLM multi-agent brain"]
+        LLM["llm/ — prompts · local inference · QLoRA · DPO"]
+        LIV["live/ — event-driven paper trading"]
+    end
+    subgraph L4["Learning loop — all offline"]
+        DIS["distill/ — DeepSeek teacher data"]
+        EVO["evolution/ — trajectory recorder · DPO flywheel"]
+    end
+    subgraph L5["Products"]
+        POR["portfolio/ — real holdings PnL & risk"]
+        WHS["warehouse/ — DuckDB EL + dbt star schema"]
+        API["api/ — FastAPI, real endpoints only"]
+        UIX["ui/ — plotly builders + Streamlit"]
+    end
+    DAT --> FEA --> SIG --> RSK --> BTE
+    DAT --> ANA --> POR
+    RSK --> LIV
+    LIV --> EXE
+    LIV --> AGT
+    AGT --> LLM
+    DAT --> DIS
+    ANA --> DIS
+    DIS --> LLM
+    LIV --> EVO
+    EVO --> LLM
+    POR --> WHS
+    BTE --> WHS
+    LIV --> WHS
+    LIV --> API
+    EVO --> API
+    API --> UIX
 ```
-quantai/
-├── config/      typed pydantic config (extra=forbid), single source of defaults
-├── data/        yfinance prices, parquet storage, NYSE calendar (pandas_market_calendars)
-├── features/    causal model features (truncation-invariance tested)
-├── analysis/    indicator + stats engine: MACD/RSI/Bollinger/ATR/stochastic/pullback,
-│                vol, VaR/CVaR, drawdown, Sharpe/Sortino, beta — pure functions,
-│                cross-validated against `ta`, no-lookahead proofs
-├── signals/     rule signal generator
-├── risk/        position sizing, vol targeting, drawdown control, risk gate
-├── backtest/    vectorized engine — fills at NEXT OPEN (lookahead fixed & documented)
-├── execution/   costs, trading rules, PaperBroker (margin, liquidation, fills)
-├── agents/      LLM multi-agent brain (deterministic fallbacks, lazy GPU deps)
-├── llm/         prompts, local inference (4/8bit, MoE adapters), QLoRA, DPO
-├── live/        event-driven runtime: feeds → engine → strategy adapter → broker
-├── evolution/   data flywheel: trajectory recorder → preference pairs → offline DPO
-├── portfolio/   real-holdings loader + analyzer (PnL, exposure, honest risk labels)
-├── warehouse/   pandas EL into DuckDB `raw`, idempotent loaders
-├── distill/     DeepSeek teacher → SFT/DPO JSONL for the local student model
-└── ui/          plotly chart builders (pure) + Streamlit dashboard
 
-warehouse/       dbt project: raw → staging (views) → marts (star schema)
-tableau/         DASHBOARD_SPEC.md — connection guide + 5 dashboard view specs
+### Multi-agent decision chain
+
+```mermaid
+flowchart LR
+    IN["market snapshot"] --> PLN["Planner"]
+    PLN --> GTK["Gatekeeper — deterministic approval"]
+    GTK -->|approved| RTR["Router"]
+    GTK -->|rejected| HLD["hold, no trade"]
+    RTR --> EXP["Experts — trend / value / risk"]
+    EXP --> VLM["VLM Chartist — chart image read, env-gated"]
+    VLM --> MAC["Macro Governor — real VIX / TNX gate"]
+    MAC --> DEB["Debate & consensus"]
+    DEB --> DEC["decision → PaperBroker"]
+```
+
+Every LLM stage has a deterministic fallback, so the chain runs end-to-end
+offline (CPU-only, no keys) and stays testable.
+
+### Teacher-student distillation & evolution flywheel (offline by design)
+
+```mermaid
+flowchart LR
+    subgraph DISTILL["Distillation — cost-gated, --confirm-spend"]
+        MKT["real market data"] --> SCN["ScenarioBuilder — 4 task templates"]
+        SCN --> TCH["DeepSeek teacher — key from env only"]
+        TCH --> SFT["SFT JSONL"]
+        TCH --> DPD["DPO preference pairs"]
+    end
+    subgraph TRAIN["Student training — offline"]
+        SFT --> QLR["QLoRA fine-tune, local student model"]
+        DPD --> DPO["DPO training"]
+        QLR --> ADP["LoRA adapter"]
+        DPO --> ADP
+    end
+    subgraph FLYWHEEL["Evolution flywheel — offline"]
+        TRJ["paper-trading trajectories"] --> REC["evolution/ recorder"]
+        REC --> DSB["DPO dataset builder"]
+        DSB --> DPO
+        ADP --> HOT["hot-reload adapter into agents"]
+        HOT -.-> TRJ
+    end
+    BND["Honest boundary: NO online gradient updates —<br/>online_gradient_step raises NotImplementedError"]
+    style BND fill:#7f1d1d,color:#fff,stroke:#ef5350
 ```
 
 ## Data stack (DA/DE-grade, not a sticker)
+
+```mermaid
+flowchart LR
+    SRC["yfinance / live runtime / backtests"] --> PQ["parquet files — data/"]
+    PQ --> RAW["DuckDB raw — pandas EL, idempotent, audit cols"]
+    RAW --> STG["staging — dbt views, cleaning only"]
+    STG --> MRT["marts — dbt tables, Kimball star schema"]
+    MRT --> TST["dbt tests — 68 assertions, all green"]
+    MRT --> CSV["CSV exports — tableau/exports/"]
+    MRT --> JDBC["DuckDB JDBC"]
+    CSV --> TAB["Tableau dashboards — 5 views"]
+    JDBC --> TAB
+```
 
 - **DuckDB** local warehouse, three schemas: `raw` (pandas extract-load, audit
   columns, idempotent re-runs) → `staging` (dbt views, cleaning only) → `marts`
