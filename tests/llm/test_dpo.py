@@ -102,7 +102,7 @@ def test_from_config_maps_fields() -> None:
     runner = DPORunner.from_config(
         AppConfig().llm, sft_adapter="models/sft", output_dir="models/dpo_out"
     )
-    assert runner.model_name == "Qwen/Qwen2.5-7B-Instruct"
+    assert runner.model_name == "Qwen/Qwen3-8B"
     assert runner.sft_adapter == "models/sft"
     assert runner.cfg.beta == 0.1
     assert runner.cache_dir == "models/hf_cache"

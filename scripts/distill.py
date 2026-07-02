@@ -92,6 +92,7 @@ def main(argv: list[str] | None = None) -> int:
                 api_key_env=cfg.api_key_env,
                 temperature=cfg.temperature,
                 max_tokens=cfg.max_tokens,
+                thinking=cfg.thinking,
             )
         except MissingApiKeyError as exc:
             print(f"⛔ {exc}", file=sys.stderr)

@@ -61,7 +61,7 @@ risk:
   min_cash: 0.05
 
 llm:
-  model_name: "Qwen/Qwen2.5-7B-Instruct"
+  model_name: "Qwen/Qwen3-8B"
   cache_dir: "models/hf_cache"   # HF 权重缓存（取代旧硬编码 D:/Project/ml_cache/models）
   # adapters: { scalper: "models/.../lora_weights", analyst: "models/..." }  # MoE 专家 -> LoRA 路径
   inference:

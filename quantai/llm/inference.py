@@ -1,4 +1,4 @@
-"""quantai.llm.inference —— 本地 LLM 推理（Qwen2.5-7B，lazy torch）。
+"""quantai.llm.inference —— 本地 LLM 推理（Qwen3-8B，lazy torch）。
 
 忠实迁移 `src/llm/local_chat.py`：
 - 量化加载（4bit/8bit/fp16）+ 可选 LoRA adapter；
@@ -56,7 +56,7 @@ class LocalLLM:
     def __init__(
         self,
         *,
-        model_name: str = "Qwen/Qwen2.5-7B-Instruct",
+        model_name: str = "Qwen/Qwen3-8B",
         cache_dir: str = "models/hf_cache",
         quantization: str = "8bit",
         device: str = "cuda",

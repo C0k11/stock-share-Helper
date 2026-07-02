@@ -174,7 +174,7 @@ def test_chat_returns_empty_when_not_loaded(monkeypatch) -> None:
 # --------------------------------------------------------------------------- #
 def test_from_config_maps_fields() -> None:
     llm = LocalLLM.from_config(AppConfig().llm)
-    assert llm.model_name == "Qwen/Qwen2.5-7B-Instruct"
+    assert llm.model_name == "Qwen/Qwen3-8B"
     assert llm.quantization == "8bit"
     assert llm.default_adapter == "scalper"
     assert llm.max_new_tokens == 512

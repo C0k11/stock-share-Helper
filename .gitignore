@@ -118,6 +118,7 @@ build_exe.py
 package.json
 package-lock.json
 启动交易终端.bat
+configs/secretary.yaml
 
 # ====================
 # Local-only helper scripts

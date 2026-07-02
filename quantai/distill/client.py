@@ -10,9 +10,10 @@
 被实例化；测试/CI/loop 一律用 `MockDeepSeekClient`（零真实调用）。`usage_totals`
 累计 token 用量，跑完打印对账。
 
-模型名 config 驱动（`distill.model`，默认 `deepseek-chat`——DeepSeek 官方的**稳定
-别名**，始终指向当前最新 V3 系；推理任务可切 `deepseek-reasoner`。用别名即"不写死
-过时版本号"）。
+模型名 config 驱动（`distill.model`，默认 `deepseek-v4-pro`，教师质量优先；预算紧可切
+`deepseek-v4-flash`）。注意：旧别名 `deepseek-chat` / `deepseek-reasoner` 于
+2026-07-24 15:59 UTC 退役，之后调用直接失败，故用显式版本名。思考模式
+（`thinking: {"type": "enabled"}`）默认打开，蒸馏走深度推理路径。
 """
 
 from __future__ import annotations
@@ -33,13 +34,14 @@ class DeepSeekClient:
 
     def __init__(
         self,
-        model: str = "deepseek-chat",
+        model: str = "deepseek-v4-pro",
         base_url: str = "https://api.deepseek.com",
         api_key_env: str = "DEEPSEEK_API_KEY",
         temperature: float = 0.7,
         max_tokens: int = 1024,
         timeout_sec: float = 120.0,
         max_retries: int = 3,
+        thinking: bool = True,
     ) -> None:
         key = os.environ.get(api_key_env, "").strip()
         if not key:
@@ -54,6 +56,8 @@ class DeepSeekClient:
         self.max_tokens = max_tokens
         self.timeout_sec = timeout_sec
         self.max_retries = max_retries
+        #: 深度思考模式（DeepSeek V4 系）：True 时请求体带 thinking: {"type": "enabled"}。
+        self.thinking = thinking
         #: 累计用量（对账用）：{"prompt_tokens": int, "completion_tokens": int, "requests": int}
         self.usage_totals: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "requests": 0}
 
@@ -66,6 +70,8 @@ class DeepSeekClient:
             "max_tokens": self.max_tokens,
             "stream": False,
         }
+        if self.thinking:
+            payload["thinking"] = {"type": "enabled"}
         last_err: Optional[Exception] = None
         for attempt in range(self.max_retries):
             try:

@@ -68,7 +68,7 @@ def test_build_training_texts() -> None:
 # --------------------------------------------------------------------------- #
 def test_from_config_maps_fields() -> None:
     ft = QLoRAFineTuner.from_config(AppConfig().llm, output_dir="models/x")
-    assert ft.model_name == "Qwen/Qwen2.5-7B-Instruct"
+    assert ft.model_name == "Qwen/Qwen3-8B"
     assert ft.cfg.lora_r == 16
     assert ft.cache_dir == "models/hf_cache"
 

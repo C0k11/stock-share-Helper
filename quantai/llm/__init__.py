@@ -1,4 +1,4 @@
-"""quantai.llm —— 本地 LLM 推理与对齐训练层（Qwen2.5-7B + QLoRA + DPO）。
+"""quantai.llm —— 本地 LLM 推理与对齐训练层（Qwen3-8B + QLoRA + DPO）。
 
 四件套：
     prompts   -> 纯逻辑（消息构建 / think 清洗 / 响应解析 / 量化选择 / adapter 路径），无 torch，可全单测

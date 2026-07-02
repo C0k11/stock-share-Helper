@@ -78,7 +78,7 @@ class QLoRAFineTuner:
     def __init__(
         self,
         *,
-        model_name: str = "Qwen/Qwen2.5-7B-Instruct",
+        model_name: str = "Qwen/Qwen3-8B",
         output_dir: str = "models/llm",
         cfg: Any,
         cache_dir: str = "models/hf_cache",

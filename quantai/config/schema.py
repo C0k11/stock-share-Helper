@@ -181,7 +181,7 @@ class LLMDPOConfig(_Base):
 
 
 class LLMConfig(_Base):
-    model_name: str = "Qwen/Qwen2.5-7B-Instruct"
+    model_name: str = "Qwen/Qwen3-8B"
     # HuggingFace 模型/权重缓存目录（取代旧 local_chat.py 硬编码的 "D:/Project/ml_cache/models"）。
     cache_dir: str = "models/hf_cache"
     # MoE 适配器：专家名 -> LoRA 权重路径（如 {"scalper": "...", "analyst": "..."}）。
@@ -335,13 +335,15 @@ class EvolutionConfig(_Base):
 class DistillConfig(_Base):
     """DeepSeek 教师蒸馏配置。
 
-    - `model`：DeepSeek 官方**稳定别名**（deepseek-chat=最新 V3 系 / deepseek-reasoner=
-      推理系），不写死带日期的版本号。
+    - `model`：显式版本名 `deepseek-v4-pro`（教师质量优先；预算紧切 `deepseek-v4-flash`）。
+      旧别名 deepseek-chat / deepseek-reasoner 于 2026-07-24 15:59 UTC 退役，不可再用。
+    - `thinking`：V4 深度思考模式，蒸馏默认打开（请求体 thinking: {"type": "enabled"}）。
     - key **只从环境变量**（`api_key_env`）读，永不入配置文件/代码。
     - 真实生成只走 `scripts/distill.py --run --confirm-spend`（手动，成本闸）。
     """
 
-    model: str = "deepseek-chat"
+    model: str = "deepseek-v4-pro"
+    thinking: bool = True
     base_url: str = "https://api.deepseek.com"
     api_key_env: str = "DEEPSEEK_API_KEY"
     temperature: float = Field(default=0.7, ge=0)

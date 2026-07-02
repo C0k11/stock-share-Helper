@@ -91,7 +91,7 @@ class DPORunner:
     def __init__(
         self,
         *,
-        model_name: str = "Qwen/Qwen2.5-7B-Instruct",
+        model_name: str = "Qwen/Qwen3-8B",
         sft_adapter: str,
         output_dir: str,
         cfg: Any,

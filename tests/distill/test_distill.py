@@ -85,6 +85,14 @@ class TestClientSafety:
         # usage_totals 等公开面不含 key
         assert "sk-secret-test-123" not in json.dumps(c.usage_totals)
 
+    def test_defaults_explicit_v4_model_with_thinking(self, monkeypatch):
+        """显式版本名 + 思考模式默认开（旧别名 2026-07-24 退役，防回归）。"""
+        monkeypatch.setenv("DEEPSEEK_API_KEY", "sk-secret-test-123")
+        c = DeepSeekClient()
+        assert c.model == "deepseek-v4-pro"
+        assert c.thinking is True
+        assert "deepseek-chat" not in c.model and "reasoner" not in c.model
+
     def test_mock_client_records_calls(self):
         m = MockDeepSeekClient()
         out = m.chat([{"role": "user", "content": "hi"}])
