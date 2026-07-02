@@ -4,7 +4,7 @@
 
     score = random.uniform(0.3, 0.8)   # "Simulated risk score"
 
-即**纯随机**、零真实宏观输入——伪装成功能的半成品。本版方针：**删随机 + 接真实信号**。
+即**纯随机**、零真实宏观输入——伪装成功能的半成品。本版**删随机 + 接真实信号**：
 现在用 `PriceFetcher` 已在抓的 ^VIX / ^TNX（见 `quantai.data.prices`），按阈值确定性映射：
 
 - VIX >= `vix_risk_off`（或 10Y 收益率 >= `tnx_risk_off`）-> RISK_OFF（gear=-1，提示缩风险）；

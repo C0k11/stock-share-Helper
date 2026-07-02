@@ -2,8 +2,7 @@
 
 - `db.connect`：config 驱动的库连接 + 三层 schema（raw / staging / marts）。
 - `etl`：pandas Extract-Load（原样落 raw + 审计列，幂等重跑）；
-  变换（清洗/星型建模）在 dbt SQL：`warehouse/`（staging → marts），见
-  `docs/modules/warehouse.md`。
+  变换（清洗/星型建模）在 dbt SQL：`warehouse/`（staging → marts）。
 
 Tableau/BI 只查 `marts.*`（dim_symbol / dim_date + fact_*）。
 """

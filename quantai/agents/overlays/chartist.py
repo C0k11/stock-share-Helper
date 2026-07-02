@@ -7,8 +7,8 @@
   `analyzer` 完成（鸭子类型：`.analyze(ticker, asof=...) -> {"signal","confidence",...} | None`）。
   默认未注入 / 未启用 -> 返回 0（中性，不影响决策）。
 
-注：具体的 Qwen2.5-VL 后端（mplfinance 渲染 + VLM 生成）尚未迁入 agents/，是 overlay
-的重依赖部分；当前提供打分逻辑 + 注入接缝。见 vlm_chartist 注入接缝。
+注：具体的 Qwen2.5-VL 后端（mplfinance 渲染 + VLM 生成）见 `vlm_chartist.QwenVLChartist`
+（重依赖懒加载、GPU 可选），经 `analyzer` 注入接入本 overlay。
 """
 from __future__ import annotations
 

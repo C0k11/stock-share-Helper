@@ -1,6 +1,6 @@
 """向量化单资产回测引擎，按 `fill_timing` 切换成交时点。
 
-核心（lookahead 的修复就在这里）：
+核心（lookahead 修复就在这里）：
 - 输入 `weight[t]`：在 **close[t]** 用 ≤t 的信息**决策**出的目标仓位。
 - fill_timing="close"（旧 / 有 lookahead）：让 `weight[t]` 直接吃下 close[t-1]→close[t] 的收益，
   等于"看到 close[t] 才定的仓位，却又用它赚了截至 close[t] 的钱" —— 历史业绩**虚高**的根源。

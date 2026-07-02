@@ -1,7 +1,7 @@
 """OLD(close, lookahead) vs NEW(next_open, 修复) 对比工具。
 
 把同一份价格 + 同一个目标仓位，分别用两种成交时点回测，并排出对比表——
-用来量化"修掉 lookahead 后历史业绩降了多少"（诚实口径的对比数字）。
+用来量化"修掉 lookahead 后历史业绩降了多少"（给出诚实口径的对比数字）。
 """
 
 from __future__ import annotations
@@ -80,7 +80,7 @@ def format_comparison_markdown(
     """把对比结果排成 Markdown 表。
 
     benchmark 为 None：旧 vs 新 + 变化列（3 列对比）。
-    benchmark 给定：再并入「Buy&Hold SPY」列与「新版 − B&H」诚实差距列（常用的市场对标）。
+    benchmark 给定：再并入「Buy&Hold SPY」列与「新版 − B&H」诚实差距列（市场对标）。
     """
     old = results["close"].metrics
     new = results["next_open"].metrics

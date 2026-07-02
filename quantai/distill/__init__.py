@@ -6,7 +6,7 @@
   格式与 `quantai.llm.{finetune,dpo}` 严格对接。
 
 成本闸：真实生成只走 `scripts/distill.py --run --confirm-spend`（用户手动），
-CI/测试/loop 零真实调用。文档见 `docs/modules/distill.md`。
+CI/测试零真实调用。
 """
 
 from quantai.distill.client import DeepSeekClient, MissingApiKeyError, MockDeepSeekClient

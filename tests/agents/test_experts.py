@@ -1,4 +1,4 @@
-"""quantai.agents.experts 测试（假 LLM 注入；验证 F-008 启发式去随机）。"""
+"""quantai.agents.experts 测试（假 LLM 注入；验证启发式去随机）。"""
 
 from __future__ import annotations
 

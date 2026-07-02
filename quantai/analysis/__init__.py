@@ -6,7 +6,7 @@
 - `stats`：收益分布、回撤画像、Sharpe（复用 backtest.metrics）/Sortino、beta。
 
 全层纯函数、因果窗口（无 lookahead，截断不变性测试保证）、边界诚实（数据不足
-给 NaN 不报错、未定义不编数字）。文档见 `docs/modules/analysis.md`。
+给 NaN 不报错、未定义不编数字）。
 """
 
 from quantai.analysis.stats import (

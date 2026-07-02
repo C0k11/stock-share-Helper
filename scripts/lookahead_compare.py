@@ -23,7 +23,7 @@ from quantai.backtest import buy_and_hold, compare_fill_timings, format_comparis
 from quantai.config import load_config
 from quantai.signals import SignalGenerator
 
-REPORT_PATH = Path(__file__).resolve().parents[1] / "docs" / "backtest_old_vs_new.md"
+REPORT_PATH = Path(__file__).resolve().parents[1] / "reports" / "backtest_old_vs_new.md"
 
 
 def _load_prices(symbol: str, start: str, cache: Path | None) -> pd.DataFrame:

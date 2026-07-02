@@ -8,8 +8,8 @@
 设计原则（与 llm/ 一致）：
 - 纯决策逻辑与重依赖（torch / LLM 推理 / VLM）解耦：重活通过参数注入，
   所有 agent 的核心逻辑都能用假对象单测，CI 无需 GPU。
-- 「诚实命名」：路由是规则不是学习门控 -> `HeuristicRouter`；宏观闸当前是
-  中性占位（旧版 random 已删）-> 见 `MacroGovernor` 。
+- 「诚实命名」：路由是规则不是学习门控 -> `HeuristicRouter`；宏观闸由真实
+  VIX/10Y 收益率信号确定性给闸（旧版 random 已删）-> 见 `MacroGovernor`。
 
 子模块按需导入（planner/gatekeeper 的 torch 为懒加载），`import quantai.agents`
 不会拉起 torch。

@@ -1,4 +1,4 @@
-"""quantai.agents.gatekeeper 测试（无模型路径纯逻辑，验证 F-007 去随机修复）。"""
+"""quantai.agents.gatekeeper 测试（无模型路径纯逻辑，验证去随机修复）。"""
 
 from __future__ import annotations
 
