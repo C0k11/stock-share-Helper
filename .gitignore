@@ -105,8 +105,19 @@ temp/
 /scripts/eval_outputs/
 /scripts/eval_results/
 
-windows_app/**/bin/
-windows_app/**/obj/
+# ====================
+# 桌面宠物集群（保留本地、不入公开仓；2026-07-02 git rm --cached）
+# ====================
+windows_app/
+node_modules/
+爱尔奎特/
+玛丽偶像 _vts/
+长离带水印/
+launch.py
+build_exe.py
+package.json
+package-lock.json
+启动交易终端.bat
 
 # ====================
 # Local-only helper scripts
