@@ -15,12 +15,14 @@ from __future__ import annotations
 
 from typing import Optional
 
-_SYSTEM_PROMPT = (
+#: 报告 system prompt（公开常量：distill 场景构造与生产推理**同源**，防两头漂移）
+REPORT_SYSTEM_PROMPT = (
     "你是一名严谨的量化分析师助手。基于下面的系统数据简报做客观分析：\n"
     "1) 只引用简报中出现的数字，不编造任何数据；2) 数据不足处明说不足；\n"
     "3) 输出【组合体检】【个股要点】【风险提示】【今日关注】四段；\n"
     "4) 语气克制，这是分析参考不是投资建议。"
 )
+_SYSTEM_PROMPT = REPORT_SYSTEM_PROMPT
 
 
 def _fmt(x, nd: int = 2) -> str:

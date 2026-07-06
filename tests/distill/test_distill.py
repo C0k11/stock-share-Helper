@@ -72,6 +72,51 @@ class TestScenarioBuilder:
         assert "n/a" in brief
 
 
+class TestProductionTaskScenarios:
+    """生产同款任务场景：prompt 必须与线上常量同源，坏例按任务分支。"""
+
+    def _news(self, n=10):
+        from quantai.data.news import entries_to_items
+
+        return entries_to_items(
+            [{"title": f"Headline {i}", "link": f"https://t/{i}"} for i in range(n)],
+            symbol="AAA", source="test",
+        )
+
+    def test_news_scenarios_batched_and_source_identical(self):
+        from quantai.agents.news_scorer import SCORING_SYSTEM_PROMPT
+        from quantai.distill.scenarios import build_news_scoring_scenarios
+
+        scs = list(build_news_scoring_scenarios(self._news(10), as_of="2026-07-06", batch_size=8))
+        assert len(scs) == 2  # 10 条 -> 8+2
+        assert scs[0].messages[0]["content"] == SCORING_SYSTEM_PROMPT  # 与生产同源
+        assert "0. [AAA] Headline 0" in scs[0].messages[1]["content"]
+        assert scs[0].task == "news_scoring"
+
+    def test_report_scenario_source_identical(self):
+        from quantai.agents.analyst import REPORT_SYSTEM_PROMPT
+        from quantai.distill.scenarios import build_market_report_scenario
+
+        sc = build_market_report_scenario({"AAA": _prices(), "BBB": _prices(seed=1)}, as_of="2026-07-06")
+        assert sc is not None
+        assert sc.messages[0]["content"] == REPORT_SYSTEM_PROMPT
+        assert "AAA" in sc.messages[1]["content"] and "BBB" in sc.messages[1]["content"]
+        assert "RSI" in sc.messages[1]["content"]
+
+    def test_report_scenario_none_when_all_too_short(self):
+        from quantai.distill.scenarios import build_market_report_scenario
+
+        assert build_market_report_scenario({"AAA": _prices(20)}, as_of="x") is None
+
+    def test_weak_baseline_task_branches(self):
+        from quantai.distill.scenarios import build_market_report_scenario, build_news_scoring_scenarios
+
+        news_sc = next(iter(build_news_scoring_scenarios(self._news(2), as_of="x")))
+        assert "JSON" not in weak_baseline_answer(news_sc)  # 坏例故意不守 JSON 格式
+        report_sc = build_market_report_scenario({"AAA": _prices()}, as_of="x")
+        assert "【组合体检】" in weak_baseline_answer(report_sc)  # 有结构但空洞无数字
+
+
 class TestClientSafety:
     def test_missing_key_fails_fast(self, monkeypatch):
         monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)

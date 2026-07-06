@@ -14,13 +14,15 @@ from typing import Optional
 
 from quantai.llm.json_utils import repair_and_parse_json
 
-_SYSTEM = (
+#: 打分 system prompt（公开常量：distill 场景与生产打分**同源**，防两头漂移）
+SCORING_SYSTEM_PROMPT = (
     "你是金融新闻情绪标注器。对每条头条给 sentiment ∈ [-1, 1]"
     "（-1 极度利空，0 中性，+1 极度利多，仅凭标题无法判断时给接近 0 的值）"
     "和 label ∈ {bullish, bearish, neutral}。"
     "只输出 JSON 数组，元素形如 {\"id\": 0, \"sentiment\": 0.5, \"label\": \"bullish\"}，"
     "不要输出任何其它文字。"
 )
+_SYSTEM = SCORING_SYSTEM_PROMPT
 
 
 def build_scoring_prompt(items: list) -> str:

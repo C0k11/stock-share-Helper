@@ -141,13 +141,83 @@ class ScenarioBuilder:
 
 
 def weak_baseline_answer(scenario: Scenario) -> str:
-    """确定性弱基线回答（DPO 的 rejected 侧）。
+    """确定性弱基线回答（DPO 的 rejected 侧，按任务类型分支）。
 
-    诚实说明：这不是真实学生模型的输出，而是刻意模板化、不引用数值的空洞回答——
-    作为偏好对的"坏例"引导学生学会引用数据、结构化输出。后续可替换为学生模型采样。
+    诚实说明：这不是真实学生模型的输出，而是刻意模板化的坏例——
+    指标/报告任务给"不引用数值的空话"，打分任务给"破坏 JSON 约定的散文"，
+    引导学生学会引用数据、遵守输出格式。后续可替换为学生模型采样。
     """
+    if scenario.task == "news_scoring":
+        return "整体来看这些新闻有好有坏，市场情绪比较复杂，建议投资者自行判断。"
+    if scenario.task == "market_report":
+        return (
+            "【组合体检】市场近期波动。\n【个股要点】各股表现不一。\n"
+            "【风险提示】股市有风险。\n【今日关注】持续关注市场动态。"
+        )
     return (
         f"【结论】{scenario.symbol} 后市可能上涨也可能下跌，建议观望。\n"
         "【依据】市场有不确定性，技术指标仅供参考。\n"
         "【风险】股市有风险，投资需谨慎。"
+    )
+
+
+# --------------------------------------------------------------------------- #
+# 生产同款任务场景（与线上 prompt 常量同源，学生练的就是要上岗的活）
+# --------------------------------------------------------------------------- #
+def build_news_scoring_scenarios(
+    news_items: list, as_of: str, batch_size: int = 8
+) -> Iterator[Scenario]:
+    """真实头条 → 新闻打分任务场景（system/user 与 `news_scorer` 生产路径同源）。
+
+    每 batch_size 条一个场景（与生产的"一次调用打一批"一致）。
+    """
+    from quantai.agents.news_scorer import SCORING_SYSTEM_PROMPT, build_scoring_prompt
+
+    items = [it for it in news_items if getattr(it, "title", "")]
+    for b, i in enumerate(range(0, len(items), batch_size)):
+        batch = items[i : i + batch_size]
+        yield Scenario(
+            scenario_id=f"news_{as_of}_{b}",
+            symbol="_NEWS_",
+            as_of=as_of,
+            task="news_scoring",
+            messages=[
+                {"role": "system", "content": SCORING_SYSTEM_PROMPT},
+                {"role": "user", "content": build_scoring_prompt(batch)},
+            ],
+            meta={"n_items": len(batch), "links": [it.link for it in batch]},
+        )
+
+
+def build_market_report_scenario(
+    prices: dict, as_of: str, min_bars: int = 60, max_symbols: int = 8
+) -> Optional[Scenario]:
+    """多标的指标简报 → 四段式综合报告任务（system 与 `analyst` 生产报告同源）。
+
+    诚实边界：这是生产日报简报的**近似**（多标的指标节）——真实持仓/现金等隐私
+    数据**不进训练集**；教师学的是"给定一篮子指标出四段分析"的通用能力。
+    """
+    from quantai.agents.analyst import REPORT_SYSTEM_PROMPT
+
+    briefs = []
+    for sym, df in list(prices.items())[:max_symbols]:
+        if df is None or len(df) < min_bars or "close" not in df.columns:
+            continue
+        briefs.append(build_indicator_brief(df, sym)[0])
+    if not briefs:
+        return None
+    user = (
+        "# 市场数据简报（多标的技术指标）\n\n" + "\n\n".join(briefs)
+        + "\n\n基于以上数据出具分析报告。"
+    )
+    return Scenario(
+        scenario_id=f"report_{as_of}",
+        symbol="_MARKET_",
+        as_of=as_of,
+        task="market_report",
+        messages=[
+            {"role": "system", "content": REPORT_SYSTEM_PROMPT},
+            {"role": "user", "content": user},
+        ],
+        meta={"n_symbols": len(briefs)},
     )

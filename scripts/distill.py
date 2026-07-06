@@ -58,7 +58,21 @@ def main(argv: list[str] | None = None) -> int:
     prices = PriceFetcher().fetch_prices(args.symbols, start)
     builder = ScenarioBuilder(min_bars=cfg.min_bars, tasks=args.tasks)
     scenarios = list(builder.build(prices))
-    print(f"[distill] {len(prices)} symbols -> {len(scenarios)} scenarios")
+
+    # 生产同款任务：新闻打分 + 多标的综合报告（与线上 prompt 同源，学生练上岗的活）
+    from quantai.data.news import NewsFetcher
+    from quantai.distill.scenarios import build_market_report_scenario, build_news_scoring_scenarios
+
+    as_of = datetime.now().strftime("%Y-%m-%d")
+    news = NewsFetcher().fetch_all(args.symbols, limit_per_symbol=4)
+    news_scs = list(build_news_scoring_scenarios(news, as_of=as_of))
+    report_sc = build_market_report_scenario(prices, as_of=as_of, min_bars=cfg.min_bars)
+    scenarios += news_scs + ([report_sc] if report_sc else [])
+    print(
+        f"[distill] {len(prices)} symbols -> {len(scenarios)} scenarios "
+        f"(indicator {len(scenarios) - len(news_scs) - (1 if report_sc else 0)}, "
+        f"news {len(news_scs)}, report {1 if report_sc else 0})"
+    )
 
     if args.show_sample:
         if not scenarios:
