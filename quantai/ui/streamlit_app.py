@@ -366,17 +366,27 @@ def _render_analyst_page(st) -> None:  # pragma: no cover - 需 streamlit 运行
     from pathlib import Path
 
     st.markdown(
-        "生成**数据简报**（持仓+自选股+新闻+仓库 SQL 摘要，秒级）；"
-        "LLM 财经分析需 GPU 加载本地 Qwen，请在终端跑："
+        "**日报**（收盘口径：持仓+自选股+新闻+仓库 SQL 摘要）｜**盘中快报**（当日 1 分钟"
+        "会话：VWAP 位置、量能倍数、跌 bar 量占比等卖压代理指标）。带 LLM 的版本"
+        "（财经分析 + 新闻情绪量化）需 GPU，在终端跑："
     )
-    st.code("venv311\\Scripts\\python.exe scripts\\report.py --llm", language="powershell")
-    reports = sorted(Path("data/reports").glob("report_*.md"), reverse=True)
-    if st.button("📋 立即生成数据简报（无 LLM，秒级）"):
-        import subprocess, sys as _sys
+    st.code(
+        "venv311\\Scripts\\python.exe scripts\\report.py --llm            # 日报+LLM\n"
+        "venv311\\Scripts\\python.exe scripts\\report.py --intraday --llm  # 盘中快评+新闻打分",
+        language="powershell",
+    )
+    b1, b2 = st.columns(2)
+    import subprocess, sys as _sys
 
-        with st.spinner("组装简报中…"):
+    if b1.button("📋 生成日报（无 LLM，秒级）"):
+        with st.spinner("组装日报…"):
             subprocess.run([_sys.executable, "scripts/report.py"], cwd=str(Path.cwd()))
         st.rerun()
+    if b2.button("⚡ 生成盘中快报（无 LLM）"):
+        with st.spinner("拉取当日分钟数据…"):
+            subprocess.run([_sys.executable, "scripts/report.py", "--intraday"], cwd=str(Path.cwd()))
+        st.rerun()
+    reports = sorted(Path("data/reports").glob("*.md"), reverse=True)
     if reports:
         pick = st.selectbox("历史报告", [p.name for p in reports])
         st.markdown((Path("data/reports") / pick).read_text(encoding="utf-8"))

@@ -27,8 +27,13 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--portfolio", default=cfg.portfolio.file)
     p.add_argument("--benchmark", default=cfg.portfolio.benchmark)
     p.add_argument("--llm", action="store_true", help="加载本地 LLM 生成财经分析（GPU）")
+    p.add_argument("--intraday", action="store_true", help="盘中模式：分钟级会话统计+卖压指标+快评")
+    p.add_argument("--intraday-symbols", type=int, default=8, help="盘中模式覆盖的自选股数（控制抓取量）")
     p.add_argument("--out-dir", default="data/reports")
     args = p.parse_args(argv)
+
+    if args.intraday:
+        return _intraday(args, cfg)
 
     from quantai.agents.analyst import build_brief, generate_commentary
     from quantai.analysis import realized_volatility, rsi
@@ -107,6 +112,70 @@ def main(argv: list[str] | None = None) -> int:
     out.write_text(report, encoding="utf-8")
     print(report)
     print(f"\n[report] saved -> {out}")
+    return 0
+
+
+def _intraday(args, cfg) -> int:
+    """盘中快报：持仓 + 自选股前 N 的当日 1 分钟会话 → 统计/卖压 →（可选）LLM 快评。"""
+    from datetime import datetime
+
+    import yfinance as yf
+
+    from quantai.agents.analyst import (
+        build_intraday_brief, generate_intraday_commentary, intraday_stats,
+    )
+    from quantai.agents.news_scorer import aggregate_symbol_sentiment, score_news
+    from quantai.data.news import NewsFetcher
+    from quantai.data.watchlist import load_watchlist
+    from quantai.portfolio import load_portfolio
+
+    portfolio = load_portfolio(args.portfolio)
+    watch = load_watchlist(cfg.portfolio.watchlist_file)
+    symbols = list(dict.fromkeys(portfolio.symbols + watch[: args.intraday_symbols]))
+    print(f"[intraday] {len(symbols)} symbols, fetching 1m session bars ...")
+
+    rows = []
+    for sym in symbols:
+        try:
+            t = yf.Ticker(sym)
+            m1 = t.history(period="1d", interval="1m")
+            d5 = t.history(period="10d", interval="1d")
+            if m1.empty or len(d5) < 2:
+                continue
+            m1.columns = [c.lower() for c in m1.columns]
+            prev_close = float(d5["Close"].iloc[-2])
+            avg_vol = float(d5["Volume"].iloc[:-1].mean())
+            stats = intraday_stats(m1, prev_close, avg_vol)
+            if stats:
+                rows.append({"symbol": sym, **stats})
+        except Exception as exc:  # noqa: BLE001 - 单标的失败不炸整批
+            print(f"  skip {sym}: {exc}")
+
+    scored, agg = None, None
+    llm = None
+    if args.llm:
+        print("[intraday] loading local LLM (GPU) ...")
+        from quantai.llm.inference import LocalLLM
+
+        llm = LocalLLM.from_config(cfg.llm)
+        llm.gen_max_time_sec = 240.0
+        llm.max_new_tokens = 2000
+        news = NewsFetcher().fetch_all(symbols, limit_per_symbol=3)
+        scored = score_news(news, llm)
+        agg = aggregate_symbol_sentiment(scored)
+
+    as_of = datetime.now().strftime("%Y-%m-%d %H:%M")
+    brief = build_intraday_brief(rows, scored, agg, as_of=as_of)
+    report = brief
+    if llm is not None:
+        report = f"{brief}\n\n---\n\n# LLM 盘中快评（本地 {cfg.llm.model_name}）\n\n" + \
+            generate_intraday_commentary(brief, llm)
+
+    out = Path(args.out_dir) / f"intraday_{datetime.now().strftime('%Y%m%d_%H%M')}.md"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(report, encoding="utf-8")
+    print(report)
+    print(f"\n[intraday] saved -> {out}")
     return 0
 
 

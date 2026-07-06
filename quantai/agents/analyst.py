@@ -136,3 +136,105 @@ def build_brief(
 def generate_commentary(brief: str, llm) -> str:
     """brief → LLM 财经分析。llm 鸭子接口 `generate(user, system=...)`（LocalLLM 兼容）。"""
     return llm.generate(brief, system=_SYSTEM_PROMPT)
+
+
+# --------------------------------------------------------------------------- #
+# 盘中模式（分钟级 bar → 当日会话统计 + 卖压代理指标）
+# --------------------------------------------------------------------------- #
+def intraday_stats(df_1m, prev_close: float, avg_daily_volume: float) -> dict:
+    """当日分钟 bar → 会话统计（纯函数，可测）。
+
+    卖压/买压是**bar 级代理指标**（我们只有 OHLCV，没有逐笔/盘口数据，不冒充 order flow）：
+    - `down_volume_share`：收跌 bar 的成交量占比（>0.5 = 抛压主导）。
+    - `vs_vwap_pct`：现价相对当日 VWAP（负值 = 均价下方交易，偏弱）。
+    - `close_position`：现价在当日高低区间的位置（0=贴地，1=顶部）。
+    - `vol_vs_avg`：当日累计量 / 20 日均量（>1 提前放量）。
+    """
+    import numpy as np
+
+    close = df_1m["close"].astype(float).dropna()
+    if close.empty or prev_close != prev_close or prev_close <= 0:
+        return {}
+    last = float(close.iloc[-1])
+    high = float(df_1m["high"].astype(float).max()) if "high" in df_1m.columns else last
+    low = float(df_1m["low"].astype(float).min()) if "low" in df_1m.columns else last
+    vol = df_1m["volume"].astype(float) if "volume" in df_1m.columns else None
+    out = {
+        "last": last,
+        "chg_pct": last / prev_close - 1,
+        "day_high": high,
+        "day_low": low,
+        "close_position": (last - low) / (high - low) if high > low else float("nan"),
+    }
+    if vol is not None and float(vol.sum()) > 0:
+        typical = (df_1m["high"].astype(float) + df_1m["low"].astype(float) + close) / 3
+        vwap = float((typical * vol).sum() / vol.sum())
+        bar_chg = close.diff()
+        down_vol = float(vol[bar_chg < 0].sum())
+        out.update(
+            {
+                "vwap": vwap,
+                "vs_vwap_pct": last / vwap - 1,
+                "cum_volume": float(vol.sum()),
+                "vol_vs_avg": float(vol.sum()) / avg_daily_volume if avg_daily_volume > 0 else float("nan"),
+                "down_volume_share": down_vol / float(vol.sum()),
+            }
+        )
+    return out
+
+
+_INTRADAY_SYSTEM = (
+    "你是一名盘中交易台分析师。基于下面的**当日分钟级会话数据**做盘中快评：\n"
+    "1) 只引用简报中的数字，不编造；2) 卖压/买压结论必须落到 down_volume_share、"
+    "VWAP 相对位置、区间位置这些给定指标上；3) 输出【大盘/持仓速览】【压力与量能】"
+    "【新闻情绪】【风险】四段，短句、克制；4) 这是分析参考不是投资建议。"
+)
+
+
+def build_intraday_brief(
+    rows: list[dict],
+    scored_news: Optional[list[dict]] = None,
+    symbol_sentiment: Optional[dict] = None,
+    as_of: str = "",
+) -> str:
+    """盘中会话统计 + 量化新闻 → 盘中简报（markdown，纯组装可测）。
+
+    rows: [{"symbol", **intraday_stats 输出}]；scored_news: news_scorer.score_news 输出。
+    """
+    lines = [f"# QuantAI 盘中快报{f'（{as_of}）' if as_of else ''}", "", "## 一、当日会话（分钟级）"]
+    if not rows:
+        lines.append("（无盘中数据——非交易时段或数据源无返回）")
+    for r in rows:
+        seg = (
+            f"- {r['symbol']}: {_fmt(r.get('last'))}（vs 昨收 {_fmt(r.get('chg_pct', float('nan')) * 100)}%）"
+            f"，区间 [{_fmt(r.get('day_low'))}, {_fmt(r.get('day_high'))}]"
+            f"，区间位置 {_fmt(r.get('close_position', float('nan')), 2)}"
+        )
+        if "vwap" in r:
+            seg += (
+                f"，VWAP {_fmt(r['vwap'])}（现价 {_fmt(r.get('vs_vwap_pct', float('nan')) * 100)}%）"
+                f"，量能 {_fmt(r.get('vol_vs_avg', float('nan')), 2)}× 均量"
+                f"，跌 bar 量占比 {_fmt(r.get('down_volume_share', float('nan')) * 100, 1)}%"
+            )
+        lines.append(seg)
+    lines.append("")
+    lines.append("## 二、新闻情绪（LLM 标题级量化，[-1,1]）")
+    if symbol_sentiment:
+        agg = ", ".join(
+            f"{s} {v:+.2f}" if v is not None else f"{s} 未打分"
+            for s, v in symbol_sentiment.items()
+        )
+        lines.append(f"- 按标的均值: {agg}")
+    if scored_news:
+        for row in scored_news[:15]:
+            it = row["item"]
+            score = f"{row['sentiment']:+.2f}" if row["sentiment"] is not None else "n/a"
+            lines.append(f"- [{getattr(it, 'symbol', '') or '-'}] ({score} {row['label']}) {it.title}")
+    if not scored_news and not symbol_sentiment:
+        lines.append("（无量化新闻——未启用 LLM 打分或无新闻）")
+    return "\n".join(lines)
+
+
+def generate_intraday_commentary(brief: str, llm) -> str:
+    """盘中简报 → LLM 盘中快评。"""
+    return llm.generate(brief, system=_INTRADAY_SYSTEM)
