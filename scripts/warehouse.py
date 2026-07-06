@@ -32,16 +32,19 @@ _EXPORT_DIR = _REPO / "tableau" / "exports"
 _MARTS = (
     "dim_date", "dim_symbol", "fact_prices", "fact_positions",
     "fact_trades", "fact_signals", "fact_backtest_results", "fact_backtest_equity",
+    "fact_news",
 )
 
 
 def _load_raw(db_path: Path, portfolio_file: str, years: int, benchmark: str) -> None:
     from quantai.backtest import run_backtest
+    from quantai.config import load_config
+    from quantai.data.news import NewsFetcher
     from quantai.data.prices import PriceFetcher
     from quantai.portfolio import load_portfolio
     from quantai.signals.generator import SignalGenerator
     from quantai.warehouse import (
-        connect, load_backtest, load_positions, load_prices,
+        connect, load_backtest, load_news, load_positions, load_prices,
         load_signals, load_trading_days,
     )
     from quantai.warehouse.etl import init_raw_tables
@@ -68,6 +71,9 @@ def _load_raw(db_path: Path, portfolio_file: str, years: int, benchmark: str) ->
         for sym, df in prices.items():
             load_signals(con, sym, gen.generate(df))
         print(f"[etl] raw.signals         {len(prices)} symbols")
+        news = NewsFetcher(extra_feeds=load_config().data.news_feeds).fetch_all(symbols)
+        n = load_news(con, news)
+        print(f"[etl] raw.news            +{n} new items ({len(news)} fetched)")
         if benchmark in prices:
             df = prices[benchmark]
             weight = pd.Series(0.6, index=df.index)  # demo：60% 恒权重基准回测

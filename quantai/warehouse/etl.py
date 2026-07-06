@@ -94,6 +94,14 @@ _DDL: dict[str, str] = {
         equity DOUBLE NOT NULL,
         daily_return DOUBLE,
         {_AUDIT})""",
+    "news": f"""CREATE TABLE IF NOT EXISTS raw.news (
+        symbol VARCHAR,
+        title VARCHAR NOT NULL,
+        summary VARCHAR,
+        link VARCHAR NOT NULL,
+        published TIMESTAMP,
+        source VARCHAR,
+        {_AUDIT})""",
 }
 
 
@@ -307,6 +315,46 @@ def load_signals(
         )
         con.unregister("_stg_signals")
     return len(frame)
+
+
+# --------------------------------------------------------------------------- #
+# news（RSS 头条）
+# --------------------------------------------------------------------------- #
+def load_news(con: DuckDBPyConnection, items: Iterable) -> int:
+    """`NewsItem` 流 → `raw.news`。幂等键 = link（同链接不重复入库，新闻只增不删）。
+
+    与其它 loader 的 delete-then-insert 不同：新闻是**追加型**数据（历史头条没有
+    "重载一批"的语义），用 link 反连接去重。返回本次新插入的行数。
+    """
+    _ensure(con, _DDL["news"])
+    rows = [
+        (
+            it.symbol,
+            it.title,
+            it.summary,
+            it.link,
+            it.published.replace(tzinfo=None) if getattr(it, "published", None) else None,
+            it.source,
+        )
+        for it in items
+        if getattr(it, "title", "") and getattr(it, "link", "")
+    ]
+    if not rows:
+        return 0
+    frame = pd.DataFrame(
+        rows, columns=["symbol", "title", "summary", "link", "published", "source"]
+    ).drop_duplicates(subset=["link"])
+    with _tx(con):
+        con.register("_stg_news", frame)
+        n = con.execute(
+            """INSERT INTO raw.news (symbol, title, summary, link, published, source)
+               SELECT s.symbol, s.title, s.summary, s.link, s.published, s.source
+               FROM _stg_news s
+               WHERE NOT EXISTS (SELECT 1 FROM raw.news n WHERE n.link = s.link)"""
+        ).fetchone()
+        con.unregister("_stg_news")
+    # duckdb INSERT 返回影响行数（Count 列）
+    return int(n[0]) if n else 0
 
 
 # --------------------------------------------------------------------------- #

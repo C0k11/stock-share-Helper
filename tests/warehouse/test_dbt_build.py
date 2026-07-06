@@ -76,6 +76,16 @@ def warehouse(tmp_path_factory):
     )
     load_signals(con, "AAA", SignalGenerator(5, 20, 10).generate(prices["AAA"]))
     load_backtest(con, "bt1", bt, strategy="const60", symbol="AAA")
+    from quantai.data.news import entries_to_items
+    from quantai.warehouse import load_news
+
+    load_news(
+        con,
+        entries_to_items(
+            [{"title": "AAA beats estimates", "link": "https://t.test/n1", "summary": "s"}],
+            symbol="AAA", source="test",
+        ),
+    )
     con.close()  # DuckDB 单写者：dbt 接管前必须放锁
 
     from dbt.cli.main import dbtRunner
@@ -100,6 +110,7 @@ class TestDbtBuild:
         for t in (
             "dim_date", "dim_symbol", "fact_prices", "fact_positions",
             "fact_trades", "fact_signals", "fact_backtest_results", "fact_backtest_equity",
+            "fact_news",
         ):
             n = con.execute(f"SELECT count(*) FROM marts.{t}").fetchone()[0]
             assert n > 0, f"marts.{t} 为空"

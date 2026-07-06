@@ -10,6 +10,7 @@ Tableau/BI 只查 `marts.*`（dim_symbol / dim_date + fact_*）。
 from quantai.warehouse.db import SCHEMAS, connect
 from quantai.warehouse.etl import (
     load_backtest,
+    load_news,
     load_positions,
     load_prices,
     load_signals,
@@ -26,4 +27,5 @@ __all__ = [
     "load_trades",
     "load_signals",
     "load_backtest",
+    "load_news",
 ]

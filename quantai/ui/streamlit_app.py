@@ -106,7 +106,7 @@ def _render_portfolio_page(st) -> None:  # pragma: no cover - 需 streamlit 运�
     )
     st.plotly_chart(pnl_bar_figure([s.as_dict() for s in snap.positions]), use_container_width=True)
 
-    # 个股 K 线 + 指标
+    # 个股 K 线 + 指标 + 新闻
     st.subheader("个股图表")
     held = [s.symbol for s in snap.positions]
     sym = st.selectbox("标的", held + ([benchmark] if benchmark not in held else []))
@@ -114,6 +114,21 @@ def _render_portfolio_page(st) -> None:  # pragma: no cover - 需 streamlit 运�
     if df is not None and not df.empty:
         st.plotly_chart(candlestick_figure(df, sym), use_container_width=True)
         st.plotly_chart(rsi_macd_figure(df), use_container_width=True)
+
+    @st.cache_data(ttl=900, show_spinner=False)
+    def _fetch_news(symbol: str) -> list:
+        from quantai.data.news import NewsFetcher
+
+        return [n.as_dict() for n in NewsFetcher().fetch_symbol_news(symbol, limit=10)]
+
+    st.subheader(f"{sym} · 最新新闻")
+    news_items = _fetch_news(sym)
+    if news_items:
+        for n in news_items:
+            ts = n["published"].strftime("%m-%d %H:%M") if n["published"] else "时间未知"
+            st.markdown(f"- [{n['title']}]({n['link']})  `{ts} UTC`")
+    else:
+        st.caption("暂无该标的新闻（RSS 源无返回）。")
 
 
 def main() -> None:  # pragma: no cover - 需 streamlit 运行时

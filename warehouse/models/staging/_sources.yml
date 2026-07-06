@@ -55,3 +55,9 @@ sources:
             tests: [not_null]
           - name: equity
             tests: [not_null]
+      - name: news
+        columns:
+          - name: title
+            tests: [not_null]
+          - name: link
+            tests: [not_null, unique]
