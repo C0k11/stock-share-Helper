@@ -131,17 +131,126 @@ def _render_portfolio_page(st) -> None:  # pragma: no cover - 需 streamlit 运�
         st.caption("暂无该标的新闻（RSS 源无返回）。")
 
 
+def _render_watchlist_page(st) -> None:  # pragma: no cover - 需 streamlit 运行时
+    from datetime import datetime, timedelta
+
+    from quantai.analysis import realized_volatility, rsi
+    from quantai.config import load_config
+    from quantai.data.watchlist import add_symbol, load_watchlist, remove_symbol
+
+    wl_file = load_config().portfolio.watchlist_file
+    symbols = load_watchlist(wl_file)
+
+    # 添加/删除
+    c1, c2 = st.columns([3, 2])
+    new_sym = c1.text_input("添加标的（yfinance 代码，加密币如 BTC-USD）", "")
+    if c1.button("➕ 添加") and new_sym.strip():
+        import yfinance as yf
+
+        sym = new_sym.strip().upper()
+        probe = yf.Ticker(sym).history(period="5d")  # 先验证代码有效，无效不入表
+        if probe.empty:
+            st.error(f"{sym} 在 yfinance 取不到数据，未添加（检查代码拼写）")
+        else:
+            symbols = add_symbol(sym, wl_file)
+            st.success(f"已添加 {sym}")
+            st.cache_data.clear()
+    rm = c2.multiselect("移除标的", symbols)
+    if c2.button("🗑 移除") and rm:
+        for s in rm:
+            symbols = remove_symbol(s, wl_file)
+        st.cache_data.clear()
+        st.rerun()
+
+    if not symbols:
+        st.info(f"自选股为空。上方添加，或参照 watchlist.example.yaml 编辑 `{wl_file}`。")
+        return
+
+    @st.cache_data(ttl=300, show_spinner="拉取自选股行情…")
+    def _quotes(syms: tuple, start: str) -> list[dict]:
+        from quantai.data.prices import PriceFetcher
+
+        prices = PriceFetcher().fetch_prices(list(syms), start)
+        rows = []
+        for sym in syms:
+            df = prices.get(sym)
+            if df is None or df.empty or "close" not in df.columns:
+                rows.append({"标的": sym, "现价": None, "日涨跌%": None, "RSI14": None, "20D波动%": None})
+                continue
+            close = df["close"].astype(float).dropna()
+            if close.empty:
+                continue
+            last = float(close.iloc[-1])
+            prev = float(close.iloc[-2]) if len(close) >= 2 else float("nan")
+            rows.append(
+                {
+                    "标的": sym,
+                    "现价": round(last, 2),
+                    "日涨跌%": round((last / prev - 1) * 100, 2) if prev == prev else None,
+                    "RSI14": round(float(rsi(close, 14).iloc[-1]), 1) if len(close) > 14 else None,
+                    "20D波动%": round(float(realized_volatility(close, 20).iloc[-1]) * 100, 1)
+                    if len(close) > 20
+                    else None,
+                }
+            )
+        return rows
+
+    start = (datetime.now() - timedelta(days=120)).strftime("%Y-%m-%d")
+    st.dataframe(_quotes(tuple(symbols), start), use_container_width=True, height=560)
+    st.caption("日线级数据（最新收盘，非实时 tick）；新上市/加密标的历史不足时指标为空。")
+
+
+def _render_analyst_page(st) -> None:  # pragma: no cover - 需 streamlit 运行时
+    from pathlib import Path
+
+    st.markdown(
+        "生成**数据简报**（持仓+自选股+新闻+仓库 SQL 摘要，秒级）；"
+        "LLM 财经分析需 GPU 加载本地 Qwen，请在终端跑："
+    )
+    st.code("venv311\\Scripts\\python.exe scripts\\report.py --llm", language="powershell")
+    reports = sorted(Path("data/reports").glob("report_*.md"), reverse=True)
+    if st.button("📋 立即生成数据简报（无 LLM，秒级）"):
+        import subprocess, sys as _sys
+
+        with st.spinner("组装简报中…"):
+            subprocess.run([_sys.executable, "scripts/report.py"], cwd=str(Path.cwd()))
+        st.rerun()
+    if reports:
+        pick = st.selectbox("历史报告", [p.name for p in reports])
+        st.markdown((Path("data/reports") / pick).read_text(encoding="utf-8"))
+    else:
+        st.caption("暂无报告。点上方按钮或在终端跑 scripts/report.py。")
+
+
 def main() -> None:  # pragma: no cover - 需 streamlit 运行时
+    import os
+    from pathlib import Path
+
     import streamlit as st
 
     from quantai.ui.client import QuantAIClient
 
     st.set_page_config(page_title="QuantAI Dashboard", layout="wide")
 
-    page = st.sidebar.radio("页面", ["组合分析", "实盘会话"], index=0)
+    page = st.sidebar.radio("页面", ["组合分析", "自选股", "AI 分析", "实盘会话"], index=0)
+
+    # Tableau 一键打开（找 tableau/ 下的 .twb/.twbx；没有就开导出目录）
+    tb_files = list(Path("tableau").glob("*.twb*"))
+    label = f"📊 打开 Tableau（{tb_files[0].name}）" if tb_files else "📂 打开 Tableau 数据源目录"
+    if st.sidebar.button(label):
+        os.startfile(str(tb_files[0]) if tb_files else str(Path("tableau/exports").resolve()))
+
     if page == "组合分析":
         st.title("QuantAI · 真实组合分析")
         _render_portfolio_page(st)
+        return
+    if page == "自选股":
+        st.title("QuantAI · 自选股")
+        _render_watchlist_page(st)
+        return
+    if page == "AI 分析":
+        st.title("QuantAI · AI 分析师")
+        _render_analyst_page(st)
         return
 
     st.title("QuantAI · 实盘仪表盘")

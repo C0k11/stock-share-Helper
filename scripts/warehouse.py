@@ -50,8 +50,11 @@ def _load_raw(db_path: Path, portfolio_file: str, years: int, benchmark: str) ->
     from quantai.warehouse.etl import init_raw_tables
     import pandas as pd
 
+    from quantai.data.watchlist import load_watchlist
+
     portfolio = load_portfolio(portfolio_file)
-    symbols = list(dict.fromkeys(portfolio.symbols + [benchmark]))
+    watchlist = load_watchlist(load_config().portfolio.watchlist_file)
+    symbols = list(dict.fromkeys(portfolio.symbols + watchlist + [benchmark]))
     start = (datetime.now() - timedelta(days=years * 365)).strftime("%Y-%m-%d")
     end = datetime.now().strftime("%Y-%m-%d")
 

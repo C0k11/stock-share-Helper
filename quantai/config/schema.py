@@ -370,6 +370,8 @@ class PortfolioConfig(_Base):
     benchmark: str = "SPY"
     # 分析用的历史回看年数（beta/波动/回撤的合成历史长度）。
     history_years: int = Field(default=2, gt=0)
+    # 自选股列表（只跟踪行情/指标/新闻，不参与盈亏统计；同为本地文件不入库）。
+    watchlist_file: str = "watchlist.local.yaml"
 
 
 # --------------------------------------------------------------------------- #

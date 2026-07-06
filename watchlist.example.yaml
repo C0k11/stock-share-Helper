@@ -1,0 +1,7 @@
+# QuantAI 自选股示例（复制成 watchlist.local.yaml 再改；*.local.yaml 不入库）
+# 加密货币用 yfinance 口径（BTC-USD / ETH-USD）。
+symbols:
+  - SPY
+  - QQQ
+  - NVDA
+  - BTC-USD
