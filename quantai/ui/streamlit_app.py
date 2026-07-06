@@ -131,6 +131,143 @@ def _render_portfolio_page(st) -> None:  # pragma: no cover - 需 streamlit 运�
         st.caption("暂无该标的新闻（RSS 源无返回）。")
 
 
+#: 时间档 -> (yfinance period, interval)。1D/1W 是盘中分钟级，3M 起为日线/周线。
+_TIMEFRAMES = {
+    "1D": ("1d", "1m"),
+    "1W": ("5d", "15m"),
+    "1M": ("1mo", "1h"),
+    "3M": ("3mo", "1d"),
+    "1Y": ("1y", "1d"),
+    "5Y": ("5y", "1wk"),
+}
+
+
+def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit 运行时
+    from pathlib import Path
+
+    from quantai.config import load_config
+    from quantai.data.watchlist import load_watchlist
+    from quantai.portfolio import load_portfolio
+    from quantai.ui.charts import workstation_figure
+
+    cfg = load_config().portfolio
+    portfolio = (
+        load_portfolio(cfg.file) if Path(cfg.file).exists() else None
+    )
+    held = portfolio.symbols if portfolio else []
+    watch = load_watchlist(cfg.watchlist_file)
+    universe = list(dict.fromkeys(held + watch)) or ["SPY"]
+
+    # 顶栏：标的选择 + 可用现金（Wealthsimple 式）
+    top_l, top_r = st.columns([4, 1])
+    sym = top_l.selectbox("标的", universe, label_visibility="collapsed")
+    if portfolio:
+        top_r.markdown(
+            f"<div style='text-align:right;padding-top:6px'>"
+            f"<b>${portfolio.cash:,.2f}</b> <span style='color:#888'>可用现金 · TFSA</span></div>",
+            unsafe_allow_html=True,
+        )
+
+    tf = st.segmented_control("时间档", list(_TIMEFRAMES), default="3M", label_visibility="collapsed")
+    period, interval = _TIMEFRAMES[tf or "3M"]
+    intraday = interval.endswith("m") or interval.endswith("h")
+
+    @st.cache_data(ttl=120 if intraday else 900, show_spinner="拉取行情…")
+    def _hist(symbol: str, period: str, interval: str):
+        import yfinance as yf
+
+        raw = yf.Ticker(symbol).history(period=period, interval=interval)
+        raw.columns = [str(c).lower() for c in raw.columns]
+        if getattr(raw.index, "tz", None) is not None:
+            raw = raw.tz_convert("America/New_York").tz_localize(None)
+        return raw
+
+    @st.cache_data(ttl=600, show_spinner=False)
+    def _info(symbol: str) -> dict:
+        import yfinance as yf
+
+        try:
+            return dict(yf.Ticker(symbol).info)
+        except Exception:
+            return {}
+
+    df = _hist(sym, period, interval)
+    if df is None or df.empty:
+        st.error(f"{sym} 在 {tf} 档取不到数据（新上市/加密标的部分粒度不支持），换个时间档试试。")
+        return
+
+    close = df["close"].astype(float).dropna()
+    last, first = float(close.iloc[-1]), float(close.iloc[0])
+    chg, chg_pct = last - first, (last / first - 1) * 100
+    o, h, l = (float(df[c].dropna().iloc[-1]) if c in df.columns else float("nan") for c in ("open", "high", "low"))
+    hc1, hc2 = st.columns([2, 3])
+    hc1.metric(sym, f"${last:,.2f}", f"{chg:+,.2f} ({chg_pct:+.2f}%) {tf}")
+    hc2.caption(f"O ${o:,.2f}　H ${h:,.2f}　L ${l:,.2f}　C ${last:,.2f}　·　{interval} bars")
+
+    # 指标开关（券商式弹出菜单）
+    with st.popover("指标 ⌄"):
+        show_volume = st.checkbox("Volume", True)
+        show_vwap = st.checkbox("VWAP（仅盘中档有效）", intraday, disabled=not intraday)
+        show_rsi = st.checkbox("RSI(14)", True)
+        show_macd = st.checkbox("MACD", True)
+        ma_on = st.multiselect("均线（bar 数）", [20, 50, 200], default=[20, 50])
+        show_bb = st.checkbox("Bollinger(20,2)", False)
+        kind = st.radio("图型", ["line", "candle"], index=0 if intraday else 1, horizontal=True)
+
+    st.plotly_chart(
+        workstation_figure(
+            df, sym, kind=kind, ma_windows=ma_on, show_bollinger=show_bb,
+            show_vwap=show_vwap and intraday, show_volume=show_volume,
+            show_rsi=show_rsi, show_macd=show_macd,
+        ),
+        use_container_width=True,
+    )
+
+    # Market details（来自 yfinance info；缺失诚实显示 —）
+    info = _info(sym)
+
+    def g(key, money=False):
+        v = info.get(key)
+        if v is None:
+            return "—"
+        return f"${v:,.2f}" if money and isinstance(v, (int, float)) else f"{v:,}" if isinstance(v, int) else str(v)
+
+    st.subheader("Market details")
+    m1, m2, m3 = st.columns(3)
+    m1.metric("Bid", g("bid", True)); m2.metric("Ask", g("ask", True)); m3.metric("Prev close", g("previousClose", True))
+    m4, m5, m6 = st.columns(3)
+    m4.metric("Volume", g("volume")); m5.metric("Avg vol", g("averageVolume")); m6.metric("P/E", g("trailingPE"))
+    m7, m8, m9 = st.columns(3)
+    m7.metric("52W high", g("fiftyTwoWeekHigh", True)); m8.metric("52W low", g("fiftyTwoWeekLow", True)); m9.metric("Exchange", g("exchange"))
+
+    # 底部页签：持仓 / 新闻
+    tab_hold, tab_news = st.tabs(["Holdings", "News"])
+    with tab_hold:
+        pos = next((p for p in (portfolio.positions if portfolio else []) if p.symbol == sym), None)
+        if pos:
+            agg_shares = sum(p.shares for p in portfolio.positions if p.symbol == sym)
+            agg_cost = sum(p.shares * p.cost_basis for p in portfolio.positions if p.symbol == sym)
+            avg = agg_cost / agg_shares if agg_shares else float("nan")
+            pnl = agg_shares * (last - avg)
+            c1, c2, c3, c4 = st.columns(4)
+            c1.metric("持股", f"{agg_shares:,.0f}")
+            c2.metric("均价", f"${avg:,.2f}")
+            c3.metric("市值", f"${agg_shares * last:,.2f}")
+            c4.metric("未实现盈亏", f"${pnl:,.2f}", f"{pnl / abs(agg_cost) * 100:+.2f}%" if agg_cost else None)
+        else:
+            st.caption("未持有该标的。")
+    with tab_news:
+        @st.cache_data(ttl=900, show_spinner=False)
+        def _news(symbol: str) -> list:
+            from quantai.data.news import NewsFetcher
+
+            return [n.as_dict() for n in NewsFetcher().fetch_symbol_news(symbol, limit=8)]
+
+        for n in _news(sym) or []:
+            ts = n["published"].strftime("%m-%d %H:%M") if n["published"] else "?"
+            st.markdown(f"- [{n['title']}]({n['link']})  `{ts} UTC`")
+
+
 def _render_watchlist_page(st) -> None:  # pragma: no cover - 需 streamlit 运行时
     from datetime import datetime, timedelta
 
@@ -232,7 +369,7 @@ def main() -> None:  # pragma: no cover - 需 streamlit 运行时
 
     st.set_page_config(page_title="QuantAI Dashboard", layout="wide")
 
-    page = st.sidebar.radio("页面", ["组合分析", "自选股", "AI 分析", "实盘会话"], index=0)
+    page = st.sidebar.radio("页面", ["行情工作台", "组合分析", "自选股", "AI 分析", "实盘会话"], index=0)
 
     # Tableau 一键打开（找 tableau/ 下的 .twb/.twbx；没有就开导出目录）
     tb_files = list(Path("tableau").glob("*.twb*"))
@@ -240,6 +377,9 @@ def main() -> None:  # pragma: no cover - 需 streamlit 运行时
     if st.sidebar.button(label):
         os.startfile(str(tb_files[0]) if tb_files else str(Path("tableau/exports").resolve()))
 
+    if page == "行情工作台":
+        _render_workstation_page(st)
+        return
     if page == "组合分析":
         st.title("QuantAI · 真实组合分析")
         _render_portfolio_page(st)

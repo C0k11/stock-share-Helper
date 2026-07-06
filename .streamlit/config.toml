@@ -1,0 +1,11 @@
+# QuantAI 仪表盘主题（Wealthsimple 式暗色）
+[theme]
+base = "dark"
+primaryColor = "#26A69A"
+backgroundColor = "#0E0E10"
+secondaryBackgroundColor = "#1A1A1E"
+textColor = "#EAEAEA"
+font = "sans serif"
+
+[browser]
+gatherUsageStats = false
