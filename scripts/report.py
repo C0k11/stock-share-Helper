@@ -95,6 +95,10 @@ def main(argv: list[str] | None = None) -> int:
         from quantai.llm.inference import LocalLLM
 
         llm = LocalLLM.from_config(cfg.llm)
+        # 报告场景放开生成上限：config 默认 gen_max_time_sec=12s 是桌面对话的
+        # 防卡死值，长报告会被腰斩（实测只出了第一段）；离线报告不赶时间。
+        llm.gen_max_time_sec = 240.0
+        llm.max_new_tokens = 2500  # 1500 实测在【今日关注】段中途截断
         commentary = generate_commentary(brief, llm)
         report = f"{brief}\n\n---\n\n# LLM 财经分析（本地 {cfg.llm.model_name}）\n\n{commentary}"
 

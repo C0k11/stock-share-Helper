@@ -159,12 +159,12 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
     universe = list(dict.fromkeys(held + watch)) or ["SPY"]
 
     # 顶栏：标的选择 + 可用现金（Wealthsimple 式）
-    top_l, top_r = st.columns([4, 1])
+    top_l, _sp, top_r = st.columns([2, 2, 1.4])
     sym = top_l.selectbox("标的", universe, label_visibility="collapsed")
     if portfolio:
         top_r.markdown(
-            f"<div style='text-align:right;padding-top:6px'>"
-            f"<b>${portfolio.cash:,.2f}</b> <span style='color:#888'>可用现金 · TFSA</span></div>",
+            f"<div style='text-align:right;padding-top:8px;font-size:0.92rem;white-space:nowrap'>"
+            f"<b>${portfolio.cash:,.2f}</b> <span style='color:#8A8A93'>可用现金 · TFSA</span></div>",
             unsafe_allow_html=True,
         )
 
@@ -198,11 +198,31 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
 
     close = df["close"].astype(float).dropna()
     last, first = float(close.iloc[-1]), float(close.iloc[0])
+    # 1D 档按券商惯例对比**昨收**（而非当日首根 bar，后者是"对比开盘"口径）
+    if tf == "1D":
+        daily = _hist(sym, "5d", "1d")
+        if daily is not None and len(daily) >= 2:
+            first = float(daily["close"].dropna().iloc[-2])
     chg, chg_pct = last - first, (last / first - 1) * 100
-    o, h, l = (float(df[c].dropna().iloc[-1]) if c in df.columns else float("nan") for c in ("open", "high", "low"))
-    hc1, hc2 = st.columns([2, 3])
-    hc1.metric(sym, f"${last:,.2f}", f"{chg:+,.2f} ({chg_pct:+.2f}%) {tf}")
-    hc2.caption(f"O ${o:,.2f}　H ${h:,.2f}　L ${l:,.2f}　C ${last:,.2f}　·　{interval} bars")
+    o = float(df["open"].dropna().iloc[-1]) if "open" in df.columns else float("nan")
+    h = float(df["high"].dropna().max()) if "high" in df.columns else float("nan")
+    l = float(df["low"].dropna().min()) if "low" in df.columns else float("nan")
+    up = chg >= 0
+    color = "#26A69A" if up else "#EF5350"
+    # 自定义头部（WS 式：大价格 + 内联涨跌；不用 st.metric——$ 会触发 LaTeX、涨跌不能内联）
+    st.markdown(
+        f"""<div style="line-height:1.15;margin:2px 0 6px 0">
+  <span style="color:#8A8A93;font-size:0.95rem">{sym}</span><br>
+  <span style="font-size:2.3rem;font-weight:700">${last:,.2f}</span>
+  <span style="color:{color};font-size:1.05rem;font-weight:600;margin-left:8px">
+    {chg:+,.2f} ({chg_pct:+.2f}%) <span style="color:#8A8A93;font-weight:400">{tf}</span>
+  </span><br>
+  <span style="color:#8A8A93;font-size:0.85rem">
+    O&nbsp;${o:,.2f}&emsp;H&nbsp;${h:,.2f}&emsp;L&nbsp;${l:,.2f}&emsp;C&nbsp;${last:,.2f}
+    &emsp;·&emsp;{interval} bars</span>
+</div>""",
+        unsafe_allow_html=True,
+    )
 
     # 指标开关（券商式弹出菜单）
     with st.popover("指标 ⌄"):
@@ -226,17 +246,22 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
     # Market details（来自 yfinance info；缺失诚实显示 —）
     info = _info(sym)
 
-    def g(key, money=False):
+    def g(key, money=False, compact=False):
         v = info.get(key)
         if v is None:
             return "—"
+        if compact and isinstance(v, (int, float)):
+            for unit, div in (("B", 1e9), ("M", 1e6), ("K", 1e3)):
+                if abs(v) >= div:
+                    return f"{v / div:,.2f}{unit}"
+            return f"{v:,.0f}"
         return f"${v:,.2f}" if money and isinstance(v, (int, float)) else f"{v:,}" if isinstance(v, int) else str(v)
 
     st.subheader("Market details")
     m1, m2, m3 = st.columns(3)
     m1.metric("Bid", g("bid", True)); m2.metric("Ask", g("ask", True)); m3.metric("Prev close", g("previousClose", True))
     m4, m5, m6 = st.columns(3)
-    m4.metric("Volume", g("volume")); m5.metric("Avg vol", g("averageVolume")); m6.metric("P/E", g("trailingPE"))
+    m4.metric("Volume", g("volume", compact=True)); m5.metric("Avg vol", g("averageVolume", compact=True)); m6.metric("P/E", g("trailingPE"))
     m7, m8, m9 = st.columns(3)
     m7.metric("52W high", g("fiftyTwoWeekHigh", True)); m8.metric("52W low", g("fiftyTwoWeekLow", True)); m9.metric("Exchange", g("exchange"))
 
@@ -368,6 +393,16 @@ def main() -> None:  # pragma: no cover - 需 streamlit 运行时
     from quantai.ui.client import QuantAIClient
 
     st.set_page_config(page_title="QuantAI Dashboard", layout="wide")
+    # 全局視覺微调：藏 streamlit 默认头/脚、收紧上边距（券商终端式信息密度）
+    st.markdown(
+        """<style>
+  header[data-testid="stHeader"] {background: transparent; height: 0.8rem;}
+  .block-container {padding-top: 1.1rem; padding-bottom: 2rem; max-width: 1500px;}
+  div[data-testid="stMetricValue"] {font-size: 1.35rem;}
+  #MainMenu, footer, div[data-testid="stToolbar"] {visibility: hidden;}
+</style>""",
+        unsafe_allow_html=True,
+    )
 
     page = st.sidebar.radio("页面", ["行情工作台", "组合分析", "自选股", "AI 分析", "实盘会话"], index=0)
 
