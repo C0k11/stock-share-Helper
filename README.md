@@ -52,7 +52,7 @@ python scripts/distill.py --dry-run --symbols SPY NVDA
 flowchart TB
     subgraph L0["Foundation"]
         CFG["config/ — typed pydantic settings, extra=forbid"]
-        DAT["data/ — yfinance · parquet · NYSE calendar"]
+        DAT["data/ — yfinance · RSS news · parquet · NYSE calendar"]
     end
     subgraph L1["Pure computation — causal, no lookahead"]
         FEA["features/ — causal model features"]
@@ -164,9 +164,10 @@ flowchart LR
 - **Star schema**: `dim_symbol`, `dim_date` (calendar spine + NYSE trading-day
   attrs) and facts with declared grains — `fact_prices` (window-function
   daily returns, 52-week-high distance), `fact_positions` (lot aggregation +
-  ASOF-join valuation), `fact_trades`, `fact_signals`, `fact_backtest_results`,
-  `fact_backtest_equity` (SQL drawdown).
-- **dbt tests**: 68 assertions (not-null/enums/relationships/grain uniqueness on
+  ASOF-join valuation), `fact_trades`, `fact_signals`, `fact_news` (RSS
+  headlines, link grain), `fact_backtest_results`, `fact_backtest_equity`
+  (SQL drawdown).
+- **dbt tests**: 76 assertions (not-null/enums/relationships/grain uniqueness on
   every fact/OHLC sanity/PnL consistency/drawdown ≤ 0/warn on unpriceable
   positions) — all passing on real market data.
 - **Reconciliation**: pytest runs a real `dbt build` and asserts SQL and pandas
