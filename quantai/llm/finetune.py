@@ -45,6 +45,9 @@ def build_training_arguments_dict(cfg: Any, *, output_dir: str, use_bf16: bool) 
         "output_dir": output_dir,
         "num_train_epochs": int(cfg.num_epochs),
         "per_device_train_batch_size": int(cfg.batch_size),
+        # eval 批大小必须跟训练一致——不设则 HF 默认 8，151k 词表的 logits 在
+        # eval 时同样爆显存（实锤：训练步 bs2 健康，step100 中途 eval 卡死 40 分钟）
+        "per_device_eval_batch_size": int(cfg.batch_size),
         "gradient_accumulation_steps": int(cfg.gradient_accumulation_steps),
         "learning_rate": float(cfg.learning_rate),
         "warmup_ratio": float(cfg.warmup_ratio),
