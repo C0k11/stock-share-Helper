@@ -231,7 +231,7 @@ def workstation_figure(
     return fig
 
 
-def pnl_bar_figure(positions: list[dict]) -> go.Figure:
+def pnl_bar_figure(positions: list[dict], title: str = "未实现盈亏（USD）") -> go.Figure:
     """每标的未实现盈亏条形图（输入 `PositionSnapshot.as_dict()` 列表）。"""
     rows = sorted(positions, key=lambda p: p.get("unrealized_pnl", 0.0))
     symbols = [p["symbol"] for p in rows]
@@ -241,5 +241,5 @@ def pnl_bar_figure(positions: list[dict]) -> go.Figure:
                            text=[f"{v:+,.0f}" if v == v else "n/a" for v in pnl],
                            textposition="outside"))
     fig.add_vline(x=0, line_color=_TEXT, opacity=0.4)
-    fig.update_layout(title="未实现盈亏（USD）", height=max(220, 60 * len(rows) + 120), **DARK_LAYOUT)
+    fig.update_layout(title=title, height=max(220, 60 * len(rows) + 120), **DARK_LAYOUT)
     return fig

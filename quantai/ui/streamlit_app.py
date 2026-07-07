@@ -36,13 +36,15 @@ def _render_portfolio_page(st) -> None:  # pragma: no cover - 需 streamlit 运�
 
     from quantai.config import load_config
     from quantai.portfolio import PortfolioAnalyzer, load_portfolio
-    from quantai.ui.charts import candlestick_figure, pnl_bar_figure, rsi_macd_figure
+    from quantai.ui.charts import pnl_bar_figure
+    from quantai.ui.i18n import tr
 
+    lang = st.session_state.get("ui_lang", "zh")
     cfg = load_config().portfolio
-    st.sidebar.header("组合分析")
-    pf_path = st.sidebar.text_input("持仓文件", value=cfg.file)
-    benchmark = st.sidebar.text_input("基准", value=cfg.benchmark)
-    years = st.sidebar.slider("历史回看（年）", 1, 5, cfg.history_years)
+    st.sidebar.header(tr(lang, "pf.sidebar"))
+    pf_path = st.sidebar.text_input(tr(lang, "pf.file"), value=cfg.file)
+    benchmark = st.sidebar.text_input(tr(lang, "pf.bench"), value=cfg.benchmark)
+    years = st.sidebar.slider(tr(lang, "pf.years"), 1, 5, cfg.history_years)
 
     if not Path(pf_path).exists():
         st.info(
@@ -74,46 +76,60 @@ def _render_portfolio_page(st) -> None:  # pragma: no cover - 需 streamlit 运�
 
     # KPI 行
     c1, c2, c3, c4, c5 = st.columns(5)
-    c1.metric("总资产", _fmt_money(snap.total_value), _fmt_pct(snap.day_change_pct))
-    c2.metric("未实现盈亏", _fmt_money(snap.total_unrealized_pnl), _fmt_pct(snap.total_unrealized_pnl_pct))
-    c3.metric("组合 Beta", f"{snap.portfolio_beta:.2f}" if snap.portfolio_beta == snap.portfolio_beta else "n/a")
-    c4.metric("年化波动*", _fmt_pct(snap.current_holdings_ann_vol))
-    c5.metric("最大回撤*", _fmt_pct(snap.current_holdings_max_drawdown))
-    st.caption("*基于「当前持仓固定不变」的合成历史（holdings-based），非真实交易流水。")
+    c1.metric(tr(lang, "pf.total"), _fmt_money(snap.total_value), _fmt_pct(snap.day_change_pct))
+    c2.metric(tr(lang, "pf.pnl"), _fmt_money(snap.total_unrealized_pnl), _fmt_pct(snap.total_unrealized_pnl_pct))
+    c3.metric(tr(lang, "pf.beta"), f"{snap.portfolio_beta:.2f}" if snap.portfolio_beta == snap.portfolio_beta else "n/a")
+    c4.metric(tr(lang, "pf.vol"), _fmt_pct(snap.current_holdings_ann_vol))
+    c5.metric(tr(lang, "pf.mdd"), _fmt_pct(snap.current_holdings_max_drawdown))
+    st.caption(tr(lang, "pf.note"))
     if snap.missing_prices:
-        st.warning(f"以下标的抓不到行情，已从统计剔除：{', '.join(snap.missing_prices)}")
+        st.warning(tr(lang, "pf.missing", syms=", ".join(snap.missing_prices)))
 
     # 持仓表
-    st.subheader("持仓")
+    st.subheader(tr(lang, "pf.holdings"))
     st.dataframe(
         [
             {
-                "标的": s.symbol,
-                "股数": s.shares,
-                "均价": round(s.avg_cost, 2),
-                "现价": round(s.last_price, 2),
-                "市值": round(s.market_value, 2),
-                "盈亏": round(s.unrealized_pnl, 2),
-                "盈亏%": _fmt_pct(s.unrealized_pnl_pct),
-                "权重%": round(s.weight * 100, 1) if s.weight == s.weight else None,
+                tr(lang, "pf.h_symbol"): s.symbol,
+                tr(lang, "pf.h_shares"): s.shares,
+                tr(lang, "pf.h_avg"): round(s.avg_cost, 2),
+                tr(lang, "pf.h_last"): round(s.last_price, 2),
+                tr(lang, "pf.h_mv"): round(s.market_value, 2),
+                tr(lang, "pf.h_pnl"): round(s.unrealized_pnl, 2),
+                tr(lang, "pf.h_pnlpct"): _fmt_pct(s.unrealized_pnl_pct),
+                tr(lang, "pf.h_weight"): round(s.weight * 100, 1) if s.weight == s.weight else None,
                 "RSI": round(s.rsi_14, 1) if s.rsi_14 == s.rsi_14 else None,
-                "趋势": "↑" if s.in_uptrend else "—",
-                "回踩": "●" if s.is_pullback else "",
+                tr(lang, "pf.h_trend"): "↑" if s.in_uptrend else "—",
+                tr(lang, "pf.h_pb"): "●" if s.is_pullback else "",
             }
             for s in sorted(snap.positions, key=lambda x: -abs(x.market_value))
         ],
         use_container_width=True,
     )
-    st.plotly_chart(pnl_bar_figure([s.as_dict() for s in snap.positions]), use_container_width=True)
+    st.plotly_chart(
+        pnl_bar_figure([s.as_dict() for s in snap.positions], title=tr(lang, "pf.pnl_chart")),
+        use_container_width=True,
+    )
 
-    # 个股 K 线 + 指标 + 新闻
-    st.subheader("个股图表")
+    # 宏观长线对比（模拟盘同款 line_chart 交互）：持仓 + 基准归一化到 100。
+    # 日线蜡烛/RSI/MACD 细看在行情工作台——组合页定位是长线宏观，不重复摆日线。
+    st.subheader(tr(lang, "pf.longview"))
+    import pandas as pd
+
     held = [s.symbol for s in snap.positions]
-    sym = st.selectbox("标的", held + ([benchmark] if benchmark not in held else []))
-    df = prices.get(sym)
-    if df is not None and not df.empty:
-        st.plotly_chart(candlestick_figure(df, sym), use_container_width=True)
-        st.plotly_chart(rsi_macd_figure(df), use_container_width=True)
+    norm = {}
+    for s in held + ([benchmark] if benchmark not in held else []):
+        df = prices.get(s)
+        if df is None or df.empty or "close" not in df.columns:
+            continue
+        c = df["close"].dropna()
+        if len(c) > 1:
+            norm[s] = c / float(c.iloc[0]) * 100.0
+    if norm:
+        st.line_chart(pd.DataFrame(norm), use_container_width=True)
+        st.caption(tr(lang, "pf.longview_note", years=years))
+
+    sym = st.selectbox(tr(lang, "pf.h_symbol"), held + ([benchmark] if benchmark not in held else []))
 
     @st.cache_data(ttl=900, show_spinner=False)
     def _fetch_news(symbol: str) -> list:
@@ -121,14 +137,14 @@ def _render_portfolio_page(st) -> None:  # pragma: no cover - 需 streamlit 运�
 
         return [n.as_dict() for n in NewsFetcher().fetch_symbol_news(symbol, limit=10)]
 
-    st.subheader(f"{sym} · 最新新闻")
+    st.subheader(tr(lang, "pf.news_of", sym=sym))
     news_items = _fetch_news(sym)
     if news_items:
         for n in news_items:
-            ts = n["published"].strftime("%m-%d %H:%M") if n["published"] else "时间未知"
+            ts = n["published"].strftime("%m-%d %H:%M") if n["published"] else "?"
             st.markdown(f"- [{n['title']}]({n['link']})  `{ts} UTC`")
     else:
-        st.caption("暂无该标的新闻（RSS 源无返回）。")
+        st.caption(tr(lang, "pf.no_news"))
 
 
 #: 时间档 -> (yfinance period, interval)。1D/1W 是盘中分钟级，3M 起为日线/周线。
@@ -334,7 +350,7 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
     tact_syms = st.multiselect(
         tr(lang, "ws.board_symbols"),
         options=list(dict.fromkeys(held + watch)),
-        default=list(dict.fromkeys(held + watch[:4])),
+        default=list(dict.fromkeys(held)) or list(dict.fromkeys(watch[:1])),
         key="ws_tact_syms",
     )
     tact_syms = list(dict.fromkeys(held + tact_syms))  # 持仓永远在列
@@ -460,32 +476,35 @@ def _render_watchlist_page(st) -> None:  # pragma: no cover - 需 streamlit 运�
     from quantai.config import load_config
     from quantai.data.watchlist import add_symbol, load_watchlist, remove_symbol
 
+    from quantai.ui.i18n import tr
+
+    lang = st.session_state.get("ui_lang", "zh")
     wl_file = load_config().portfolio.watchlist_file
     symbols = load_watchlist(wl_file)
 
     # 添加/删除
     c1, c2 = st.columns([3, 2])
-    new_sym = c1.text_input("添加标的（yfinance 代码，加密币如 BTC-USD）", "")
-    if c1.button("➕ 添加") and new_sym.strip():
+    new_sym = c1.text_input(tr(lang, "wl.add_label"), "")
+    if c1.button(tr(lang, "wl.add_btn")) and new_sym.strip():
         import yfinance as yf
 
         sym = new_sym.strip().upper()
         probe = yf.Ticker(sym).history(period="5d")  # 先验证代码有效，无效不入表
         if probe.empty:
-            st.error(f"{sym} 在 yfinance 取不到数据，未添加（检查代码拼写）")
+            st.error(tr(lang, "wl.invalid", sym=sym))
         else:
             symbols = add_symbol(sym, wl_file)
-            st.success(f"已添加 {sym}")
+            st.success(tr(lang, "wl.added", sym=sym))
             st.cache_data.clear()
-    rm = c2.multiselect("移除标的", symbols)
-    if c2.button("🗑 移除") and rm:
+    rm = c2.multiselect(tr(lang, "wl.remove_label"), symbols)
+    if c2.button(tr(lang, "wl.remove_btn")) and rm:
         for s in rm:
             symbols = remove_symbol(s, wl_file)
         st.cache_data.clear()
         st.rerun()
 
     if not symbols:
-        st.info(f"自选股为空。上方添加，或参照 watchlist.example.yaml 编辑 `{wl_file}`。")
+        st.info(tr(lang, "wl.empty", file=wl_file))
         return
 
     @st.cache_data(ttl=300, show_spinner="拉取自选股行情…")
@@ -519,7 +538,7 @@ def _render_watchlist_page(st) -> None:  # pragma: no cover - 需 streamlit 运�
 
     start = (datetime.now() - timedelta(days=120)).strftime("%Y-%m-%d")
     st.dataframe(_quotes(tuple(symbols), start), use_container_width=True, height=560)
-    st.caption("日线级数据（最新收盘，非实时 tick）；新上市/加密标的历史不足时指标为空。")
+    st.caption(tr(lang, "wl.caption"))
 
 
 def _render_analyst_page(st) -> None:  # pragma: no cover - 需 streamlit 运行时
@@ -568,7 +587,8 @@ def _render_ytd_replay(st) -> None:  # pragma: no cover - 需 streamlit 运行�
         load_portfolio(cfg.file).symbols if Path(cfg.file).exists() else []
     )
     watch = load_watchlist(cfg.watchlist_file)
-    default = ",".join(list(dict.fromkeys(held + watch))[:5]) or "SPY,NVDA,TSLA"
+    # 默认只回放真实持仓（其它标的手动输入）——"我的模拟盘"先讲我的票
+    default = ",".join(dict.fromkeys(held)) or "SPY"
 
     from quantai.ui.i18n import tr
 
