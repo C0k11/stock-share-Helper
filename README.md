@@ -32,7 +32,13 @@ Four jobs, nothing decorative:
    paper-trading runtime, and an executed **teacher–student distillation flywheel**:
    DeepSeek-generated scenario batches (indicator analysis, news scoring,
    multi-symbol reports — prompts shared verbatim with production) → local
-   QLoRA SFT / DPO on a single RTX 4090. On top of the batch flywheel, a scheduled
+   QLoRA SFT / DPO on a single RTX 4090. The **v2 student is live**: 1,129
+   teacher samples sampled across 25 historical dates (bull/bear/chop coverage),
+   QLoRA-trained in 26 minutes (eval-loss 0.957), passed the blind-eval gate —
+   zero repetition collapse and more prompt-number citations than the base model
+   in 12/14 held-out + never-seen-symbol cases — and now serves as the
+   production analyst adapter (v1 was rejected by the same gate and never
+   shipped). On top of the batch flywheel, a scheduled
    **daily decision journal** accumulates triple-labeled samples every trading day:
    a transparent rule engine states the day's position call (citing real indicator
    values) → the teacher independently answers the same scenario (clean SFT data)
@@ -229,6 +235,10 @@ flowchart TB
   honest offline DPO, and the placeholder raises if called.
 - Real API spend (DeepSeek distillation) requires an explicit
   `--run --confirm-spend` and an env-var key; CI and tests are mock-only.
+- Student adapters ship only through a blind-eval gate
+  (`scripts/eval_student.py`: base vs student side-by-side on held-out dates
+  plus never-trained symbols, with repetition/citation/format collapse
+  detectors) — the v1 adapter failed it and was never mounted.
 
 ## Privacy
 

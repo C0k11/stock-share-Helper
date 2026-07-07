@@ -63,7 +63,11 @@ risk:
 llm:
   model_name: "Qwen/Qwen3-8B"
   cache_dir: "models/hf_cache"   # HF 权重缓存（取代旧硬编码 D:/Project/ml_cache/models）
-  # adapters: { scalper: "models/.../lora_weights", analyst: "models/..." }  # MoE 专家 -> LoRA 路径
+  # MoE 专家 -> LoRA 路径。analyst = v2 蒸馏学生（1129 条历史多市况教师数据 QLoRA，
+  # 盲评过关后挂载：零复读、12/14 例引用数值多于基座；权重本地不入库，路径不存在时
+  # 自动降级裸基座）。
+  adapters:
+    analyst: "models/llm/finance_v2_sft/lora_weights"
   inference:
     device: "cuda"
     quantization: "8bit"         # 4bit | 8bit | fp16（取代旧 load_in_4bit 布尔）

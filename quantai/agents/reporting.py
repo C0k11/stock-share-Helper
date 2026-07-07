@@ -28,12 +28,22 @@ _WAREHOUSE_DB = Path("data/warehouse/quantai.duckdb")
 
 
 def load_report_llm():
-    """加载本地 LLM 并放开报告场景的生成上限（GPU；调用方自行缓存/驻留）。"""
+    """加载本地 LLM 并放开报告场景的生成上限（GPU；调用方自行缓存/驻留）。
+
+    `llm.adapters.analyst` 配置存在且权重在本地时预加载该 LoRA（v2 蒸馏学生，
+    盲评过关后挂载）；路径缺失自动降级裸基座——公开仓库不带权重也能跑。
+    """
+    from pathlib import Path as _Path
+
     from quantai.llm.inference import LocalLLM
 
-    llm = LocalLLM.from_config(load_config().llm)
+    cfg = load_config().llm
+    llm = LocalLLM.from_config(cfg)
     llm.gen_max_time_sec = 240.0
     llm.max_new_tokens = 2500
+    adapter = str(cfg.adapters.get("analyst", "") or "")
+    if adapter and _Path(adapter).exists():
+        llm.load(adapter_path=adapter)
     return llm
 
 
