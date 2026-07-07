@@ -162,6 +162,73 @@ def weak_baseline_answer(scenario: Scenario) -> str:
 
 
 # --------------------------------------------------------------------------- #
+# 历史日期采样（v2：覆盖多市况——牛/熊/横盘的真实案例）
+# --------------------------------------------------------------------------- #
+def sample_history_dates(index, n_dates: int, min_bars: int = 60, forward_bars: int = 20) -> list:
+    """从价格索引里等距采样 n 个历史截止日。
+
+    可用区间 = [min_bars, len-forward_bars)：前端保证指标热身，尾端预留 forward
+    窗口（算实现收益做结局元数据用）。区间不足时返回能给的（可能少于 n）。
+    """
+    lo, hi = min_bars, len(index) - forward_bars - 1
+    if hi <= lo:
+        return []
+    n = min(n_dates, hi - lo)
+    step = (hi - lo) / n
+    positions = sorted({int(lo + step * i) for i in range(n)})
+    return [index[p] for p in positions]
+
+
+def build_historical_scenarios(
+    prices: dict,
+    n_dates: int,
+    min_bars: int = 60,
+    tasks: Optional[list[str]] = None,
+    with_report: bool = True,
+) -> Iterator[Scenario]:
+    """历史截断采样：每个采样日 × 每标的 × 各任务 + 当日多标的综合报告。
+
+    因果纪律：喂给教师的数据是**截断到采样日**的（prompt 里绝无未来）；
+    采样日之后的实现收益只写进 `meta.outcome`（forward 5/20 日收益）——
+    这是给将来"结局排序 DPO"（好决策=方向与实现收益一致）预留的标注，
+    **绝不进训练 prompt**。
+    """
+    ref = max(prices.values(), key=len, default=None)
+    if ref is None or ref.empty:
+        return
+    builder = ScenarioBuilder(min_bars=min_bars, tasks=tasks)
+    for d in sample_history_dates(ref.index, n_dates, min_bars=min_bars):
+        snapshot: dict = {}
+        outcomes: dict = {}
+        for sym, df in prices.items():
+            if df is None or df.empty:
+                continue
+            trunc = df.loc[:d]
+            if len(trunc) < min_bars:
+                continue
+            snapshot[sym] = trunc
+            # 结局元数据（meta-only）：截止日收盘 → +5/+20 根后的实现收益
+            future = df.loc[d:]["close"].dropna()
+            base = float(future.iloc[0]) if len(future) else float("nan")
+            outcomes[sym] = {
+                "fwd_5d": float(future.iloc[5] / base - 1) if len(future) > 5 else None,
+                "fwd_20d": float(future.iloc[20] / base - 1) if len(future) > 20 else None,
+            }
+        if not snapshot:
+            continue
+        for sc in builder.build(snapshot):
+            sc.meta["outcome"] = outcomes.get(sc.symbol)
+            yield sc
+        if with_report:
+            rep = build_market_report_scenario(
+                snapshot, as_of=str(getattr(d, "date", lambda: d)()), min_bars=min_bars
+            )
+            if rep:
+                rep.meta["outcome"] = outcomes
+                yield rep
+
+
+# --------------------------------------------------------------------------- #
 # 生产同款任务场景（与线上 prompt 常量同源，学生练的就是要上岗的活）
 # --------------------------------------------------------------------------- #
 def build_news_scoring_scenarios(

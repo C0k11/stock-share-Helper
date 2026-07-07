@@ -75,27 +75,53 @@ class DistillGenerator:
         sft_path: str | Path,
         dpo_path: str | Path,
         limit: Optional[int] = None,
+        workers: int = 1,
     ) -> dict:
-        """逐场景调教师 → 同时产 SFT 与 DPO 行。返回统计摘要。
+        """场景 → 教师 → SFT+DPO 行。返回统计摘要。
 
-        单场景失败不炸整批（记录进 `failures`，最后如实汇报）。
-        `limit` 是硬上限（额度保险丝）：达到即停。
+        - 单场景失败不炸整批（进 `failures` 如实汇报）；`limit` 是额度保险丝。
+        - `workers > 1` 用线程池并发调教师（网络 IO 密集，千条级批量必开——
+          串行 16s/条 × 1200 条要 5 小时，10 并发 ~35 分钟）。输出顺序保持
+          与输入一致（按索引回填）。
         """
-        sft_records: list[dict] = []
-        dpo_records: list[dict] = []
-        failures: list[dict] = []
+        items = []
         for i, sc in enumerate(scenarios):
             if limit is not None and i >= limit:
                 break
+            items.append(sc)
+
+        answers: list[Optional[str]] = [None] * len(items)
+        failures: list[dict] = []
+
+        def _one(idx: int, sc: Scenario) -> None:
             try:
                 answer = self.client.chat(sc.messages)
                 if not (answer or "").strip():
                     raise RuntimeError("empty teacher answer")  # 双保险：空答案绝不落盘
-                sft_records.append(scenario_to_sft_record(sc, answer))
-                dpo_records.append(scenario_to_dpo_record(sc, chosen=answer))
-                self.on_progress(i, sc.scenario_id)
+                answers[idx] = answer
+                self.on_progress(idx, sc.scenario_id)
             except Exception as exc:  # noqa: BLE001 - 单场景失败不应中断整批
                 failures.append({"scenario_id": sc.scenario_id, "error": str(exc)})
+
+        if workers <= 1:
+            for i, sc in enumerate(items):
+                _one(i, sc)
+        else:
+            from concurrent.futures import ThreadPoolExecutor
+
+            with ThreadPoolExecutor(max_workers=workers) as pool:
+                list(pool.map(lambda t: _one(*t), enumerate(items)))
+
+        sft_records = [
+            scenario_to_sft_record(sc, ans)
+            for sc, ans in zip(items, answers)
+            if ans is not None
+        ]
+        dpo_records = [
+            scenario_to_dpo_record(sc, chosen=ans)
+            for sc, ans in zip(items, answers)
+            if ans is not None
+        ]
         n_sft = write_jsonl(sft_path, sft_records)
         n_dpo = write_jsonl(dpo_path, dpo_records)
         return {

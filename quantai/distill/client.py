@@ -19,6 +19,7 @@
 from __future__ import annotations
 
 import os
+import threading
 import time
 from typing import Optional
 
@@ -60,6 +61,7 @@ class DeepSeekClient:
         self.thinking = thinking
         #: 累计用量（对账用）：{"prompt_tokens": int, "completion_tokens": int, "requests": int}
         self.usage_totals: dict[str, int] = {"prompt_tokens": 0, "completion_tokens": 0, "requests": 0}
+        self._usage_lock = threading.Lock()  # 并发批量生成时保护用量累计
 
     def chat(self, messages: list[dict], temperature: Optional[float] = None) -> str:
         """一次聊天补全，返回 assistant 文本。5xx/429 指数退避重试。"""
@@ -88,9 +90,10 @@ class DeepSeekClient:
                 resp.raise_for_status()
                 data = resp.json()
                 usage = data.get("usage", {})
-                self.usage_totals["prompt_tokens"] += int(usage.get("prompt_tokens", 0))
-                self.usage_totals["completion_tokens"] += int(usage.get("completion_tokens", 0))
-                self.usage_totals["requests"] += 1
+                with self._usage_lock:
+                    self.usage_totals["prompt_tokens"] += int(usage.get("prompt_tokens", 0))
+                    self.usage_totals["completion_tokens"] += int(usage.get("completion_tokens", 0))
+                    self.usage_totals["requests"] += 1
                 content = data["choices"][0]["message"].get("content") or ""
                 if not content.strip():
                     # 思考模式踩坑（实测）：max_tokens 被推理链耗尽时 content 为空、

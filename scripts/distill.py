@@ -45,6 +45,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--symbols", nargs="+", default=["SPY", "QQQ", "NVDA"], help="标的池")
     p.add_argument("--tasks", nargs="+", default=None, help="任务子集（trend/risk/pullback/volatility）")
     p.add_argument("--limit", type=int, default=None, help=f"场景上限（默认 config {cfg.max_scenarios}）")
+    p.add_argument("--history-dates", type=int, default=0,
+                   help="历史日期采样数（v2 多市况覆盖；0=只用当下快照）")
+    p.add_argument("--workers", type=int, default=8, help="教师并发请求数（IO 密集）")
     p.add_argument("--dry-run", action="store_true", help="mock 教师走全管线（零花费）")
     p.add_argument("--show-sample", action="store_true", help="打印一条场景 prompt 后退出（零花费）")
     p.add_argument("--run", action="store_true", help="真实调用 DeepSeek（需 --confirm-spend）")
@@ -56,22 +59,37 @@ def main(argv: list[str] | None = None) -> int:
 
     start = (datetime.now() - timedelta(days=cfg.history_years * 365)).strftime("%Y-%m-%d")
     prices = PriceFetcher().fetch_prices(args.symbols, start)
-    builder = ScenarioBuilder(min_bars=cfg.min_bars, tasks=args.tasks)
-    scenarios = list(builder.build(prices))
 
-    # 生产同款任务：新闻打分 + 多标的综合报告（与线上 prompt 同源，学生练上岗的活）
     from quantai.data.news import NewsFetcher
-    from quantai.distill.scenarios import build_market_report_scenario, build_news_scoring_scenarios
+    from quantai.distill.scenarios import (
+        build_historical_scenarios,
+        build_market_report_scenario,
+        build_news_scoring_scenarios,
+    )
 
     as_of = datetime.now().strftime("%Y-%m-%d")
+    if args.history_dates > 0:
+        # v2：历史截断采样——多市况真实案例（prompt 因果，实现收益只进 meta）
+        scenarios = list(
+            build_historical_scenarios(
+                prices, n_dates=args.history_dates, min_bars=cfg.min_bars, tasks=args.tasks
+            )
+        )
+    else:
+        builder = ScenarioBuilder(min_bars=cfg.min_bars, tasks=args.tasks)
+        scenarios = list(builder.build(prices))
+        report_sc = build_market_report_scenario(prices, as_of=as_of, min_bars=cfg.min_bars)
+        if report_sc:
+            scenarios.append(report_sc)
+
+    # 新闻打分任务恒为"当下"（RSS 没有历史存档）
     news = NewsFetcher().fetch_all(args.symbols, limit_per_symbol=4)
     news_scs = list(build_news_scoring_scenarios(news, as_of=as_of))
-    report_sc = build_market_report_scenario(prices, as_of=as_of, min_bars=cfg.min_bars)
-    scenarios += news_scs + ([report_sc] if report_sc else [])
+    scenarios += news_scs
+    n_news = len(news_scs)
     print(
-        f"[distill] {len(prices)} symbols -> {len(scenarios)} scenarios "
-        f"(indicator {len(scenarios) - len(news_scs) - (1 if report_sc else 0)}, "
-        f"news {len(news_scs)}, report {1 if report_sc else 0})"
+        f"[distill] {len(prices)} symbols, history_dates={args.history_dates} -> "
+        f"{len(scenarios)} scenarios (market {len(scenarios) - n_news}, news {n_news})"
     )
 
     if args.show_sample:
@@ -116,8 +134,9 @@ def main(argv: list[str] | None = None) -> int:
         client = MockDeepSeekClient()
         print("[distill] dry-run（mock 教师，零花费）")
 
-    gen = DistillGenerator(client, on_progress=lambda i, sid: print(f"  [{i + 1}] {sid}"))
-    summary = gen.run(scenarios, sft_path=sft_path, dpo_path=dpo_path, limit=limit)
+    workers = args.workers if args.run else 1  # mock 干跑没必要开线程
+    gen = DistillGenerator(client, on_progress=lambda i, sid: print(f"  [{i + 1}] {sid}", flush=True))
+    summary = gen.run(scenarios, sft_path=sft_path, dpo_path=dpo_path, limit=limit, workers=workers)
     print(
         f"[distill] done: sft={summary['sft_written']} dpo={summary['dpo_written']} "
         f"failures={len(summary['failures'])} model={summary['model']}\n"

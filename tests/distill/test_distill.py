@@ -117,6 +117,73 @@ class TestProductionTaskScenarios:
         assert "【组合体检】" in weak_baseline_answer(report_sc)  # 有结构但空洞无数字
 
 
+class TestHistoricalSampling:
+    """v2 历史采样：截断因果、结局只进 meta、日期覆盖。"""
+
+    def test_dates_sampled_within_usable_range(self):
+        from quantai.distill.scenarios import sample_history_dates
+
+        idx = pd.bdate_range("2024-01-01", periods=300)
+        dates = sample_history_dates(idx, n_dates=10, min_bars=60, forward_bars=20)
+        assert len(dates) == 10
+        assert min(dates) >= idx[60] and max(dates) <= idx[279]
+
+    def test_too_short_series_no_dates(self):
+        from quantai.distill.scenarios import sample_history_dates
+
+        assert sample_history_dates(pd.bdate_range("2024-01-01", periods=70), 5) == []
+
+    def test_prompt_is_causal_and_outcome_meta_only(self):
+        from quantai.distill.scenarios import build_historical_scenarios
+
+        prices = {"AAA": _prices(300)}
+        scs = [s for s in build_historical_scenarios(prices, n_dates=3, tasks=["trend"])
+               if s.task == "trend"]
+        assert len(scs) == 3
+        full_close = prices["AAA"]["close"]
+        for sc in scs:
+            # prompt 里的"最新收盘"必须等于截止日收盘（无未来数据）
+            d = pd.Timestamp(sc.as_of)
+            expected_last = float(full_close.loc[:d].iloc[-1])
+            assert f"{expected_last:.2f}" in sc.messages[1]["content"]
+            # 结局元数据存在且不出现在 prompt 里
+            out = sc.meta["outcome"]
+            assert out is not None and "fwd_20d" in out
+            if out["fwd_20d"] is not None:
+                assert f"{out['fwd_20d']:.4f}" not in sc.messages[1]["content"]
+
+    def test_distinct_dates_give_distinct_scenario_ids(self):
+        from quantai.distill.scenarios import build_historical_scenarios
+
+        scs = list(build_historical_scenarios({"AAA": _prices(300)}, n_dates=5, tasks=["trend"]))
+        ids = [s.scenario_id for s in scs if s.task == "trend"]
+        assert len(ids) == len(set(ids)) == 5
+
+
+class TestConcurrentGeneration:
+    def test_workers_preserve_order_and_counts(self, tmp_path):
+        scs = list(ScenarioBuilder().build({"AAA": _prices(), "BBB": _prices(seed=1)}))
+        gen = DistillGenerator(MockDeepSeekClient())
+        summary = gen.run(scs, tmp_path / "s.jsonl", tmp_path / "d.jsonl", workers=4)
+        assert summary["sft_written"] == len(scs)
+        # 输出顺序与输入一致（按 scenario_id 对齐）
+        lines = [json.loads(l) for l in (tmp_path / "s.jsonl").read_text(encoding="utf-8").splitlines()]
+        assert [r["meta"]["scenario_id"] for r in lines] == [s.scenario_id for s in scs]
+
+    def test_workers_with_failures_isolated(self, tmp_path):
+        scs = list(ScenarioBuilder().build({"AAA": _prices()}))
+
+        class Flaky(MockDeepSeekClient):
+            def chat(self, messages, temperature=None):
+                if "risk" in messages[-1]["content"][:400] or "风险暴露" in messages[-1]["content"]:
+                    raise RuntimeError("boom")
+                return super().chat(messages, temperature)
+
+        summary = DistillGenerator(Flaky()).run(scs, tmp_path / "s.jsonl", tmp_path / "d.jsonl", workers=4)
+        assert summary["sft_written"] == 3
+        assert len(summary["failures"]) == 1
+
+
 class TestClientSafety:
     def test_missing_key_fails_fast(self, monkeypatch):
         monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
