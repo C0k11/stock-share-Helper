@@ -116,7 +116,7 @@ flowchart TB
 ### Multi-agent decision chain
 
 ```mermaid
-flowchart LR
+flowchart TB
     IN["market snapshot"] --> PLN["Planner"]
     PLN --> GTK["Gatekeeper — deterministic approval"]
     GTK -->|approved| RTR["Router"]
@@ -134,26 +134,29 @@ offline (CPU-only, no keys) and stays testable.
 ### Teacher-student distillation & evolution flywheel (offline by design)
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph DISTILL["Distillation — cost-gated, --confirm-spend"]
-        MKT["real market data"] --> SCN["ScenarioBuilder — 4 task templates"]
+        direction TB
+        MKT["real market data + news"] --> SCN["ScenarioBuilder — indicator / news-scoring / report tasks"]
         SCN --> TCH["DeepSeek teacher — key from env only"]
         TCH --> SFT["SFT JSONL"]
         TCH --> DPD["DPO preference pairs"]
     end
     subgraph TRAIN["Student training — offline"]
-        SFT --> QLR["QLoRA fine-tune, local student model"]
-        DPD --> DPO["DPO training"]
-        QLR --> ADP["LoRA adapter"]
-        DPO --> ADP
+        direction TB
+        QLR["QLoRA fine-tune — local Qwen student"] --> ADP["LoRA adapter"]
+        DPO["DPO training"] --> ADP
     end
     subgraph FLYWHEEL["Evolution flywheel — offline"]
-        TRJ["paper-trading trajectories"] --> REC["evolution/ recorder"]
+        direction TB
+        TRJ["paper-trading trajectories"] --> REC["evolution recorder"]
         REC --> DSB["DPO dataset builder"]
-        DSB --> DPO
-        ADP --> HOT["hot-reload adapter into agents"]
-        HOT -.-> TRJ
     end
+    SFT --> QLR
+    DPD --> DPO
+    DSB --> DPO
+    ADP --> HOT["hot-reload adapter into agents"]
+    HOT -.-> TRJ
     BND["Honest boundary: NO online gradient updates —<br/>online_gradient_step raises NotImplementedError"]
     style BND fill:#7f1d1d,color:#fff,stroke:#ef5350
 ```
@@ -161,12 +164,12 @@ flowchart LR
 ## Data stack (DA/DE-grade, not a sticker)
 
 ```mermaid
-flowchart LR
-    SRC["yfinance / live runtime / backtests"] --> PQ["parquet files — data/"]
-    PQ --> RAW["DuckDB raw — pandas EL, idempotent, audit cols"]
+flowchart TB
+    SRC["yfinance / RSS news / live runtime / backtests"] --> PQ["parquet files — data/"]
+    PQ --> RAW["DuckDB raw — pandas EL, idempotent + transactional, audit cols"]
     RAW --> STG["staging — dbt views, cleaning only"]
-    STG --> MRT["marts — dbt tables, Kimball star schema"]
-    MRT --> TST["dbt tests — 68 assertions, all green"]
+    STG --> MRT["marts — dbt tables, Kimball star schema + LLM sentiment"]
+    MRT --> TST["dbt tests — 80 assertions, all green"]
     MRT --> CSV["CSV exports — tableau/exports/"]
     MRT --> JDBC["DuckDB JDBC"]
     CSV --> TAB["Tableau dashboards — 5 views"]
