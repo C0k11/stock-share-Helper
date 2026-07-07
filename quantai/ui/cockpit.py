@@ -109,14 +109,19 @@ class CockpitDaemon:
         self._lang = "zh"
         self._lock = threading.Lock()
         self._stop = threading.Event()
+        self._kick = threading.Event()  # 提前唤醒（语言切换等）：打断轮间休眠立即重出一轮
         self._thread: Optional[threading.Thread] = None
 
     def configure(self, symbols: list[str], held_cost: dict[str, float], lang: str = "zh") -> None:
-        """UI 每次渲染时同步标的池与语言（线程安全；下一轮循环生效）。"""
+        """UI 每次渲染时同步标的池与语言（线程安全）。语言变化立即唤醒重出一轮——
+        否则用户切了语言还要盯着旧语言的综述最多 5 分钟。"""
         with self._lock:
+            lang_changed = lang != self._lang
             self._symbols = list(symbols)
             self._held_cost = dict(held_cost)
             self._lang = lang
+        if lang_changed and self.state.get("round", 0) > 0:
+            self._kick.set()
 
     def start(self) -> "CockpitDaemon":
         if self._thread is None or not self._thread.is_alive():
@@ -129,6 +134,7 @@ class CockpitDaemon:
 
     def stop(self) -> None:
         self._stop.set()
+        self._kick.set()
 
     # ----------------------------------------------------------------- #
     def _loop(self) -> None:
@@ -172,9 +178,10 @@ class CockpitDaemon:
                 brief = build_tactical_brief(advs, scored, as_of=datetime.now().strftime("%H:%M"))
                 out = llm.generate(brief, system=tactical_system_prompt(lang))
                 self.state.update(
-                    out=out, ts=datetime.now().timestamp(), scored=len(scored),
+                    out=out, out_lang=lang, ts=datetime.now().timestamp(), scored=len(scored),
                     error="", status="running", round=self.state["round"] + 1,
                 )
             except Exception as exc:  # noqa: BLE001 - 单轮失败下一轮重试，但要留痕
                 self.state.update(error=f"{type(exc).__name__}: {exc}", status="round_failed")
-            self._stop.wait(self.interval_sec)
+            self._kick.clear()
+            self._kick.wait(self.interval_sec)  # 等满一轮，或被语言切换/stop 提前唤醒

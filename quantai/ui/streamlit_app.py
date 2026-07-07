@@ -111,23 +111,54 @@ def _render_portfolio_page(st) -> None:  # pragma: no cover - 需 streamlit 运�
         use_container_width=True,
     )
 
-    # 宏观长线对比（模拟盘同款 line_chart 交互）：持仓 + 基准归一化到 100。
+    # 宏观长线区（模拟盘同款 line_chart 交互）。两种视图：
+    # 净值（默认）=「我的钱随时间的变化」：持仓股数×历史收盘+现金，对照同额投基准；
+    # 归一化对比 = 相对表现（涨跌幅口径，与起点价格无关）。
     # 日线蜡烛/RSI/MACD 细看在行情工作台——组合页定位是长线宏观，不重复摆日线。
-    st.subheader(tr(lang, "pf.longview"))
     import pandas as pd
 
     held = [s.symbol for s in snap.positions]
-    norm = {}
-    for s in held + ([benchmark] if benchmark not in held else []):
-        df = prices.get(s)
-        if df is None or df.empty or "close" not in df.columns:
-            continue
-        c = df["close"].dropna()
-        if len(c) > 1:
-            norm[s] = c / float(c.iloc[0]) * 100.0
-    if norm:
-        st.line_chart(pd.DataFrame(norm), use_container_width=True)
-        st.caption(tr(lang, "pf.longview_note", years=years))
+    view = st.radio(
+        tr(lang, "pf.view"), ["net", "norm"],
+        format_func=lambda v: tr(lang, f"pf.view_{v}"), horizontal=True, key="pf_view",
+    )
+    if view == "net":
+        st.subheader(tr(lang, "pf.networth"))
+        held_shares: dict[str, float] = {}
+        for pp in portfolio.positions:
+            held_shares[pp.symbol] = held_shares.get(pp.symbol, 0.0) + pp.shares
+        cols = {}
+        for s2, sh in held_shares.items():
+            df = prices.get(s2)
+            if df is not None and not df.empty and "close" in df.columns:
+                cols[s2] = df["close"].dropna() * sh
+        if cols:
+            aligned = pd.concat(cols.values(), axis=1).dropna()
+            nw = aligned.sum(axis=1) + float(portfolio.cash)
+            chart = {tr(lang, "pf.networth"): nw}
+            spy = prices.get(benchmark)
+            if spy is not None and not spy.empty and len(nw):
+                sc = spy["close"].dropna().reindex(nw.index).dropna()
+                if len(sc):
+                    chart[tr(lang, "pf.spy_same", bench=benchmark)] = (
+                        sc / float(sc.iloc[0]) * float(nw.iloc[0])
+                    )
+            st.line_chart(pd.DataFrame(chart), use_container_width=True)
+            if len(nw):
+                st.caption(tr(lang, "pf.net_note", start=str(nw.index[0].date())))
+    else:
+        st.subheader(tr(lang, "pf.longview"))
+        norm = {}
+        for s in held + ([benchmark] if benchmark not in held else []):
+            df = prices.get(s)
+            if df is None or df.empty or "close" not in df.columns:
+                continue
+            c = df["close"].dropna()
+            if len(c) > 1:
+                norm[s] = c / float(c.iloc[0]) * 100.0
+        if norm:
+            st.line_chart(pd.DataFrame(norm), use_container_width=True)
+            st.caption(tr(lang, "pf.longview_note", years=years))
 
     sym = st.selectbox(tr(lang, "pf.h_symbol"), held + ([benchmark] if benchmark not in held else []))
 
@@ -329,6 +360,8 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
             ),
             use_container_width=True,
             key="ws_main_chart",
+            # 轻交互：无工具栏 + 滚轮缩放（配合图内十字线统一悬浮读数）
+            config={"displayModeBar": False, "scrollZoom": True},
         )
         if _REFRESH[auto]:
             from datetime import datetime as _dt
@@ -397,6 +430,8 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
             stt = daemon.state
             if stt.get("out"):
                 st.markdown(stt["out"])
+                if stt.get("out_lang") and stt.get("out_lang") != lang:
+                    st.info(tr(lang, "ws.ai_lang_switch"))
                 st.caption(tr(
                     lang, "ws.ai_status", model=stt.get("model", "?"),
                     round=stt.get("round", 0),

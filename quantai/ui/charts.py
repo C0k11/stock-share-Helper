@@ -228,6 +228,13 @@ def workstation_figure(
 
     fig.update_layout(height=340 + 120 * (len(panes) - 1), **DARK_LAYOUT)
     fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])] if kind == "candle" else None)
+    # 轻交互（模拟盘 line_chart 手感）：十字线悬浮统一读数、平移拖拽；
+    # 工具栏由渲染层 config displayModeBar=False 关闭
+    fig.update_layout(hovermode="x unified", dragmode="pan")
+    fig.update_xaxes(
+        showspikes=True, spikemode="across", spikesnap="cursor",
+        spikethickness=1, spikedash="dot", spikecolor="#8A8A93",
+    )
     return fig
 
 
