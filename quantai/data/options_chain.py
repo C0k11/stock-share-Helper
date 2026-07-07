@@ -35,7 +35,8 @@ class OptionChainFetcher:
         """返回 {symbol, expiry, days_to_expiry, calls, puts} 或 None（无期权/抓取失败）。
 
         到期日选择：[min_days, max_days] 窗口内最早的；窗口内没有则退而求
-        ≥7 天的最近一个（太近的末日期权时间价值畸形，不做对冲参考）。
+        `max(7, min_days)` 天外的最近一个——对冲口径默认不碰太近的末日期权
+        （时间价值畸形），但显式传 min_days<7（如 0DTE 教学场景）时按需给近端。
         """
         try:
             t = self._ticker(symbol)
@@ -43,13 +44,14 @@ class OptionChainFetcher:
             if not expiries:
                 return None
             today = datetime.now().date()
+            floor = min(min_days, 7)
             dated = []
             for e in expiries:
                 try:
                     d = (datetime.strptime(e, "%Y-%m-%d").date() - today).days
                 except ValueError:
                     continue
-                if d >= 7:
+                if d >= floor:
                     dated.append((d, e))
             if not dated:
                 return None

@@ -78,7 +78,9 @@ llm:
     api_key_env: "REMOTE_LLM_API_KEY"
   inference:
     device: "cuda"
-    quantization: "8bit"         # 4bit | 8bit | fp16（取代旧 load_in_4bit 布尔）
+    # fp16：24GB 卡单驻留时吞吐远高于 bitsandbytes 8bit（8bit 省显存但推理慢数倍）。
+    # 要与训练/其它 GPU 任务并存时改回 8bit/4bit。fp16 权重约 16GB。
+    quantization: "fp16"         # 4bit | 8bit | fp16（取代旧 load_in_4bit 布尔）
     temperature: 0.7
     max_new_tokens: 512
   finetune:

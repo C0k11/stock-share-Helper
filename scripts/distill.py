@@ -36,6 +36,7 @@ from quantai.distill import (
     MissingApiKeyError,
     MockDeepSeekClient,
     ScenarioBuilder,
+    build_indicator_brief,
 )
 
 
@@ -47,6 +48,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--limit", type=int, default=None, help=f"场景上限（默认 config {cfg.max_scenarios}）")
     p.add_argument("--history-dates", type=int, default=0,
                    help="历史日期采样数（v2 多市况覆盖；0=只用当下快照）")
+    p.add_argument("--with-options", action="store_true",
+                   help="附加期权教学场景（真实链面快照：权利金/择时/末日/对冲评审）")
+    p.add_argument("--symbols-from-config", action="store_true",
+                   help="标的池 = 持仓 + 自选股（覆盖 --symbols）")
     p.add_argument("--workers", type=int, default=8, help="教师并发请求数（IO 密集）")
     p.add_argument("--dry-run", action="store_true", help="mock 教师走全管线（零花费）")
     p.add_argument("--show-sample", action="store_true", help="打印一条场景 prompt 后退出（零花费）")
@@ -56,6 +61,20 @@ def main(argv: list[str] | None = None) -> int:
 
     # 抓真实行情构造场景（网络免费；教师调用才花钱）
     from quantai.data.prices import PriceFetcher
+
+    if args.symbols_from_config:
+        from quantai.config import load_config as _lc
+        from quantai.data.watchlist import load_watchlist
+        from quantai.portfolio import load_portfolio
+
+        pcfg = _lc().portfolio
+        pool: list[str] = []
+        try:
+            pool += load_portfolio(pcfg.file).symbols
+        except Exception:  # noqa: BLE001 - 无本地持仓文件时用自选股
+            pass
+        pool += load_watchlist(pcfg.watchlist_file)
+        args.symbols = list(dict.fromkeys(pool)) or args.symbols
 
     start = (datetime.now() - timedelta(days=cfg.history_years * 365)).strftime("%Y-%m-%d")
     prices = PriceFetcher().fetch_prices(args.symbols, start)
@@ -82,11 +101,32 @@ def main(argv: list[str] | None = None) -> int:
         if report_sc:
             scenarios.append(report_sc)
 
+    # 期权教学场景（真实链面快照，同为"当下"性质——链没有历史存档）
+    opt_scs = []
+    if args.with_options:
+        from quantai.data.options_chain import OptionChainFetcher
+        from quantai.distill.options_scenarios import build_option_scenarios
+
+        ocf = OptionChainFetcher()
+        for sym, df in prices.items():
+            if df is None or len(df) < 15 or "close" not in df.columns:
+                continue
+            ch = ocf.fetch(sym)  # 对冲窗口（20-60 天）
+            if ch is None:
+                continue  # 无期权链（新股/ETF 部分），诚实跳过
+            near = ocf.fetch(sym, min_days=0, max_days=7)  # 近端链（末日题素材）
+            vals = build_indicator_brief(df, sym)[1]
+            spot = float(df["close"].dropna().iloc[-1])
+            opt_scs += list(build_option_scenarios(sym, spot, ch, vals, near, as_of=as_of))
+        print(f"[distill] options scenarios: {len(opt_scs)}")
+
     # 新闻打分任务恒为"当下"（RSS 没有历史存档）
     news = NewsFetcher().fetch_all(args.symbols, limit_per_symbol=4)
     news_scs = list(build_news_scoring_scenarios(news, as_of=as_of))
-    scenarios += news_scs
     n_news = len(news_scs)
+    # 顺序即优先级：limit 保险丝从队尾截断——期权/新闻是当日稀缺快照放最前，
+    # 海量历史场景放后（被截只损失可再采样的历史日）
+    scenarios = opt_scs + news_scs + scenarios
     print(
         f"[distill] {len(prices)} symbols, history_dates={args.history_dates} -> "
         f"{len(scenarios)} scenarios (market {len(scenarios) - n_news}, news {n_news})"

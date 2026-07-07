@@ -176,7 +176,7 @@ class CockpitDaemon:
                     self._stop.wait(self.interval_sec)
                     continue
                 self.state["status"] = "scoring"
-                news = NewsFetcher().fetch_all([a["symbol"] for a in advs[:5]], limit_per_symbol=3)
+                news = NewsFetcher().fetch_all([a["symbol"] for a in advs[:6]], limit_per_symbol=5)
                 scored = score_news(news, llm) if news else []
                 if scored:
                     _persist_scores(scored, model=self.state["model"])
@@ -204,9 +204,27 @@ class CockpitDaemon:
                 except Exception:  # noqa: BLE001
                     hedges = []
 
+                # Polymarket 事件概率（公开免 key；失败静默跳过，不影响主综述）
+                events: list[str] = []
+                try:
+                    from quantai.config import load_config
+                    from quantai.data.events import EventsFetcher
+
+                    tags = load_config().data.event_tags
+                    if tags:
+                        odds = EventsFetcher().fetch_all(tags, limit_per_tag=10)
+                        top = sorted(odds, key=lambda o: -(o.volume_24h or 0))[:5]
+                        events = [
+                            f"[{o.category}] {o.question} - Yes {o.yes_price * 100:.0f}%"
+                            for o in top
+                        ]
+                except Exception:  # noqa: BLE001
+                    events = []
+
                 self.state["status"] = "summarizing"
                 brief = build_tactical_brief(
-                    advs, scored, as_of=datetime.now().strftime("%H:%M"), hedges=hedges
+                    advs, scored, as_of=datetime.now().strftime("%H:%M"),
+                    hedges=hedges, events=events,
                 )
                 out = llm.generate(brief, system=tactical_system_prompt(lang))
                 self.state.update(

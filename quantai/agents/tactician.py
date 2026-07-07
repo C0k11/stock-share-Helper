@@ -308,6 +308,7 @@ def build_tactical_brief(
     scored_news: Optional[list[dict]] = None,
     as_of: str = "",
     hedges: Optional[list[str]] = None,
+    events: Optional[list[str]] = None,
 ) -> str:
     """操作卡 + 新闻情绪 → 驻留 LLM 的战术简报（纯组装可测）。"""
     lines = [f"# 实时作战台数据{f'（{as_of}）' if as_of else ''}", "", "## 操作卡（规则引擎）"]
@@ -328,6 +329,10 @@ def build_tactical_brief(
         lines.append("")
         lines.append("## 对冲台（期权，Black-Scholes 引擎估算——只可转述数字，不要自行计算）")
         lines.extend(f"- {h}" for h in hedges)
+    if events:
+        lines.append("")
+        lines.append("## 宏观事件概率（Polymarket 预测市场隐含，非官方预测）")
+        lines.extend(f"- {e}" for e in events)
     lines.append("")
     lines.append("## 新闻情绪（标题级 [-1,1]）")
     if scored_news:

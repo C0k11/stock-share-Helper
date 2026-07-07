@@ -111,6 +111,43 @@ def _render_portfolio_page(st) -> None:  # pragma: no cover - 需 streamlit 运�
         use_container_width=True,
     )
 
+    # 编辑持仓：交易后同步真实仓位（WS 无公开 API，手动两步全站对齐）
+    with st.expander(tr(lang, "pf.edit")):
+        import yaml as _yaml
+
+        st.caption(tr(lang, "pf.edit_note"))
+        e_cash = st.number_input(tr(lang, "pf.e_cash"), value=float(portfolio.cash),
+                                 step=10.0, min_value=0.0, key="pf_e_cash")
+        edited = []
+        for i, pp in enumerate(portfolio.positions):
+            c1, c2, c3 = st.columns([1.2, 1, 1])
+            c1.markdown(f"**{pp.symbol}**")
+            sh = c2.number_input(f"{tr(lang, 'pf.e_shares')} · {pp.symbol}", value=float(pp.shares),
+                                 step=1.0, key=f"pf_e_sh_{i}")
+            cb = c3.number_input(f"{tr(lang, 'pf.e_cost')} · {pp.symbol}", value=float(pp.cost_basis),
+                                 step=0.01, min_value=0.0, key=f"pf_e_cb_{i}")
+            edited.append((pp, sh, cb))
+        if st.button(tr(lang, "pf.e_save")):
+            data = {
+                "cash": float(e_cash),
+                "positions": [
+                    {"symbol": pp.symbol, "shares": float(sh), "cost_basis": float(cb),
+                     "open_date": str(pp.open_date)}
+                    for pp, sh, cb in edited if sh != 0
+                ],
+            }
+            header = (
+                "# 真实持仓（本文件被 .gitignore 排除，永不入库）。\n"
+                "# 由仪表盘「编辑持仓」写入；全 USD 口径。\n"
+            )
+            Path(pf_path).write_text(
+                header + _yaml.safe_dump(data, allow_unicode=True, sort_keys=False),
+                encoding="utf-8",
+            )
+            st.success(tr(lang, "pf.e_saved"))
+            st.cache_data.clear()
+            st.rerun()
+
     # 宏观长线区（模拟盘同款 line_chart 交互）。两种视图：
     # 净值（默认）=「我的钱随时间的变化」：持仓股数×历史收盘+现金，对照同额投基准；
     # 归一化对比 = 相对表现（涨跌幅口径，与起点价格无关）。
