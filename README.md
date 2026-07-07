@@ -13,16 +13,26 @@ The codebase was rebuilt bottom-up into the typed, tested `quantai/` package
 
 ## What it does
 
-Three jobs, nothing decorative:
+Four jobs, nothing decorative:
 
 1. **Analyze your real portfolio** — load actual holdings (local YAML/CSV, never
    committed), compute precise unrealized PnL, exposure/concentration, beta,
    holdings-based risk stats, and per-position technical state.
-2. **Analyze tickers** — a pure pandas/numpy indicator & stats engine with math
-   definitions, boundary honesty, and causality proofs (no lookahead).
-3. **Decision support** — rule + LLM multi-agent pipeline (planner → gatekeeper →
-   router → experts → VLM chartist → macro governor → debate), paper-trading
-   runtime, offline evolution loop (experience → DPO preference pairs → QLoRA).
+2. **Track tickers & markets** — a pure pandas/numpy indicator & stats engine with
+   math definitions, boundary honesty, and causality proofs (no lookahead); a
+   self-managed watchlist feeding prices, signals, and RSS news into the warehouse;
+   a broker-style workstation UI (intraday 1-minute bars, VWAP, indicator toggles).
+3. **AI analyst** — scheduled daily and intraday reports: session statistics with
+   honest OHLCV-level selling-pressure proxies (down-bar volume share, price vs
+   session VWAP, volume vs 20-day average), LLM commentary from a locally served
+   Qwen model grounded strictly in system data, and batch **news-sentiment
+   quantification** persisted to the warehouse for BI timelines.
+4. **Decision support & learning loop** — rule + LLM multi-agent pipeline (planner →
+   gatekeeper → router → experts → VLM chartist → macro governor → debate),
+   paper-trading runtime, and an executed **teacher–student distillation flywheel**:
+   DeepSeek-generated scenario batches (indicator analysis, news scoring,
+   multi-symbol reports — prompts shared verbatim with production) → local
+   QLoRA SFT / DPO on a single RTX 4090.
 
 ## Quick start
 
@@ -39,11 +49,16 @@ python scripts/warehouse.py --full --portfolio portfolio.local.yaml
 # 3) Dashboard (portfolio page works standalone)
 python -m streamlit run quantai/ui/streamlit_app.py
 
-# 4) Paper trading (offline deterministic demo)
+# 4) AI analyst reports (data brief is seconds; --llm adds local-GPU commentary + news scoring)
+python scripts/report.py --llm              # daily
+python scripts/report.py --intraday --llm   # intraday session stats + selling-pressure proxies
+
+# 5) Paper trading (offline deterministic demo)
 python scripts/live.py --source simulated --tickers NVDA TSLA --interval 0.1 --duration 8 --seed 1
 
-# 5) Distillation dry-run (mock teacher, zero API spend)
+# 6) Distillation flywheel (mock dry-run is free; real teacher runs are cost-gated)
 python scripts/distill.py --dry-run --symbols SPY NVDA
+python scripts/train.py --sft data/distill/<batch>.jsonl --confirm-compute
 ```
 
 ## Architecture
@@ -165,9 +180,10 @@ flowchart LR
   attrs) and facts with declared grains — `fact_prices` (window-function
   daily returns, 52-week-high distance), `fact_positions` (lot aggregation +
   ASOF-join valuation), `fact_trades`, `fact_signals`, `fact_news` (RSS
-  headlines, link grain), `fact_backtest_results`, `fact_backtest_equity`
+  headlines at link grain **with LLM sentiment columns** — unscored stays NULL,
+  never a fake neutral 0), `fact_backtest_results`, `fact_backtest_equity`
   (SQL drawdown).
-- **dbt tests**: 76 assertions (not-null/enums/relationships/grain uniqueness on
+- **dbt tests**: 80 assertions (not-null/enums/relationships/grain uniqueness on
   every fact/OHLC sanity/PnL consistency/drawdown ≤ 0/warn on unpriceable
   positions) — all passing on real market data.
 - **Reconciliation**: pytest runs a real `dbt build` and asserts SQL and pandas
