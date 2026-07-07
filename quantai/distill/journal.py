@@ -98,8 +98,10 @@ def rule_student_answer(symbol: str, vals: dict) -> str:
         elif rsi <= 30:
             risks.append(f"RSI {_fmt(rsi, 1)} 超卖，可能仍在下跌途中（不抄底赌反转）")
 
+    # retrace_from_20d_high 恒为正（1 - close/rolling_high，越大回撤越深）——
+    # 旧判 `<= -0.15` 永假（审查实锤：该因子上线以来从未触发过）
     retrace = vals.get("retrace_from_20d_high")
-    if retrace is not None and retrace == retrace and retrace <= -0.15:
+    if retrace is not None and retrace == retrace and retrace >= 0.15:
         score -= 1
         risks.append(f"距 20 日高点已回落 {_fmt(retrace * 100, 1)}%，深回撤中")
 

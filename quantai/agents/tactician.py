@@ -1,0 +1,223 @@
+"""盘中战术台：确定性操作建议引擎（规则层，秒级刷新；LLM 观点走驻留模型另出）。
+
+工作台"实时作战台"的大脑：日线五因子计分（与 distill.journal 的 rule_v1 同门）
+叠加**盘中修正**（卖压/贴地/放量急跌），输出每标的一张操作卡——
+动作（加仓/持有/减持/清仓/关注买点/观望）+ 止损参考位 + 引用真实数值的理由。
+
+诚实边界：
+- 这是**分析参考不是投资建议**（渲染层必须带此标注）；
+- 全部结论由给定数据确定性推导，可复现、可单测；
+- 止损参考位是技术位（MA20 / 日内低点），不是任何形式的收益承诺。
+"""
+
+from __future__ import annotations
+
+from typing import Optional
+
+#: 动作字典（渲染层按此上色：红=减仓向，绿=加仓向，灰=中性）
+ACTION_ADD = "加仓"
+ACTION_HOLD = "持有"
+ACTION_TRIM = "减持"
+ACTION_EXIT = "清仓"
+ACTION_ENTRY = "关注买点"
+ACTION_WATCH = "观望"
+
+#: 驻留 LLM 战术观点的 system prompt（工作台实时综述用；与日报/快评 prompt 区分——
+#: 这里要求落到"标的+动作+参考位"的可执行颗粒度）
+TACTICAL_SYSTEM_PROMPT = (
+    "你是盘中交易台的战术分析师。基于给定的实时作战台数据（每标的的操作卡、"
+    "盘中卖压指标与新闻情绪）做综述：\n"
+    "1) 只引用给定数据中的数字与事实，不编造；\n"
+    "2) 输出【盘面判断】【操作建议】【风险】三段；操作建议必须落到具体标的：\n"
+    "   动作（加仓/持有/减持/清仓/观望）+ 参考价位（如止损位），与操作卡冲突时说明理由；\n"
+    "3) 持仓标的优先讨论；4) 短句克制，这是分析参考不是投资建议。"
+)
+
+
+def _f(vals: dict, key: str) -> Optional[float]:
+    v = vals.get(key)
+    try:
+        f = float(v)
+        return f if f == f else None
+    except (TypeError, ValueError):
+        return None
+
+
+def advise(
+    symbol: str,
+    daily_vals: dict,
+    intraday: Optional[dict] = None,
+    held: bool = False,
+    avg_cost: Optional[float] = None,
+) -> dict:
+    """日线因子 + 盘中修正 → 一张操作卡。
+
+    Args:
+        daily_vals: `build_indicator_brief` 的数值 dict（**收盘口径**——调用方负责
+            剔除当日进行中的半根日线，盘中信息由 `intraday` 入口进来，不混口径）。
+        intraday: `intraday_stats` 输出（收盘后/无当日数据传 None）。
+        held / avg_cost: 是否实际持仓及成本（持仓才给止损位与减清仓动作）。
+
+    Returns:
+        {symbol, action, score, last, day_pct, stop, reasons, risks, held}
+    """
+    reasons: list[str] = []
+    risks: list[str] = []
+    score = 0
+
+    ma = _f(daily_vals, "ma_alignment")
+    if ma is not None:
+        if ma >= 0.67:
+            score += 1
+            reasons.append(f"均线多头排列 {ma:.2f}")
+        elif ma <= 0.33:
+            score -= 1
+            reasons.append(f"均线空头排列 {ma:.2f}")
+    if daily_vals.get("in_uptrend"):
+        score += 1
+        reasons.append("20 日趋势向上")
+    macd_h = _f(daily_vals, "macd_hist")
+    if macd_h is not None:
+        score += 1 if macd_h > 0 else -1
+        reasons.append(f"MACD 柱 {macd_h:+.3f}")
+    r20 = _f(daily_vals, "ret_20d_pct")
+    if r20 is not None:
+        score += 1 if r20 > 0 else -1
+        reasons.append(f"20 日 {r20:+.1f}%")
+    rsi = _f(daily_vals, "rsi_14")
+    if rsi is not None and rsi >= 70:
+        # 阈值与 rule_v1 对齐（70）：同族引擎对同一数据必须给同一分
+        score -= 1
+        risks.append(f"RSI {rsi:.0f} 超买")
+    # retrace_from_20d_high 生产口径恒为正（1 - close/rolling_high ∈ [0,1)，
+    # 越大回撤越深）——旧判 `<= -0.15` 是永假死代码（审查实锤，rule_v1 同病同修）
+    retrace = _f(daily_vals, "retrace_from_20d_high")
+    if retrace is not None and retrace >= 0.15:
+        score -= 1
+        risks.append(f"距 20 日高点 -{retrace * 100:.0f}%")
+    vol = _f(daily_vals, "realized_vol_20_ann")
+    if vol is not None and vol >= 0.6:
+        # 第五因子（波动）：漏掉它会让作战台在高波动票上比 rule_v1 激进整整一档
+        score -= 1
+        risks.append(f"年化波动率 {vol * 100:.0f}% 偏高，仓位应打折")
+
+    # ---- 盘中修正（只降不升：盘中噪音不该独立制造买入信号） ----
+    last = _f(daily_vals, "last_close")
+    day_pct = None
+    if intraday:
+        last = _f(intraday, "last") or last
+        day_pct = _f(intraday, "chg_pct")
+        dvs = _f(intraday, "down_volume_share")
+        vsv = _f(intraday, "vs_vwap_pct")
+        if dvs is not None and vsv is not None and dvs > 0.65 and vsv < -0.01:
+            score -= 1
+            risks.append(f"盘中抛压主导（跌量 {dvs * 100:.0f}%、VWAP 下方 {vsv * 100:.1f}%）")
+        pos = _f(intraday, "close_position")
+        if pos is not None and pos < 0.12:
+            risks.append("贴日内低点")
+        vva = _f(intraday, "vol_vs_avg")
+        if vva is not None and day_pct is not None and vva > 1.5 and day_pct < -0.03:
+            score -= 1
+            risks.append(f"放量急跌（{vva:.1f}× 均量、{day_pct * 100:+.1f}%）")
+
+    # ---- 动作与参考位 ----
+    sma20 = _f(daily_vals, "sma_20")
+    day_low = _f(intraday or {}, "day_low")
+    stop: Optional[float] = None
+    if held:
+        if score >= 3:
+            action = ACTION_ADD
+        elif score >= 0:
+            action = ACTION_HOLD
+        elif score >= -2:
+            action = ACTION_TRIM
+        else:
+            action = ACTION_EXIT
+        # 止损参考：价在 MA20 上方给 MA20；已破 MA20 给日内低点（跌破=趋势恶化确认）
+        if last is not None and sma20 is not None:
+            stop = sma20 if last >= sma20 else (day_low if day_low is not None else None)
+        elif day_low is not None:
+            stop = day_low
+        if rsi is not None and rsi >= 75 and score >= 1:
+            risks.append("可考虑部分止盈锁定利润")
+    else:
+        if score >= 3 or (score >= 2 and daily_vals.get("is_pullback")):
+            action = ACTION_ENTRY
+        else:
+            action = ACTION_WATCH
+
+    return {
+        "symbol": symbol,
+        "action": action,
+        "score": score,
+        "last": last,
+        "day_pct": day_pct,
+        "stop": stop,
+        "reasons": reasons,
+        "risks": risks,
+        "held": held,
+        "avg_cost": avg_cost,
+    }
+
+
+def advice_row(adv: dict) -> dict:
+    """操作卡 → 表格行（渲染层 dataframe 直接吃）。"""
+    stop = adv.get("stop")
+    return {
+        "标的": adv["symbol"] + ("　📌" if adv.get("held") else ""),
+        "现价": f"{adv['last']:.2f}" if adv.get("last") is not None else "—",
+        "当日%": f"{adv['day_pct'] * 100:+.2f}%" if adv.get("day_pct") is not None else "—",
+        "动作": adv["action"],
+        "止损参考": f"{stop:.2f}" if stop is not None else "—",
+        "依据": "；".join(adv.get("reasons", [])[:3]) or "—",
+        "风险": "；".join(adv.get("risks", [])[:2]) or "—",
+    }
+
+
+def alerts(advices: list[dict]) -> list[str]:
+    """从一批操作卡里挑需要立刻看见的警报（持仓的减/清仓与风险项优先；无状态，
+    只看本轮——跨轮变化检测未实现，别当成"止损位变动提醒"用）。"""
+    out = []
+    for a in advices:
+        if a.get("held") and a["action"] in (ACTION_TRIM, ACTION_EXIT):
+            stop = f"，止损参考 {a['stop']:.2f}" if a.get("stop") is not None else ""
+            out.append(f"⚠ {a['symbol']} 建议{a['action']}{stop}（计分 {a['score']:+d}）")
+        elif a.get("held") and a.get("risks"):
+            out.append(f"👀 {a['symbol']}：{a['risks'][0]}")
+        elif a["action"] == ACTION_ENTRY:
+            out.append(f"🟢 {a['symbol']} 出现关注买点（计分 {a['score']:+d}）")
+    return out
+
+
+def build_tactical_brief(
+    advices: list[dict],
+    scored_news: Optional[list[dict]] = None,
+    as_of: str = "",
+) -> str:
+    """操作卡 + 新闻情绪 → 驻留 LLM 的战术简报（纯组装可测）。"""
+    lines = [f"# 实时作战台数据{f'（{as_of}）' if as_of else ''}", "", "## 操作卡（规则引擎）"]
+    for a in advices:
+        head = f"- {a['symbol']}{'（持仓）' if a.get('held') else ''}: "
+        seg = head + (f"现价 {a['last']:.2f}" if a.get("last") is not None else "现价 n/a")
+        if a.get("day_pct") is not None:
+            seg += f"（当日 {a['day_pct'] * 100:+.2f}%）"
+        seg += f"，动作={a['action']}（计分 {a['score']:+d}）"
+        if a.get("stop") is not None:
+            seg += f"，止损参考 {a['stop']:.2f}"
+        if a.get("reasons"):
+            seg += f"；依据：{'；'.join(a['reasons'][:3])}"
+        if a.get("risks"):
+            seg += f"；风险：{'；'.join(a['risks'][:2])}"
+        lines.append(seg)
+    lines.append("")
+    lines.append("## 新闻情绪（标题级 [-1,1]）")
+    if scored_news:
+        for r in scored_news[:12]:
+            it = r["item"]
+            s = r.get("sentiment")
+            tag = f"{s:+.2f}" if s is not None else "未打分"
+            sym = getattr(it, "symbol", None) or "-"
+            lines.append(f"- [{sym}] ({tag}) {getattr(it, 'title', '')}")
+    else:
+        lines.append("（本轮无新闻数据）")
+    return "\n".join(lines)

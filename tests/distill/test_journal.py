@@ -35,9 +35,10 @@ def _prices(n=250, seed=0, drift=0.0006) -> pd.DataFrame:
 
 
 def _vals(**over) -> dict:
+    # retrace_from_20d_high 生产口径恒为正（越大回撤越深）
     base = {
         "ma_alignment": 1.0, "in_uptrend": True, "macd_hist": 0.5, "ret_20d_pct": 4.2,
-        "rsi_14": 55.0, "retrace_from_20d_high": -0.02, "realized_vol_20_ann": 0.25,
+        "rsi_14": 55.0, "retrace_from_20d_high": 0.02, "realized_vol_20_ann": 0.25,
         "sma_20": 101.5, "last_close": 103.0,
     }
     base.update(over)
@@ -55,9 +56,14 @@ class TestRuleStudent:
         ans = rule_student_answer(
             "BBB",
             _vals(ma_alignment=0.0, in_uptrend=False, macd_hist=-0.4, ret_20d_pct=-8.0,
-                  retrace_from_20d_high=-0.2, realized_vol_20_ann=0.9),
+                  retrace_from_20d_high=0.2, realized_vol_20_ann=0.9),
         )
         assert "减仓" in ans
+
+    def test_deep_retrace_triggers_with_production_sign(self):
+        """正值深回撤必须真触发减分与风险话术（旧 `<=-0.15` 为永假死代码，实锤已修）。"""
+        ans = rule_student_answer("CCC", _vals(retrace_from_20d_high=0.22))
+        assert "深回撤" in ans
 
     def test_action_always_one_of_four(self):
         for seed in range(6):
