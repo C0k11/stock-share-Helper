@@ -21,7 +21,13 @@ Four jobs, nothing decorative:
 2. **Track tickers & markets** — a pure pandas/numpy indicator & stats engine with
    math definitions, boundary honesty, and causality proofs (no lookahead); a
    self-managed watchlist feeding prices, signals, and RSS news into the warehouse;
-   a broker-style workstation UI (intraday 1-minute bars, VWAP, indicator toggles).
+   a broker-style workstation UI (bilingual zh/en chrome, auto-refreshing intraday
+   1-minute bars, VWAP, indicator toggles) with a real-position banner and an
+   always-on **tactics board**: a five-factor rule engine emits per-symbol action
+   cards (add/hold/trim/exit + stop references) every 30s, while a resident
+   analyst — the local v2 student, or any OpenAI-compatible remote API via
+   `llm.remote` — runs a background daemon thread that summarizes the board and
+   persists news sentiment every 5 minutes without ever blocking the UI.
 3. **AI analyst** — scheduled daily and intraday reports: session statistics with
    honest OHLCV-level selling-pressure proxies (down-bar volume share, price vs
    session VWAP, volume vs 20-day average), LLM commentary from a locally served
@@ -239,6 +245,14 @@ flowchart TB
   (`scripts/eval_student.py`: base vs student side-by-side on held-out dates
   plus never-trained symbols, with repetition/citation/format collapse
   detectors) — the v1 adapter failed it and was never mounted.
+
+## UI languages
+
+The dashboard chrome (navigation, workstation, tactics board, paper-trading,
+AI-analyst page) switches between 中文 and English from the sidebar; the
+resident analyst answers in the selected language. Report *bodies* (daily /
+intraday archives) and the portfolio/watchlist page internals are still
+Chinese-first — honest boundary, on the roadmap.
 
 ## Privacy
 

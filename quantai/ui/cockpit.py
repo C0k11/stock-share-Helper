@@ -47,6 +47,7 @@ def collect_advices(
     symbols: list[str],
     held_cost: dict[str, float],
     fetch: Callable,
+    lang: str = "zh",
 ) -> list[dict]:
     """拉数据 → 日线五因子 + 盘中卖压 → 操作卡列表（持仓优先、|计分| 降序）。
 
@@ -78,7 +79,7 @@ def collect_advices(
                 avg_vol = float(d["volume"].dropna().tail(20).mean()) if "volume" in d.columns else 0.0
                 ist = intraday_stats(m1, prev_close, avg_vol) or None
             advs.append(
-                advise(s, vals, ist, held=s in held_cost, avg_cost=held_cost.get(s))
+                advise(s, vals, ist, held=s in held_cost, avg_cost=held_cost.get(s), lang=lang)
             )
         except Exception:  # noqa: BLE001 - 单标的失败不炸整批
             continue
@@ -102,15 +103,17 @@ class CockpitDaemon:
         }
         self._symbols: list[str] = []
         self._held_cost: dict[str, float] = {}
+        self._lang = "zh"
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
-    def configure(self, symbols: list[str], held_cost: dict[str, float]) -> None:
-        """UI 每次渲染时同步标的池（线程安全；下一轮循环生效）。"""
+    def configure(self, symbols: list[str], held_cost: dict[str, float], lang: str = "zh") -> None:
+        """UI 每次渲染时同步标的池与语言（线程安全；下一轮循环生效）。"""
         with self._lock:
             self._symbols = list(symbols)
             self._held_cost = dict(held_cost)
+            self._lang = lang
 
     def start(self) -> "CockpitDaemon":
         if self._thread is None or not self._thread.is_alive():
@@ -138,7 +141,7 @@ class CockpitDaemon:
 
         from quantai.agents.news_scorer import score_news
         from quantai.agents.reporting import _persist_scores
-        from quantai.agents.tactician import TACTICAL_SYSTEM_PROMPT, build_tactical_brief
+        from quantai.agents.tactician import build_tactical_brief, tactical_system_prompt
         from quantai.data.news import NewsFetcher
 
         while not self._stop.is_set():
@@ -146,12 +149,13 @@ class CockpitDaemon:
                 with self._lock:
                     symbols = list(self._symbols)
                     held_cost = dict(self._held_cost)
+                    lang = self._lang
                 if not symbols:
                     self.state["status"] = "等待标的配置…"
                     self._stop.wait(5)
                     continue
                 self.state["status"] = "分析中（取数 + 操作卡）…"
-                advs = collect_advices(symbols, held_cost, direct_fetch)
+                advs = collect_advices(symbols, held_cost, direct_fetch, lang=lang)
                 if not advs:
                     self.state["status"] = "标的暂无足量数据"
                     self._stop.wait(self.interval_sec)
@@ -163,7 +167,7 @@ class CockpitDaemon:
                     _persist_scores(scored, model=self.state["model"])
                 self.state["status"] = "生成战术综述…"
                 brief = build_tactical_brief(advs, scored, as_of=datetime.now().strftime("%H:%M"))
-                out = llm.generate(brief, system=TACTICAL_SYSTEM_PROMPT)
+                out = llm.generate(brief, system=tactical_system_prompt(lang))
                 self.state.update(
                     out=out, ts=datetime.now().timestamp(), scored=len(scored),
                     error="", status="运行中", round=self.state["round"] + 1,

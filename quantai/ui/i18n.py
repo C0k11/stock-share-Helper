@@ -1,0 +1,173 @@
+"""仪表盘双语（中文/English）。
+
+用法：`tr(lang, key, **fmt)`——按语言取词条并可选 format；缺词条回退中文，
+再缺原样返回 key（绝不因翻译缺失炸页面）。语言状态放 st.session_state["ui_lang"]。
+
+诚实覆盖范围：UI 框架文案 + 作战台操作卡/警报 + AI 综述输出语言指令。
+日报/盘中快报的**正文**仍为中文（LLM 生成物与档案格式，后续版本再双语）。
+"""
+
+from __future__ import annotations
+
+LANGS = {"中文": "zh", "English": "en"}
+
+STRINGS: dict[str, dict[str, str]] = {
+    "zh": {
+        # 导航 / 全局
+        "nav.pages": "页面",
+        "nav.workstation": "行情工作台",
+        "nav.portfolio": "组合分析",
+        "nav.watchlist": "自选股",
+        "nav.analyst": "AI 分析",
+        "nav.sim": "模拟盘",
+        "nav.lang": "语言 / Language",
+        "nav.tableau_open": "打开 Tableau（{name}）",
+        "nav.tableau_dir": "打开 Tableau 数据源目录",
+        # 工作台
+        "ws.symbol": "标的",
+        "ws.cash_tfsa": "可用现金 · TFSA",
+        "ws.held_pos": "{sym} × {shares} [持仓]",
+        "ws.avg_cost": "成本均价",
+        "ws.mkt_value": "市值",
+        "ws.unreal_pnl": "浮动盈亏",
+        "ws.today": "今日",
+        "ws.auto_refresh": "自动刷新",
+        "ws.refresh_off": "刷新:关",
+        "ws.indicators": "指标",
+        "ws.no_data": "{sym} 在 {tf} 档取不到数据（新上市/加密标的部分粒度不支持），换个时间档试试。",
+        "ws.auto_caption": "每 {auto} 自动刷新 · 最后更新 {ts}",
+        "ws.board_title": "实时作战台",
+        "ws.board_caption": "规则引擎每 30 秒一轮（五因子 + 盘中卖压修正）· 常驻分析员后台每 5 分钟一轮综述并给新闻打分入库 · 分析参考，非投资建议",
+        "ws.board_symbols": "作战台标的（持仓恒在，自选可增删）",
+        "ws.board_empty": "（作战台标的暂无足量数据）",
+        "ws.board_updated": "操作卡更新 {ts} · 30s/轮 · 收盘后自动退回日线口径",
+        "ws.ai_toggle": "常驻 AI 分析员（打开页面即后台加载并持续分析；本地 v2 学生 ~10GB 显存，或 config llm.remote 外接 API）",
+        "ws.ai_status": "分析员 {model} · 第 {round} 轮 · 生成于 {ts} · 本轮新闻入库 {scored} 条 · 状态：{status}",
+        "ws.ai_waiting": "常驻分析员：{status}（首轮综述通常 1-2 分钟内出）",
+        "ws.ai_error": "最近一轮异常：{err}（自动重试中）",
+        "ws.market_details": "Market details",
+        "ws.tab_holdings": "Holdings",
+        "ws.tab_news": "News",
+        "ws.shares": "持股",
+        "ws.avg_price": "均价",
+        "ws.not_held": "未持有该标的。",
+        # 操作卡表头
+        "card.symbol": "标的",
+        "card.last": "现价",
+        "card.day": "当日%",
+        "card.action": "动作",
+        "card.stop": "止损参考",
+        "card.reasons": "依据",
+        "card.risks": "风险",
+        # AI 分析页
+        "ai.title": "QuantAI · AI 分析师",
+        "ai.desc": "**整日分析日报**（收盘口径：持仓+自选股+新闻+仓库 SQL 摘要，18:45 定时自动生成，也可手动触发）。盘中实时分析在**行情工作台 · 实时作战台**常驻进行，本页专注日报。",
+        "ai.toggle": "驻留本地 LLM（占用约 10GB 显存，加载一次全程复用）",
+        "ai.gen_llm": "生成日报（含 LLM 分析）",
+        "ai.gen_plain": "生成日报（数据简报）",
+        "ai.working": "组装日报…",
+        "ai.history": "历史报告（日报 + 定时盘中快报，按时间倒序）",
+        "ai.none": "暂无报告。点上方按钮生成。",
+        # 模拟盘
+        "sim.title": "QuantAI · 模拟盘",
+        "sim.mode": "模式",
+        "sim.mode_ytd": "年初至今回放（真实历史行情 × 规则策略）",
+        "sim.mode_live": "实时纸面会话（tick 级，需 API）",
+        "sim.tickers": "标的（逗号分隔，等权分仓）",
+        "sim.cash": "初始资金",
+        "sim.need_ticker": "输入至少一个标的。",
+        "sim.replaying": "回放 2026 年初至今（真实行情 × 规则策略）…",
+        "sim.no_data": "所选标的均无足量历史数据。",
+        "sim.equity": "当前权益",
+        "sim.initial": "初始资金（1 月 2 日）",
+        "sim.mdd": "最大回撤",
+        "sim.spy_bh": "同期 SPY 买入持有",
+        "sim.strategy": "规则策略",
+        "sim.positions": "当前模拟持仓",
+        "sim.all_flat": "策略当前全部空仓（信号偏空）。",
+        "sim.per_symbol": "分标的表现",
+        "sim.footnote": "口径：组合信号 >0.1 持有该标的等权份额否则空仓；next_open 成交 + 0.1% 换手成本；回放为规则层策略（非 agent 全链路），分析参考非投资建议。",
+    },
+    "en": {
+        "nav.pages": "Pages",
+        "nav.workstation": "Workstation",
+        "nav.portfolio": "Portfolio",
+        "nav.watchlist": "Watchlist",
+        "nav.analyst": "AI Analyst",
+        "nav.sim": "Paper Trading",
+        "nav.lang": "语言 / Language",
+        "nav.tableau_open": "Open Tableau ({name})",
+        "nav.tableau_dir": "Open Tableau data folder",
+        "ws.symbol": "Symbol",
+        "ws.cash_tfsa": "Cash available · TFSA",
+        "ws.held_pos": "{sym} × {shares} [HELD]",
+        "ws.avg_cost": "Avg cost",
+        "ws.mkt_value": "Market value",
+        "ws.unreal_pnl": "Unrealized PnL",
+        "ws.today": "today",
+        "ws.auto_refresh": "Auto refresh",
+        "ws.refresh_off": "Refresh: off",
+        "ws.indicators": "Indicators",
+        "ws.no_data": "No data for {sym} at {tf} (new listings / some crypto granularities unsupported) — try another timeframe.",
+        "ws.auto_caption": "Auto-refresh every {auto} · last update {ts}",
+        "ws.board_title": "Live Tactics Board",
+        "ws.board_caption": "Rule engine every 30s (five factors + intraday sell-pressure overlay) · resident analyst summarizes every 5 min and persists news sentiment · analysis reference, not investment advice",
+        "ws.board_symbols": "Board symbols (holdings always included)",
+        "ws.board_empty": "(no board symbols with sufficient data)",
+        "ws.board_updated": "Cards updated {ts} · every 30s · falls back to daily basis after close",
+        "ws.ai_toggle": "Resident AI analyst (loads in background on page open; local v2 student ~10GB VRAM, or remote API via config llm.remote)",
+        "ws.ai_status": "Analyst {model} · round {round} · generated {ts} · {scored} news scored this round · status: {status}",
+        "ws.ai_waiting": "Resident analyst: {status} (first summary usually within 1-2 min)",
+        "ws.ai_error": "Last round error: {err} (auto-retrying)",
+        "ws.market_details": "Market details",
+        "ws.tab_holdings": "Holdings",
+        "ws.tab_news": "News",
+        "ws.shares": "Shares",
+        "ws.avg_price": "Avg price",
+        "ws.not_held": "Not held.",
+        "card.symbol": "Symbol",
+        "card.last": "Last",
+        "card.day": "Day %",
+        "card.action": "Action",
+        "card.stop": "Stop ref",
+        "card.reasons": "Rationale",
+        "card.risks": "Risks",
+        "ai.title": "QuantAI · AI Analyst",
+        "ai.desc": "**End-of-day report** (close basis: holdings + watchlist + news + warehouse SQL digest; auto-generated at 18:45, manual trigger available). Intraday analysis runs continuously on the **Workstation Tactics Board**; this page focuses on the daily report. Report body is currently Chinese.",
+        "ai.toggle": "Resident local LLM (~10GB VRAM, loaded once and reused)",
+        "ai.gen_llm": "Generate daily report (with LLM analysis)",
+        "ai.gen_plain": "Generate daily report (data brief)",
+        "ai.working": "Assembling report…",
+        "ai.history": "Report history (daily + scheduled intraday, newest first)",
+        "ai.none": "No reports yet. Use the button above.",
+        "sim.title": "QuantAI · Paper Trading",
+        "sim.mode": "Mode",
+        "sim.mode_ytd": "Year-to-date replay (real history × rule strategy)",
+        "sim.mode_live": "Live paper session (tick level, needs API)",
+        "sim.tickers": "Symbols (comma separated, equal allocation)",
+        "sim.cash": "Initial capital",
+        "sim.need_ticker": "Enter at least one symbol.",
+        "sim.replaying": "Replaying 2026 YTD (real data × rule strategy)…",
+        "sim.no_data": "No selected symbol has sufficient history.",
+        "sim.equity": "Current equity",
+        "sim.initial": "Initial capital (Jan 2)",
+        "sim.mdd": "Max drawdown",
+        "sim.spy_bh": "SPY buy & hold",
+        "sim.strategy": "Rule strategy",
+        "sim.positions": "Current simulated positions",
+        "sim.all_flat": "Strategy is fully flat (signals bearish).",
+        "sim.per_symbol": "Per-symbol performance",
+        "sim.footnote": "Method: hold equal share when composite signal >0.1 else flat; next-open fills + 0.1% turnover cost; rule-layer replay (not the full agent chain); analysis reference, not investment advice.",
+    },
+}
+
+
+def tr(lang: str, key: str, **fmt) -> str:
+    """取词条（缺失回退中文 → 再缺返回 key）。fmt 出错原样返回，绝不炸渲染。"""
+    s = STRINGS.get(lang, {}).get(key) or STRINGS["zh"].get(key) or key
+    if fmt:
+        try:
+            return s.format(**fmt)
+        except Exception:  # noqa: BLE001
+            return s
+    return s

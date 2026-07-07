@@ -164,6 +164,9 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
     from quantai.portfolio import load_portfolio
     from quantai.ui.charts import workstation_figure
 
+    from quantai.ui.i18n import tr
+
+    lang = st.session_state.get("ui_lang", "zh")
     cfg = load_config().portfolio
     portfolio = (
         load_portfolio(cfg.file) if Path(cfg.file).exists() else None
@@ -228,12 +231,14 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
                 cost = sum(p.shares * p.cost_basis for p in portfolio.positions if p.symbol == p_sym)
                 pnl = shares * last - cost
                 c1, c2, c3, c4, c5 = st.columns(5)
-                c1.metric(f"{p_sym} × {shares:,.0f} [持仓]", f"${last:,.2f}",
-                          f"{(last / prev - 1) * 100:+.2f}% 今日" if prev == prev else None)
-                c2.metric("成本均价", f"${cost / shares:,.2f}" if shares else "—")
-                c3.metric("市值", f"${shares * last:,.2f}")
-                c4.metric("浮动盈亏", f"${pnl:,.2f}", f"{pnl / abs(cost) * 100:+.2f}%" if cost else None)
-                c5.metric("可用现金 · TFSA", f"${portfolio.cash:,.2f}")
+                c1.metric(tr(lang, "ws.held_pos", sym=p_sym, shares=f"{shares:,.0f}"),
+                          f"${last:,.2f}",
+                          f"{(last / prev - 1) * 100:+.2f}% {tr(lang, 'ws.today')}" if prev == prev else None)
+                c2.metric(tr(lang, "ws.avg_cost"), f"${cost / shares:,.2f}" if shares else "—")
+                c3.metric(tr(lang, "ws.mkt_value"), f"${shares * last:,.2f}")
+                c4.metric(tr(lang, "ws.unreal_pnl"), f"${pnl:,.2f}",
+                          f"{pnl / abs(cost) * 100:+.2f}%" if cost else None)
+                c5.metric(tr(lang, "ws.cash_tfsa"), f"${portfolio.cash:,.2f}")
 
         _position_strip()
         st.divider()
@@ -248,11 +253,11 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
     period, interval = _TIMEFRAMES[tf or "1D"]
     intraday = interval.endswith("m") or interval.endswith("h")
     # 自动刷新：st.fragment(run_every) 局部重跑——只刷"价格头+图"，不打扰整页交互
-    _REFRESH = {"刷新:关": None, "15s": 15, "30s": 30, "60s": 60}
+    _REFRESH = {tr(lang, "ws.refresh_off"): None, "15s": 15, "30s": 30, "60s": 60}
     with rf_c:
         auto = st.selectbox(
-            "自动刷新", list(_REFRESH), index=2,
-            key="ws_auto_refresh", label_visibility="collapsed",
+            tr(lang, "ws.auto_refresh"), list(_REFRESH), index=2,
+            key=f"ws_auto_refresh_{lang}", label_visibility="collapsed",
         )
 
     # 指标开关（放 fragment 外：自动刷新不会把打开的菜单弹回去）
@@ -269,7 +274,7 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
     def _live_view() -> None:
         df = _hist(sym, period, interval)
         if df is None or df.empty:
-            st.error(f"{sym} 在 {tf} 档取不到数据（新上市/加密标的部分粒度不支持），换个时间档试试。")
+            st.error(tr(lang, "ws.no_data", sym=sym, tf=tf))
             return
 
         close = df["close"].astype(float).dropna()
@@ -312,16 +317,13 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
         if _REFRESH[auto]:
             from datetime import datetime as _dt
 
-            st.caption(f"每 {auto} 自动刷新 · 最后更新 {_dt.now():%H:%M:%S}")
+            st.caption(tr(lang, "ws.auto_caption", auto=auto, ts=f"{_dt.now():%H:%M:%S}"))
 
     _live_view()
 
     # ================= 实时作战台（常驻分析主战场） =================
-    st.subheader("实时作战台")
-    st.caption(
-        "规则引擎每 30 秒一轮（五因子 + 盘中卖压修正）· 常驻分析员后台每 5 分钟一轮综述"
-        "并给新闻打分入库 · 分析参考，非投资建议"
-    )
+    st.subheader(tr(lang, "ws.board_title"))
+    st.caption(tr(lang, "ws.board_caption"))
 
     def _avg_cost(s2: str):
         sh = sum(p.shares for p in (portfolio.positions if portfolio else []) if p.symbol == s2)
@@ -330,7 +332,7 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
 
     # 作战台以真实持仓为核心；自选股按需补充（默认带上前几只，可增删）
     tact_syms = st.multiselect(
-        "作战台标的（持仓恒在，自选可增删）",
+        tr(lang, "ws.board_symbols"),
         options=list(dict.fromkeys(held + watch)),
         default=list(dict.fromkeys(held + watch[:4])),
         key="ws_tact_syms",
@@ -344,24 +346,21 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
     def _tactics_board():
         from datetime import datetime as _dt
 
-        from quantai.agents.tactician import advice_row, alerts
+        from quantai.agents.tactician import ALERT_MARKS, advice_row, alerts
 
-        advs = collect_advices(tact_syms, held_cost, _hist)
+        advs = collect_advices(tact_syms, held_cost, _hist, lang=lang)
         if not advs:
-            st.caption("（作战台标的暂无足量数据）")
+            st.caption(tr(lang, "ws.board_empty"))
             return
-        for al in alerts(advs)[:4]:
-            (st.warning if al.startswith("[警报]") else st.info)(al)
-        st.dataframe([advice_row(a) for a in advs], use_container_width=True, hide_index=True)
-        st.caption(f"操作卡更新 {_dt.now():%H:%M:%S} · 30s/轮 · 收盘后自动退回日线口径")
+        for al in alerts(advs, lang=lang)[:4]:
+            (st.warning if al.startswith(ALERT_MARKS) else st.info)(al)
+        st.dataframe([advice_row(a, lang=lang) for a in advs],
+                     use_container_width=True, hide_index=True)
+        st.caption(tr(lang, "ws.board_updated", ts=f"{_dt.now():%H:%M:%S}"))
 
     _tactics_board()
 
-    use_ai = st.toggle(
-        "常驻 AI 分析员（打开页面即后台加载并持续分析；本地 v2 学生 ~10GB 显存，"
-        "或 config llm.remote 外接 API）",
-        value=True, key="ws_ai_on",
-    )
+    use_ai = st.toggle(tr(lang, "ws.ai_toggle"), value=True, key="ws_ai_on")
     if use_ai:
         from quantai.agents.reporting import load_report_llm
         from quantai.ui.cockpit import CockpitDaemon
@@ -373,7 +372,7 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
             return CockpitDaemon(llm_factory=load_report_llm, interval_sec=300).start()
 
         daemon = _cockpit_daemon()
-        daemon.configure(tact_syms, held_cost)
+        daemon.configure(tact_syms, held_cost, lang=lang)
 
         @st.fragment(run_every=15)
         def _ai_view():
@@ -382,15 +381,16 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
             stt = daemon.state
             if stt.get("out"):
                 st.markdown(stt["out"])
-                st.caption(
-                    f"分析员 {stt.get('model', '?')} · 第 {stt.get('round', 0)} 轮 · "
-                    f"生成于 {_dt.fromtimestamp(stt['ts']):%H:%M:%S} · "
-                    f"本轮新闻入库 {stt.get('scored', 0)} 条 · 状态：{stt.get('status', '')}"
-                )
+                st.caption(tr(
+                    lang, "ws.ai_status", model=stt.get("model", "?"),
+                    round=stt.get("round", 0),
+                    ts=f"{_dt.fromtimestamp(stt['ts']):%H:%M:%S}",
+                    scored=stt.get("scored", 0), status=stt.get("status", ""),
+                ))
             else:
-                st.info(f"常驻分析员：{stt.get('status', '启动中')}（首轮综述通常 1-2 分钟内出）")
+                st.info(tr(lang, "ws.ai_waiting", status=stt.get("status", "…")))
             if stt.get("error"):
-                st.warning(f"最近一轮异常：{stt['error']}（自动重试中）")
+                st.warning(tr(lang, "ws.ai_error", err=stt["error"]))
 
         _ai_view()
 
@@ -425,7 +425,7 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
     m7.metric("52W high", g("fiftyTwoWeekHigh", True)); m8.metric("52W low", g("fiftyTwoWeekLow", True)); m9.metric("Exchange", g("exchange"))
 
     # 底部页签：持仓 / 新闻
-    tab_hold, tab_news = st.tabs(["Holdings", "News"])
+    tab_hold, tab_news = st.tabs([tr(lang, "ws.tab_holdings"), tr(lang, "ws.tab_news")])
     with tab_hold:
         pos = next((p for p in (portfolio.positions if portfolio else []) if p.symbol == sym), None)
         if pos:
@@ -434,12 +434,13 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
             avg = agg_cost / agg_shares if agg_shares else float("nan")
             pnl = agg_shares * (last - avg)
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("持股", f"{agg_shares:,.0f}")
-            c2.metric("均价", f"${avg:,.2f}")
-            c3.metric("市值", f"${agg_shares * last:,.2f}")
-            c4.metric("未实现盈亏", f"${pnl:,.2f}", f"{pnl / abs(agg_cost) * 100:+.2f}%" if agg_cost else None)
+            c1.metric(tr(lang, "ws.shares"), f"{agg_shares:,.0f}")
+            c2.metric(tr(lang, "ws.avg_price"), f"${avg:,.2f}")
+            c3.metric(tr(lang, "ws.mkt_value"), f"${agg_shares * last:,.2f}")
+            c4.metric(tr(lang, "ws.unreal_pnl"), f"${pnl:,.2f}",
+                      f"{pnl / abs(agg_cost) * 100:+.2f}%" if agg_cost else None)
         else:
-            st.caption("未持有该标的。")
+            st.caption(tr(lang, "ws.not_held"))
     with tab_news:
         @st.cache_data(ttl=900, show_spinner=False)
         def _news(symbol: str) -> list:
@@ -524,28 +525,28 @@ def _render_watchlist_page(st) -> None:  # pragma: no cover - 需 streamlit 运�
 def _render_analyst_page(st) -> None:  # pragma: no cover - 需 streamlit 运行时
     from pathlib import Path
 
-    st.markdown(
-        "**整日分析日报**（收盘口径：持仓+自选股+新闻+仓库 SQL 摘要，18:45 定时自动生成，"
-        "也可手动触发）。盘中实时分析在**行情工作台 · 实时作战台**常驻进行，本页专注日报。"
-    )
+    from quantai.ui.i18n import tr
 
-    use_llm = st.toggle("驻留本地 LLM（占用约 10GB 显存，加载一次全程复用）", value=False)
+    lang = st.session_state.get("ui_lang", "zh")
+    st.markdown(tr(lang, "ai.desc"))
+
+    use_llm = st.toggle(tr(lang, "ai.toggle"), value=False)
     llm = _resident_llm(st) if use_llm else None
 
     from quantai.agents.reporting import make_daily_report
 
-    if st.button("生成日报" + ("（含 LLM 分析）" if use_llm else "（数据简报）")):
-        with st.spinner("组装日报…" + ("LLM 生成中…" if use_llm else "")):
+    if st.button(tr(lang, "ai.gen_llm" if use_llm else "ai.gen_plain")):
+        with st.spinner(tr(lang, "ai.working")):
             make_daily_report(llm, log=lambda m: None)
         st.rerun()
 
     # 按修改时间倒序：新报告永远排第一个（旧版按文件名排，刚生成的盘中报告会被埋进列表）
     reports = sorted(Path("data/reports").glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
     if reports:
-        pick = st.selectbox("历史报告（日报 + 定时盘中快报，按时间倒序）", [p.name for p in reports])
+        pick = st.selectbox(tr(lang, "ai.history"), [p.name for p in reports])
         st.markdown((Path("data/reports") / pick).read_text(encoding="utf-8"))
     else:
-        st.caption("暂无报告。点上方按钮生成。")
+        st.caption(tr(lang, "ai.none"))
 
 
 def _render_ytd_replay(st) -> None:  # pragma: no cover - 需 streamlit 运行时
@@ -569,12 +570,15 @@ def _render_ytd_replay(st) -> None:  # pragma: no cover - 需 streamlit 运行�
     watch = load_watchlist(cfg.watchlist_file)
     default = ",".join(list(dict.fromkeys(held + watch))[:5]) or "SPY,NVDA,TSLA"
 
+    from quantai.ui.i18n import tr
+
+    lang = st.session_state.get("ui_lang", "zh")
     c1, c2 = st.columns([3, 1])
-    tickers_in = c1.text_input("标的（逗号分隔，等权分仓）", value=default)
-    cash = c2.number_input("初始资金", value=100_000.0, step=10_000.0, min_value=1_000.0)
+    tickers_in = c1.text_input(tr(lang, "sim.tickers"), value=default)
+    cash = c2.number_input(tr(lang, "sim.cash"), value=100_000.0, step=10_000.0, min_value=1_000.0)
     tickers = tuple(dict.fromkeys(t.strip().upper() for t in tickers_in.split(",") if t.strip()))
     if not tickers:
-        st.info("输入至少一个标的。")
+        st.info(tr(lang, "sim.need_ticker"))
         return
 
     @st.cache_data(ttl=1800, show_spinner="回放 2026 年初至今（真实行情 × 规则策略）…")
@@ -665,7 +669,7 @@ def _render_ytd_replay(st) -> None:  # pragma: no cover - 需 streamlit 运行�
 
     out = _replay(tickers, float(cash))
     if not out:
-        st.error("所选标的均无足量历史数据。")
+        st.error(tr(lang, "sim.no_data"))
         return
 
     import pandas as pd
@@ -673,28 +677,25 @@ def _render_ytd_replay(st) -> None:  # pragma: no cover - 需 streamlit 运行�
     total = out["total"]
     ret = (float(total.iloc[-1]) / float(cash) - 1) * 100
     m1, m2, m3, m4 = st.columns(4)
-    m1.metric("当前权益", f"${float(total.iloc[-1]):,.0f}", f"{ret:+.1f}% YTD")
-    m2.metric("初始资金（1 月 2 日）", f"${cash:,.0f}")
-    m3.metric("最大回撤", f"{out['mdd'] * 100:.1f}%")
+    m1.metric(tr(lang, "sim.equity"), f"${float(total.iloc[-1]):,.0f}", f"{ret:+.1f}% YTD")
+    m2.metric(tr(lang, "sim.initial"), f"${cash:,.0f}")
+    m3.metric(tr(lang, "sim.mdd"), f"{out['mdd'] * 100:.1f}%")
     if out["bench"] is not None:
-        m4.metric("同期 SPY 买入持有", f"{(float(out['bench'].iloc[-1]) / cash - 1) * 100:+.1f}%")
+        m4.metric(tr(lang, "sim.spy_bh"), f"{(float(out['bench'].iloc[-1]) / cash - 1) * 100:+.1f}%")
 
-    chart = pd.DataFrame({"规则策略": total})
+    chart = pd.DataFrame({tr(lang, "sim.strategy"): total})
     if out["bench"] is not None:
-        chart["SPY 买入持有"] = out["bench"]
+        chart[tr(lang, "sim.spy_bh")] = out["bench"]
     st.line_chart(chart, use_container_width=True)
 
-    st.subheader("当前模拟持仓")
+    st.subheader(tr(lang, "sim.positions"))
     if out["positions"]:
         st.dataframe(out["positions"], use_container_width=True, hide_index=True)
     else:
-        st.caption("策略当前全部空仓（信号偏空）。")
-    st.subheader("分标的表现")
+        st.caption(tr(lang, "sim.all_flat"))
+    st.subheader(tr(lang, "sim.per_symbol"))
     st.dataframe(out["rows"], use_container_width=True, hide_index=True)
-    st.caption(
-        "口径：组合信号 >0.1 持有该标的等权份额否则空仓；next_open 成交 + 0.1% 换手成本；"
-        "回放为规则层策略（非 agent 全链路），分析参考非投资建议。"
-    )
+    st.caption(tr(lang, "sim.footnote"))
 
 
 def main() -> None:  # pragma: no cover - 需 streamlit 运行时
@@ -717,11 +718,27 @@ def main() -> None:  # pragma: no cover - 需 streamlit 运行时
         unsafe_allow_html=True,
     )
 
-    page = st.sidebar.radio("页面", ["行情工作台", "组合分析", "自选股", "AI 分析", "模拟盘"], index=0)
+    from quantai.ui.i18n import LANGS, tr
+
+    lang_label = st.sidebar.radio(
+        "语言 / Language", list(LANGS), index=0, horizontal=True, key="ui_lang_label"
+    )
+    lang = LANGS[lang_label]
+    st.session_state["ui_lang"] = lang
+
+    _PAGE_KEYS = ["workstation", "portfolio", "watchlist", "analyst", "sim"]
+    page_key = st.sidebar.radio(
+        tr(lang, "nav.pages"), _PAGE_KEYS,
+        format_func=lambda k: tr(lang, f"nav.{k}"), index=0, key="ui_page",
+    )
+    # 旧路由沿用中文页名（组合分析/自选股页内部文案本轮仍为中文，README 已注明）
+    page = {"workstation": "行情工作台", "portfolio": "组合分析", "watchlist": "自选股",
+            "analyst": "AI 分析", "sim": "模拟盘"}[page_key]
 
     # Tableau 一键打开（找 tableau/ 下的 .twb/.twbx；没有就开导出目录）
     tb_files = list(Path("tableau").glob("*.twb*"))
-    label = f"打开 Tableau（{tb_files[0].name}）" if tb_files else "打开 Tableau 数据源目录"
+    label = (tr(lang, "nav.tableau_open", name=tb_files[0].name) if tb_files
+             else tr(lang, "nav.tableau_dir"))
     if st.sidebar.button(label):
         os.startfile(str(tb_files[0]) if tb_files else str(Path("tableau/exports").resolve()))
 
@@ -729,25 +746,25 @@ def main() -> None:  # pragma: no cover - 需 streamlit 运行时
         _render_workstation_page(st)
         return
     if page == "组合分析":
-        st.title("QuantAI · 真实组合分析")
+        st.title("QuantAI · 真实组合分析" if lang == "zh" else "QuantAI · Portfolio")
         _render_portfolio_page(st)
         return
     if page == "自选股":
-        st.title("QuantAI · 自选股")
+        st.title("QuantAI · 自选股" if lang == "zh" else "QuantAI · Watchlist")
         _render_watchlist_page(st)
         return
     if page == "AI 分析":
-        st.title("QuantAI · AI 分析师")
+        st.title(tr(lang, "ai.title"))
         _render_analyst_page(st)
         return
 
-    st.title("QuantAI · 模拟盘")
+    st.title(tr(lang, "sim.title"))
+    _MODES = ["ytd", "live"]
     mode = st.radio(
-        "模式",
-        ["年初至今回放（真实历史行情 × 规则策略）", "实时纸面会话（tick 级，需 API）"],
-        horizontal=True,
+        tr(lang, "sim.mode"), _MODES,
+        format_func=lambda m: tr(lang, f"sim.mode_{m}"), horizontal=True,
     )
-    if mode.startswith("年初"):
+    if mode == "ytd":
         _render_ytd_replay(st)
         return
 
