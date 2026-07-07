@@ -24,6 +24,12 @@ class TestWatchlist:
         f.write_text("- spy\n- qqq\n", encoding="utf-8")
         assert load_watchlist(f) == ["SPY", "QQQ"]
 
+    def test_scalar_symbols_not_exploded_per_char(self, tmp_path: Path):
+        """`symbols: NVDA`（YAML 标量）绝不能逐字符炸成 N/V/D/A（都是真 ticker）。"""
+        f = tmp_path / "w.yaml"
+        f.write_text("symbols: NVDA\n", encoding="utf-8")
+        assert load_watchlist(f) == ["NVDA"]
+
     def test_add_idempotent(self, tmp_path: Path):
         f = tmp_path / "w.yaml"
         save_watchlist(["SPY"], f)

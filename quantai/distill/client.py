@@ -103,9 +103,16 @@ class DeepSeekClient:
                         f"finish_reason={data['choices'][0].get('finish_reason')!r}）"
                     )
                 return content
-            except requests.RequestException as exc:  # 网络层错误也退避重试
+            except requests.HTTPError:
+                # 4xx（400 参数错/401 鉴权/402 欠费等）是确定性失败：重试不会变好，
+                # 立刻抛出（429/5xx 已在上面单独退避）。旧逻辑连 401 都重试 3 轮。
+                raise
+            except requests.RequestException as exc:  # 超时/连接错误退避重试
+                # 诚实说明：超时重试有重复计费风险（服务端可能已完成并计费但响应
+                # 没送达），usage_totals 只记收到的响应——对账偏差以平台账单为准。
                 last_err = exc
-                time.sleep(2**attempt)
+                if attempt < self.max_retries - 1:
+                    time.sleep(2**attempt)
         raise RuntimeError(f"DeepSeek 请求在 {self.max_retries} 次重试后仍失败: {last_err}")
 
 

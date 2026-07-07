@@ -17,6 +17,7 @@ from typing import Iterable, Mapping
 
 import pandas as pd
 from duckdb import DuckDBPyConnection
+from loguru import logger
 
 from quantai.backtest.engine import BacktestResult
 from quantai.data.calendar import TradingCalendar
@@ -164,6 +165,18 @@ def load_prices(con: DuckDBPyConnection, prices: Mapping[str, pd.DataFrame]) -> 
         frame = frame.reset_index(names="date")
         frame.insert(0, "symbol", str(symbol).upper())
         frame["date"] = pd.to_datetime(frame["date"]).dt.tz_localize(None).dt.date
+        # 缩水守卫：批次键是 symbol 的全量替换——yfinance 限流/故障返回"非空但
+        # 截断"的批（已知失败模式）会把几百根历史原子性换成几根残段，下游 52 周
+        # 高点/收益全被静默污染。新批不足存量一半时拒绝装载（保住旧数据、留痕）。
+        existing = con.execute(
+            "SELECT count(*) FROM raw.prices WHERE symbol = ?", [str(symbol).upper()]
+        ).fetchone()[0]
+        if existing > 20 and len(frame) < existing * 0.5:
+            logger.warning(
+                f"load_prices SKIP {symbol}: 新批 {len(frame)} 行 < 存量 {existing} 行的一半"
+                "（疑似截断响应），保留旧数据不替换"
+            )
+            continue
         with _tx(con):
             con.execute("DELETE FROM raw.prices WHERE symbol = ?", [str(symbol).upper()])
             con.register("_stg_prices", frame)

@@ -16,12 +16,24 @@ from datetime import datetime, timezone
 from typing import Callable, Iterable, Optional
 
 import feedparser
+import requests
 from loguru import logger
 
 #: Yahoo Finance 按标的 RSS（免费、无需 key；美股口径）
 YAHOO_TICKER_FEED = (
     "https://feeds.finance.yahoo.com/rss/2.0/headline?s={symbol}&region=US&lang=en-US"
 )
+
+#: RSS 抓取超时（秒）。feedparser 自带的 urllib 路径**没有超时**（实测其安装包全文
+#: 无 timeout），一个卡死的源会把无人值守的定时任务挂住数小时——改走 requests。
+FEED_TIMEOUT_SEC = 20.0
+
+
+def _parse_feed(url: str):
+    """默认 parser：requests 限时拉取 → feedparser 解析字节（不让 feedparser 碰网络）。"""
+    resp = requests.get(url, timeout=FEED_TIMEOUT_SEC, headers={"User-Agent": "quantai-rss/1.0"})
+    resp.raise_for_status()
+    return feedparser.parse(resp.content)
 
 
 @dataclass
@@ -94,7 +106,7 @@ class NewsFetcher:
     def __init__(
         self,
         extra_feeds: Optional[list[str]] = None,
-        parser: Callable = feedparser.parse,
+        parser: Callable = _parse_feed,
     ) -> None:
         self.extra_feeds = list(extra_feeds or [])
         self._parse = parser

@@ -55,6 +55,10 @@ def score_news(items: list, llm) -> list[dict]:
                 s = max(-1.0, min(1.0, float(s))) if s is not None else None
             except (TypeError, ValueError):
                 continue
+            # id 校验：越界丢弃、重复保留首个——LLM 幻觉出的 id 直接覆盖会把分
+            # 挂到错误的头条上（错误标注比缺失标注毒得多）
+            if not (0 <= idx < len(items)) or idx in by_id:
+                continue
             label = str(entry.get("label", "")).lower()
             if label not in ("bullish", "bearish", "neutral"):
                 label = ""
@@ -62,13 +66,20 @@ def score_news(items: list, llm) -> list[dict]:
     out = []
     for i, it in enumerate(items):
         hit = by_id.get(i, {})
-        out.append(
-            {
-                "item": it,
-                "sentiment": hit.get("sentiment"),
-                "label": hit.get("label") or ("unscored" if hit.get("sentiment") is None else "neutral"),
-            }
-        )
+        s = hit.get("sentiment")
+        label = hit.get("label")
+        if not label:
+            # label 缺失/非法时从 sentiment 推导，不再一律填 neutral
+            # （sentiment=0.9 配 neutral 会让情绪时间线自相矛盾）
+            if s is None:
+                label = "unscored"
+            elif s > 0.15:
+                label = "bullish"
+            elif s < -0.15:
+                label = "bearish"
+            else:
+                label = "neutral"
+        out.append({"item": it, "sentiment": s, "label": label})
     return out
 
 

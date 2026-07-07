@@ -72,6 +72,23 @@ class TestScoring:
         assert score_news([], llm) == []
         assert llm.calls == []
 
+    def test_out_of_range_and_duplicate_ids_rejected(self):
+        """LLM 幻觉 id（越界/重复）不得把分挂到错误头条上：越界丢弃、重复保首个。"""
+        llm = _LLM('[{"id":0,"sentiment":0.9,"label":"bullish"},'
+                   '{"id":0,"sentiment":-0.9,"label":"bearish"},'
+                   '{"id":99,"sentiment":1.0,"label":"bullish"}]')
+        out = score_news(_items(), llm)
+        assert out[0]["sentiment"] == 0.9 and out[0]["label"] == "bullish"
+        assert out[1]["sentiment"] is None and out[2]["sentiment"] is None
+
+    def test_invalid_label_derived_from_sentiment(self):
+        """label 非法（如 'positive'）时按 sentiment 推导，不再一律填 neutral。"""
+        llm = _LLM('[{"id":0,"sentiment":0.9,"label":"positive"},'
+                   '{"id":1,"sentiment":-0.8,"label":"负面"},'
+                   '{"id":2,"sentiment":0.05,"label":"whatever"}]')
+        out = score_news(_items(), llm)
+        assert [r["label"] for r in out] == ["bullish", "bearish", "neutral"]
+
 
 class TestAggregate:
     def test_symbol_mean_skips_unscored(self):

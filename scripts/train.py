@@ -83,7 +83,9 @@ def main(argv: list[str] | None = None) -> int:
     else:
         from quantai.llm import DPORunner
 
-        runner = DPORunner.from_config(cfg, sft_adapter=args.sft_adapter, output_dir=out_dir)
+        # from_config 读的是 LLMConfig 字段（model_name/dpo/cache_dir）——传 AppConfig
+        # 根对象会 AttributeError（审查实锤，DPO CLI 路径此前必炸）
+        runner = DPORunner.from_config(cfg.llm, sft_adapter=args.sft_adapter, output_dir=out_dir)
         saved = runner.train(data_path)
 
     print(f"[train] done -> {saved}")

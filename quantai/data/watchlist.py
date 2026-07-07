@@ -18,7 +18,14 @@ import yaml
 
 
 def _normalize(symbols) -> list[str]:
-    """大写、去空、按首次出现去重。"""
+    """大写、去空、按首次出现去重。
+
+    标量字符串包成单元素列表——`symbols: NVDA`（YAML 自然单标的写法）解析出来
+    是 str，直接迭代会逐字符炸成 ['N','V','D','A']（N/V/D/A 都是真实 ticker，
+    会静默抓错公司入库，审查实锤）。
+    """
+    if isinstance(symbols, str):
+        symbols = [symbols]
     seen: dict[str, None] = {}
     for s in symbols or []:
         sym = str(s).strip().upper()

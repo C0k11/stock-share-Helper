@@ -36,6 +36,36 @@ _MARTS = (
 )
 
 
+def _drop_partial_today(prices: dict) -> int:
+    """收盘口径守卫：剔掉"今天还没走完"的日线尾巴再入库。
+
+    盘中跑 --load 时 yfinance 会把当日**进行中**的 bar 当日线返回（close=最新价、
+    volume=半日量），全量替换进 raw.prices 后无任何临时标记，dbt/Tableau 全按
+    收盘价消费（审查实锤：75 秒内两次抓取同一"日线"volume 在涨）。规则：
+    美股尾根 bar 日期=纽约今天且未到收盘（16:10 缓冲）→ 剔；加密（-USD，UTC
+    0 点切日）尾根 bar 日期=UTC 今天 → 剔。宁可少一根完整 bar（下次跑补回），
+    绝不让半根 bar 冒充收盘。
+    """
+    from zoneinfo import ZoneInfo
+
+    dropped = 0
+    now_et = datetime.now(ZoneInfo("America/New_York"))
+    today_utc = datetime.now(ZoneInfo("UTC")).date()
+    for sym, df in list(prices.items()):
+        if df is None or df.empty:
+            continue
+        last = df.index[-1]
+        last_date = last.date() if hasattr(last, "date") else last
+        if str(sym).upper().endswith("-USD"):
+            partial = last_date == today_utc
+        else:
+            partial = last_date == now_et.date() and (now_et.hour, now_et.minute) < (16, 10)
+        if partial:
+            prices[sym] = df.iloc[:-1]
+            dropped += 1
+    return dropped
+
+
 def _load_raw(db_path: Path, portfolio_file: str, years: int, benchmark: str) -> None:
     from quantai.backtest import run_backtest
     from quantai.config import load_config
@@ -60,6 +90,9 @@ def _load_raw(db_path: Path, portfolio_file: str, years: int, benchmark: str) ->
 
     print(f"[etl] fetching {symbols} since {start} ...")
     prices = PriceFetcher().fetch_prices(symbols, start)
+    n_partial = _drop_partial_today(prices)
+    if n_partial:
+        print(f"[etl] 收盘口径守卫：剔除 {n_partial} 根当日进行中 bar（收盘后重跑会补回）")
     con = connect(db_path)
     try:
         init_raw_tables(con)  # 全部 raw 表建齐（含还没有数据的，如 trades）——dbt 才能全模型编译

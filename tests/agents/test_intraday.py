@@ -44,6 +44,22 @@ class TestIntradayStats:
         assert "vwap" not in st and "down_volume_share" not in st
         assert st["chg_pct"] == pytest.approx(0.01)
 
+    def test_nan_close_bars_do_not_crash(self):
+        """1 分钟数据缺 close 是常态（yfinance 毛刺）：dropna 后与全长 volume 索引
+        错位曾直接抛 IndexingError（审查实锤），必须能算不能炸。"""
+        df = _session([100.0, 101.0, 99.0, 98.0], [100, 200, 300, 400])
+        df.loc[df.index[1], "close"] = float("nan")
+        st = intraday_stats(df, prev_close=100.0, avg_daily_volume=1000.0)
+        # 有效行 [100, 99, 98]，量 [100, 300, 400]；首根 100 vs 昨收 100 不算跌，
+        # 99、98 均跌 → down = 700/800
+        assert st["down_volume_share"] == pytest.approx(700 / 800)
+
+    def test_gap_down_open_counts_as_selling_pressure(self):
+        """跳空低开的第一根（diff=NaN）必须对昨收判涨跌——旧逻辑它永远只进分母。"""
+        df = _session([95.0, 96.0], [500, 100])  # 昨收 100，低开 95
+        st = intraday_stats(df, prev_close=100.0, avg_daily_volume=1000.0)
+        assert st["down_volume_share"] == pytest.approx(500 / 600)
+
 
 class TestIntradayBrief:
     def test_contains_stats_and_sentiment(self):

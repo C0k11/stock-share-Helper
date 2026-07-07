@@ -87,21 +87,31 @@ def _warehouse_section(con) -> str:
         lines.append("（仓库未初始化，跑 scripts/warehouse.py --full 后可用）")
         return "\n".join(lines)
     try:
-        movers = con.execute(
-            """SELECT symbol, round(100 * (max_by(close, date) / min_by(close, date) - 1), 2) AS pct_5d
-               FROM (SELECT symbol, date, close,
-                            row_number() OVER (PARTITION BY symbol ORDER BY date DESC) rn
-                     FROM marts.fact_prices)
-               WHERE rn <= 5 GROUP BY symbol ORDER BY pct_5d DESC"""
-        ).fetchall()
-        lines.append(
-            "- 近5日涨跌榜: "
-            + ", ".join(f"{s} {p:+.2f}%" for s, p in movers[:8] if p is not None)
-        )
+        # 近 10 日内有数据的标的才上榜（下架/改名的死符号会永远带着几个月前的
+        # "近 5 日"数字冒充现状）；涨跌两头都给（只给涨幅榜会让 LLM 系统性漏报下行）
+        movers = [
+            (s, p) for s, p in con.execute(
+                """SELECT symbol, round(100 * (max_by(close, date) / min_by(close, date) - 1), 2) AS pct_5d
+                   FROM (SELECT symbol, date, close,
+                                row_number() OVER (PARTITION BY symbol ORDER BY date DESC) rn
+                         FROM marts.fact_prices
+                         WHERE date >= (SELECT max(date) FROM marts.fact_prices) - INTERVAL 10 DAY)
+                   WHERE rn <= 5 GROUP BY symbol ORDER BY pct_5d DESC"""
+            ).fetchall() if p is not None
+        ]
+        if len(movers) > 8:
+            shown = movers[:4] + movers[-4:]
+            lines.append(
+                "- 近5日领涨: " + ", ".join(f"{s} {p:+.2f}%" for s, p in shown[:4])
+                + "；领跌: " + ", ".join(f"{s} {p:+.2f}%" for s, p in shown[4:])
+            )
+        elif movers:
+            lines.append("- 近5日涨跌榜: " + ", ".join(f"{s} {p:+.2f}%" for s, p in movers))
         high52 = con.execute(
             """SELECT symbol, round(100 * pct_from_52w_high, 1)
                FROM marts.fact_prices
                WHERE (symbol, date) IN (SELECT symbol, max(date) FROM marts.fact_prices GROUP BY symbol)
+                 AND date >= (SELECT max(date) FROM marts.fact_prices) - INTERVAL 10 DAY
                  AND pct_from_52w_high IS NOT NULL
                ORDER BY 2"""
         ).fetchall()
@@ -185,20 +195,30 @@ def intraday_stats(df_1m, prev_close: float, avg_daily_volume: float) -> dict:
         "day_low": low,
         "close_position": (last - low) / (high - low) if high > low else float("nan"),
     }
-    if vol is not None and float(vol.sum()) > 0:
-        typical = (df_1m["high"].astype(float) + df_1m["low"].astype(float) + close) / 3
-        vwap = float((typical * vol).sum() / vol.sum())
-        bar_chg = close.diff()
-        down_vol = float(vol[bar_chg < 0].sum())
-        out.update(
-            {
-                "vwap": vwap,
-                "vs_vwap_pct": last / vwap - 1,
-                "cum_volume": float(vol.sum()),
-                "vol_vs_avg": float(vol.sum()) / avg_daily_volume if avg_daily_volume > 0 else float("nan"),
-                "down_volume_share": down_vol / float(vol.sum()),
-            }
-        )
+    if vol is not None:
+        # 对齐到有效 close 的行（close 已 dropna，vol/high/low 是全长索引——
+        # 直接用短布尔序列切长序列会抛 IndexingError，1 分钟数据缺 close 实测会炸）
+        idx = close.index
+        v = vol.reindex(idx).fillna(0.0)
+        if float(v.sum()) > 0:
+            high_s = df_1m["high"].astype(float).reindex(idx) if "high" in df_1m.columns else close
+            low_s = df_1m["low"].astype(float).reindex(idx) if "low" in df_1m.columns else close
+            typical = (high_s.fillna(close) + low_s.fillna(close) + close) / 3
+            vwap = float((typical * v).sum() / v.sum())
+            bar_chg = close.diff()
+            # 开盘第一根 diff 是 NaN（NaN<0 恒 False）——对昨收算涨跌，
+            # 否则跳空低开的第一根量永远不计入抛压、只进分母（系统性低估卖压）
+            bar_chg.iloc[0] = float(close.iloc[0]) - prev_close
+            down_vol = float(v[bar_chg < 0].sum())
+            out.update(
+                {
+                    "vwap": vwap,
+                    "vs_vwap_pct": last / vwap - 1,
+                    "cum_volume": float(v.sum()),
+                    "vol_vs_avg": float(v.sum()) / avg_daily_volume if avg_daily_volume > 0 else float("nan"),
+                    "down_volume_share": down_vol / float(v.sum()),
+                }
+            )
     return out
 
 

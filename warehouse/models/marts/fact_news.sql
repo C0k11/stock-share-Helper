@@ -7,7 +7,9 @@ select
     n.symbol,
     n.title,
     n.summary,
-    cast(n.published as date)  as date,
+    -- published 是 UTC 墙钟：按美东时区归日再取 date——直接 cast 会把美东晚间
+    -- 8 点后的新闻全记到"第二天"，情绪时间线与交易日系统性错位（审查实锤）
+    cast(timezone('America/New_York', timezone('UTC', n.published)) as date) as date,
     n.published,
     n.source,
     s.sentiment,

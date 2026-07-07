@@ -137,8 +137,40 @@ class EvolutionTrainer:
         if runner_factory is None:
             from quantai.llm import DPORunner  # 懒导入：trl/torch 仅在真训练时才需要
 
-            def runner_factory(**kw: Any) -> Any:  # type: ignore[misc]
-                return DPORunner(**kw)
+            if self.llm_cfg is None:
+                raise ValueError("默认真实 DPO 路径需要 llm_cfg（用 from_config 构造，或注入 runner_factory）")
+            sft_adapter = str(runner_kwargs.pop("sft_adapter", "") or "")
+            if not sft_adapter:
+                raise ValueError(
+                    "真实 DPO 按设计在 SFT adapter 之上继续对齐：train_offline(sft_adapter=<路径>)"
+                )
+
+            class _RealRunner:
+                """把 DPORunner 适配到编排契约：train(records 列表) → 落 JSONL → 按路径训练。
+
+                （审查实锤：旧默认路径 `DPORunner(llm_cfg=...)` 直接 TypeError、
+                `train(records)` 传列表给要文件路径的接口——真实路径从没通过。）
+                """
+
+                def __init__(self, *, llm_cfg: Any, output_dir: str, **_: Any) -> None:
+                    self._out = Path(output_dir)
+                    self._runner = DPORunner(
+                        model_name=llm_cfg.model_name,
+                        sft_adapter=sft_adapter,
+                        output_dir=output_dir,
+                        cfg=llm_cfg.dpo,
+                        cache_dir=llm_cfg.cache_dir,
+                    )
+
+                def train(self, recs: List[Dict[str, str]]) -> str:
+                    from quantai.distill.generator import write_jsonl
+
+                    self._out.mkdir(parents=True, exist_ok=True)
+                    data_path = self._out / "dpo_records.jsonl"
+                    write_jsonl(data_path, recs)
+                    return self._runner.train(str(data_path))
+
+            runner_factory = _RealRunner
 
         runner = runner_factory(llm_cfg=self.llm_cfg, output_dir=str(output_dir), **runner_kwargs)
         runner.train(records)

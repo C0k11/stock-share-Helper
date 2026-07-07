@@ -50,7 +50,10 @@ def _persist_scores(scored: list[dict], model: str) -> int:
             return load_news_scores(con, scored, model=model)
         finally:
             con.close()
-    except Exception:  # noqa: BLE001 - 单写者锁冲突等：跳过持久化，报告照出
+    except Exception as exc:  # noqa: BLE001 - 单写者锁冲突等：跳过持久化，报告照出
+        # 必须留痕：静默吞掉会让"持久化失败"与"本来就没新闻"打印成同一句
+        # "persisted: 0"，真丢数据时无从发现（审查实锤）
+        print(f"[report] WARN news score persist skipped: {type(exc).__name__}: {exc}")
         return 0
 
 
@@ -113,14 +116,19 @@ def make_daily_report(
     if _WAREHOUSE_DB.exists():
         from quantai.warehouse import connect, load_event_odds
 
-        con = connect(_WAREHOUSE_DB)
-        if event_rows:
+        try:
+            con = connect(_WAREHOUSE_DB)
+        except Exception as exc:  # noqa: BLE001 - DuckDB 单写者：streamlit/定时任务占着
+            # 库时直接 connect 会抛 IOException 炸掉整份日报——降级为无仓库节照出
+            log(f"[report] WARN warehouse locked/unavailable, brief w/o warehouse: {exc}")
+            con = None
+        if con is not None and event_rows:
             try:
                 from quantai.data.events import EventOdd
 
                 load_event_odds(con, [EventOdd(**r) for r in event_rows], as_of=as_of)
-            except Exception:  # noqa: BLE001 - 单写者冲突等：跳过持久化不炸报告
-                pass
+            except Exception as exc:  # noqa: BLE001 - 单写者冲突等：跳过持久化不炸报告
+                log(f"[report] WARN event odds persist skipped: {exc}")
     brief = build_brief(snap, watch_rows, news, warehouse_con=con, as_of=as_of, event_rows=event_rows)
     if con is not None:
         con.close()
@@ -170,6 +178,14 @@ def make_intraday_report(
             d5 = t.history(period="10d", interval="1d")
             if m1.empty or len(d5) < 2:
                 continue
+            # 节假日/收盘后 yfinance 的 period='1d' 会返回**上一交易日整场**——
+            # 把昨日会话冒充实时盘中是重大误导（实测 7/7 凌晨拿到 7/6 全场 390 根）。
+            # 非当日（交易所时区）bar 直接跳过，全跳过时简报走"无盘中数据"诚实空态。
+            last_ts = m1.index[-1]
+            now_mkt = datetime.now(last_ts.tzinfo) if last_ts.tzinfo is not None else datetime.now()
+            if last_ts.date() != now_mkt.date():
+                log(f"  skip {sym}: 无当日会话（最近 bar 是 {last_ts.date()}，非交易日/闭市）")
+                continue
             m1.columns = [c.lower() for c in m1.columns]
             prev_close = float(d5["Close"].iloc[-2])
             avg_vol = float(d5["Volume"].iloc[:-1].mean())
@@ -200,4 +216,14 @@ def make_intraday_report(
     out = Path(out_dir) / f"intraday_{datetime.now().strftime('%Y%m%d_%H%M')}.md"
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(report, encoding="utf-8")
+    # 盘面卫生：盘中快报一个交易日最多 13 份、无限累积——只保留最近 60 天
+    import time as _time
+
+    cutoff = _time.time() - 60 * 86400
+    for old in out.parent.glob("intraday_*.md"):
+        try:
+            if old.stat().st_mtime < cutoff:
+                old.unlink()
+        except OSError:
+            pass
     return report, out
