@@ -59,6 +59,8 @@ class DataConfig(_Base):
     price_source: Literal["yfinance"] = "yfinance"
     news_source: str = "rss"
     news_feeds: list[str] = Field(default_factory=list)
+    # Polymarket 预测市场事件概率（Gamma 公开 API）的抓取 tag（空列表 = 关闭该通道）。
+    event_tags: list[str] = Field(default_factory=lambda: ["economy", "finance", "crypto"])
     storage: StorageConfig = Field(default_factory=StorageConfig)
     cache: CacheConfig = Field(default_factory=CacheConfig)
 

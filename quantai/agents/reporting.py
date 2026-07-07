@@ -100,13 +100,28 @@ def make_daily_report(
     news_fetcher = NewsFetcher(extra_feeds=cfg.data.news_feeds)
     news = {s: news_fetcher.fetch_symbol_news(s, limit=3) for s in (portfolio.symbols + watchlist[:10])}
 
+    # Polymarket 事件概率（公开 API；tag 列表 config 驱动，空列表=关闭）
+    event_rows: list[dict] = []
+    if cfg.data.event_tags:
+        from quantai.data.events import EventsFetcher
+
+        odds = EventsFetcher().fetch_all(cfg.data.event_tags, limit_per_tag=15)
+        event_rows = [o.as_dict() for o in odds]
+
+    as_of = datetime.now().strftime("%Y-%m-%d")
     con = None
     if _WAREHOUSE_DB.exists():
-        from quantai.warehouse import connect
+        from quantai.warehouse import connect, load_event_odds
 
         con = connect(_WAREHOUSE_DB)
-    as_of = datetime.now().strftime("%Y-%m-%d")
-    brief = build_brief(snap, watch_rows, news, warehouse_con=con, as_of=as_of)
+        if event_rows:
+            try:
+                from quantai.data.events import EventOdd
+
+                load_event_odds(con, [EventOdd(**r) for r in event_rows], as_of=as_of)
+            except Exception:  # noqa: BLE001 - 单写者冲突等：跳过持久化不炸报告
+                pass
+    brief = build_brief(snap, watch_rows, news, warehouse_con=con, as_of=as_of, event_rows=event_rows)
     if con is not None:
         con.close()
 

@@ -92,6 +92,16 @@ def warehouse(tmp_path_factory):
         [{"item": news_items[0], "sentiment": 0.7, "label": "bullish"}],  # 第二条不打分
         model="test-llm",
     )
+    from quantai.data.events import EventOdd
+    from quantai.warehouse import load_event_odds
+
+    load_event_odds(
+        con,
+        [EventOdd(market_id="m1", condition_id="0x1", event_title="Fed Decision",
+                  question="Will the Fed hike?", yes_price=0.63, volume_24h=1e6,
+                  end_date="2026-07-31T00:00:00Z", category="economy")],
+        as_of=as_of,
+    )
     con.close()  # DuckDB 单写者：dbt 接管前必须放锁
 
     from dbt.cli.main import dbtRunner
@@ -116,7 +126,7 @@ class TestDbtBuild:
         for t in (
             "dim_date", "dim_symbol", "fact_prices", "fact_positions",
             "fact_trades", "fact_signals", "fact_backtest_results", "fact_backtest_equity",
-            "fact_news",
+            "fact_news", "fact_event_odds",
         ):
             n = con.execute(f"SELECT count(*) FROM marts.{t}").fetchone()[0]
             assert n > 0, f"marts.{t} 为空"

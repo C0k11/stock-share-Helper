@@ -119,12 +119,28 @@ def _warehouse_section(con) -> str:
     return "\n".join(lines)
 
 
+def _events_section(rows: Optional[list[dict]]) -> str:
+    """Polymarket 事件概率节（预测市场隐含概率——非官方预测，标注进简报）。"""
+    lines = ["## 五、事件概率（Polymarket 预测市场隐含概率，非官方预测）"]
+    if not rows:
+        lines.append("（无事件概率数据）")
+        return "\n".join(lines)
+    for r in sorted(rows, key=lambda x: -float(x.get("volume_24h") or 0))[:10]:
+        end = str(r.get("end_date") or "")[:10]
+        lines.append(
+            f"- [{r.get('category', '-')}] {r['question']} — Yes {float(r['yes_price']) * 100:.0f}%"
+            f"（24h 量 ${float(r.get('volume_24h') or 0) / 1e6:.1f}M{f'，截止 {end}' if end else ''}）"
+        )
+    return "\n".join(lines)
+
+
 def build_brief(
     snap,
     watchlist_rows: Optional[list[dict]] = None,
     news_by_symbol: Optional[dict[str, list]] = None,
     warehouse_con=None,
     as_of: str = "",
+    event_rows: Optional[list[dict]] = None,
 ) -> str:
     """全部真实状态 → 一份 LLM 可读的 markdown 简报（纯组装，离线可测）。"""
     parts = [f"# QuantAI 每日数据简报{f'（{as_of}）' if as_of else ''}"]
@@ -132,6 +148,7 @@ def build_brief(
     parts.append(_watchlist_section(watchlist_rows or []))
     parts.append(_news_section(news_by_symbol or {}))
     parts.append(_warehouse_section(warehouse_con))
+    parts.append(_events_section(event_rows))
     return "\n\n".join(parts)
 
 

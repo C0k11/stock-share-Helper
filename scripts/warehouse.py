@@ -32,7 +32,7 @@ _EXPORT_DIR = _REPO / "tableau" / "exports"
 _MARTS = (
     "dim_date", "dim_symbol", "fact_prices", "fact_positions",
     "fact_trades", "fact_signals", "fact_backtest_results", "fact_backtest_equity",
-    "fact_news",
+    "fact_news", "fact_event_odds",
 )
 
 
@@ -77,6 +77,14 @@ def _load_raw(db_path: Path, portfolio_file: str, years: int, benchmark: str) ->
         news = NewsFetcher(extra_feeds=load_config().data.news_feeds).fetch_all(symbols)
         n = load_news(con, news)
         print(f"[etl] raw.news            +{n} new items ({len(news)} fetched)")
+        event_tags = load_config().data.event_tags
+        if event_tags:
+            from quantai.data.events import EventsFetcher
+            from quantai.warehouse import load_event_odds
+
+            odds = EventsFetcher().fetch_all(event_tags, limit_per_tag=15)
+            n = load_event_odds(con, odds, as_of=as_of)
+            print(f"[etl] raw.event_odds      +{n} markets (tags {event_tags})")
         if benchmark in prices:
             df = prices[benchmark]
             weight = pd.Series(0.6, index=df.index)  # demo：60% 恒权重基准回测

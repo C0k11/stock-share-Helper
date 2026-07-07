@@ -109,6 +109,17 @@ _DDL: dict[str, str] = {
         model VARCHAR,
         scored_at TIMESTAMP DEFAULT current_timestamp,
         {_AUDIT})""",
+    "event_odds": f"""CREATE TABLE IF NOT EXISTS raw.event_odds (
+        as_of DATE NOT NULL,
+        market_id VARCHAR NOT NULL,
+        condition_id VARCHAR,
+        event_title VARCHAR NOT NULL,
+        question VARCHAR NOT NULL,
+        yes_price DOUBLE NOT NULL,
+        volume_24h DOUBLE,
+        end_date VARCHAR,
+        category VARCHAR,
+        {_AUDIT})""",
 }
 
 
@@ -385,6 +396,25 @@ def load_news_scores(
             con.execute(
                 "INSERT INTO raw.news_scores (link, sentiment, label, model) VALUES (?,?,?,?)",
                 [link, sentiment, label, model],
+            )
+    return len(rows)
+
+
+def load_event_odds(con: DuckDBPyConnection, odds: Iterable, as_of: str) -> int:
+    """Polymarket 事件概率快照 → `raw.event_odds`。幂等键 = as_of（同日重跑全量替换，
+    跨日累积 → 概率时间序列，Tableau 可画事件概率演变线）。"""
+    _ensure(con, _DDL["event_odds"])
+    rows = [o.as_dict() for o in odds if getattr(o, "market_id", "")]
+    with _tx(con):
+        con.execute("DELETE FROM raw.event_odds WHERE as_of = ?", [as_of])
+        for r in rows:
+            con.execute(
+                """INSERT INTO raw.event_odds
+                   (as_of, market_id, condition_id, event_title, question,
+                    yes_price, volume_24h, end_date, category)
+                   VALUES (?,?,?,?,?,?,?,?,?)""",
+                [as_of, r["market_id"], r["condition_id"], r["event_title"],
+                 r["question"], r["yes_price"], r["volume_24h"], r["end_date"], r["category"]],
             )
     return len(rows)
 

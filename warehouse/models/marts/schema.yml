@@ -89,6 +89,14 @@ models:
       - name: run_id
         tests: [not_null, unique]
 
+  - name: fact_event_odds
+    description: Polymarket 事件概率（as_of×market_id 粒度；预测市场隐含概率非官方预测）。
+    columns:
+      - name: market_id
+        tests: [not_null]
+      - name: yes_price
+        tests: [not_null]
+
   - name: fact_news
     description: 新闻事实（link 粒度；LLM 情绪分 LEFT JOIN，未打分为 NULL 不冒充中性）。
     columns:

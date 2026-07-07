@@ -67,3 +67,11 @@ sources:
             tests: [not_null, unique]
           - name: sentiment
             tests: [not_null]
+      - name: event_odds
+        columns:
+          - name: market_id
+            tests: [not_null]
+          - name: yes_price
+            tests: [not_null]
+          - name: question
+            tests: [not_null]

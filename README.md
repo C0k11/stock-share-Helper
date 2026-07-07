@@ -67,7 +67,7 @@ python scripts/train.py --sft data/distill/<batch>.jsonl --confirm-compute
 flowchart TB
     subgraph L0["Foundation"]
         CFG["config/ — typed pydantic settings, extra=forbid"]
-        DAT["data/ — yfinance · RSS news · parquet · NYSE calendar"]
+        DAT["data/ — yfinance · RSS news · Polymarket odds · NYSE calendar"]
     end
     subgraph L1["Pure computation — causal, no lookahead"]
         FEA["features/ — causal model features"]
@@ -191,9 +191,11 @@ flowchart TB
   daily returns, 52-week-high distance), `fact_positions` (lot aggregation +
   ASOF-join valuation), `fact_trades`, `fact_signals`, `fact_news` (RSS
   headlines at link grain **with LLM sentiment columns** — unscored stays NULL,
-  never a fake neutral 0), `fact_backtest_results`, `fact_backtest_equity`
-  (SQL drawdown).
-- **dbt tests**: 80 assertions (not-null/enums/relationships/grain uniqueness on
+  never a fake neutral 0), `fact_event_odds` (**Polymarket prediction-market
+  implied probabilities** via the public Gamma API — Fed decisions, macro events —
+  snapshotted daily into a probability time series), `fact_backtest_results`,
+  `fact_backtest_equity` (SQL drawdown).
+- **dbt tests**: 89 assertions (not-null/enums/relationships/grain uniqueness on
   every fact/OHLC sanity/PnL consistency/drawdown ≤ 0/warn on unpriceable
   positions) — all passing on real market data.
 - **Reconciliation**: pytest runs a real `dbt build` and asserts SQL and pandas
