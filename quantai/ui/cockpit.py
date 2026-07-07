@@ -98,7 +98,7 @@ class CockpitDaemon:
         self._llm_factory = llm_factory
         self.interval_sec = int(interval_sec)
         self.state: dict = {
-            "status": "启动中", "model": "", "out": "", "ts": 0.0,
+            "status": "starting", "model": "", "out": "", "ts": 0.0,
             "scored": 0, "error": "", "round": 0,
         }
         self._symbols: list[str] = []
@@ -132,11 +132,11 @@ class CockpitDaemon:
         import time
 
         try:
-            self.state["status"] = "加载分析员（本地模型或远程 API，按 config）…"
+            self.state["status"] = "loading"
             llm = self._llm_factory()
             self.state["model"] = str(getattr(llm, "model_name", "local"))
         except Exception as exc:  # noqa: BLE001 - 加载失败要让 UI 看见原因
-            self.state.update(status="分析员加载失败", error=f"{type(exc).__name__}: {exc}")
+            self.state.update(status="load_failed", error=f"{type(exc).__name__}: {exc}")
             return
 
         from quantai.agents.news_scorer import score_news
@@ -151,27 +151,27 @@ class CockpitDaemon:
                     held_cost = dict(self._held_cost)
                     lang = self._lang
                 if not symbols:
-                    self.state["status"] = "等待标的配置…"
+                    self.state["status"] = "waiting_symbols"
                     self._stop.wait(5)
                     continue
-                self.state["status"] = "分析中（取数 + 操作卡）…"
+                self.state["status"] = "collecting"
                 advs = collect_advices(symbols, held_cost, direct_fetch, lang=lang)
                 if not advs:
-                    self.state["status"] = "标的暂无足量数据"
+                    self.state["status"] = "no_data"
                     self._stop.wait(self.interval_sec)
                     continue
-                self.state["status"] = "新闻打分中…"
+                self.state["status"] = "scoring"
                 news = NewsFetcher().fetch_all([a["symbol"] for a in advs[:5]], limit_per_symbol=3)
                 scored = score_news(news, llm) if news else []
                 if scored:
                     _persist_scores(scored, model=self.state["model"])
-                self.state["status"] = "生成战术综述…"
+                self.state["status"] = "summarizing"
                 brief = build_tactical_brief(advs, scored, as_of=datetime.now().strftime("%H:%M"))
                 out = llm.generate(brief, system=tactical_system_prompt(lang))
                 self.state.update(
                     out=out, ts=datetime.now().timestamp(), scored=len(scored),
-                    error="", status="运行中", round=self.state["round"] + 1,
+                    error="", status="running", round=self.state["round"] + 1,
                 )
             except Exception as exc:  # noqa: BLE001 - 单轮失败下一轮重试，但要留痕
-                self.state.update(error=f"{type(exc).__name__}: {exc}", status="本轮失败，稍后重试")
+                self.state.update(error=f"{type(exc).__name__}: {exc}", status="round_failed")
             self._stop.wait(self.interval_sec)

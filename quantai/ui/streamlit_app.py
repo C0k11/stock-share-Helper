@@ -385,10 +385,10 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
                     lang, "ws.ai_status", model=stt.get("model", "?"),
                     round=stt.get("round", 0),
                     ts=f"{_dt.fromtimestamp(stt['ts']):%H:%M:%S}",
-                    scored=stt.get("scored", 0), status=stt.get("status", ""),
+                    scored=stt.get("scored", 0), status=tr(lang, "st." + stt.get("status", "running")),
                 ))
             else:
-                st.info(tr(lang, "ws.ai_waiting", status=stt.get("status", "…")))
+                st.info(tr(lang, "ws.ai_waiting", status=tr(lang, "st." + stt.get("status", "starting"))))
             if stt.get("error"):
                 st.warning(tr(lang, "ws.ai_error", err=stt["error"]))
 
