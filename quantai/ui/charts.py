@@ -96,6 +96,8 @@ def candlestick_figure(
             col=1,
         )
     fig.update_layout(title=f"{symbol} 日线", **DARK_LAYOUT)
+    # 跳过周末：日线蜡烛不留非交易日空洞（工作台图已有，此处曾漏——实锤补齐）
+    fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
     return fig
 
 
@@ -118,6 +120,7 @@ def rsi_macd_figure(df: pd.DataFrame) -> go.Figure:
     fig.add_trace(go.Scatter(x=df.index, y=m["macd_signal"], name="Signal", mode="lines",
                              line=dict(color="#F06292", width=1.2)), row=2, col=1)
     fig.update_layout(height=420, **DARK_LAYOUT)
+    fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
     return fig
 
 

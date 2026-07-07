@@ -164,7 +164,7 @@ def advice_row(adv: dict) -> dict:
     """操作卡 → 表格行（渲染层 dataframe 直接吃）。"""
     stop = adv.get("stop")
     return {
-        "标的": adv["symbol"] + ("　📌" if adv.get("held") else ""),
+        "标的": adv["symbol"] + (" [持仓]" if adv.get("held") else ""),
         "现价": f"{adv['last']:.2f}" if adv.get("last") is not None else "—",
         "当日%": f"{adv['day_pct'] * 100:+.2f}%" if adv.get("day_pct") is not None else "—",
         "动作": adv["action"],
@@ -181,11 +181,11 @@ def alerts(advices: list[dict]) -> list[str]:
     for a in advices:
         if a.get("held") and a["action"] in (ACTION_TRIM, ACTION_EXIT):
             stop = f"，止损参考 {a['stop']:.2f}" if a.get("stop") is not None else ""
-            out.append(f"⚠ {a['symbol']} 建议{a['action']}{stop}（计分 {a['score']:+d}）")
+            out.append(f"[警报] {a['symbol']} 建议{a['action']}{stop}（计分 {a['score']:+d}）")
         elif a.get("held") and a.get("risks"):
-            out.append(f"👀 {a['symbol']}：{a['risks'][0]}")
+            out.append(f"[关注] {a['symbol']}：{a['risks'][0]}")
         elif a["action"] == ACTION_ENTRY:
-            out.append(f"🟢 {a['symbol']} 出现关注买点（计分 {a['score']:+d}）")
+            out.append(f"[机会] {a['symbol']} 出现关注买点（计分 {a['score']:+d}）")
     return out
 
 

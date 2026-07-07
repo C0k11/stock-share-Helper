@@ -28,16 +28,24 @@ _WAREHOUSE_DB = Path("data/warehouse/quantai.duckdb")
 
 
 def load_report_llm():
-    """加载本地 LLM 并放开报告场景的生成上限（GPU；调用方自行缓存/驻留）。
+    """按 config 返回分析员：默认本地 GPU 模型；`llm.remote.enabled` 时走外接 API。
 
-    `llm.adapters.analyst` 配置存在且权重在本地时预加载该 LoRA（v2 蒸馏学生，
-    盲评过关后挂载）；路径缺失自动降级裸基座——公开仓库不带权重也能跑。
+    本地路径：`llm.adapters.analyst` 配置存在且权重在本地时预加载该 LoRA（v2 蒸馏
+    学生，盲评过关后挂载）；路径缺失自动降级裸基座——公开仓库不带权重也能跑。
+    远程路径：任意 OpenAI 兼容 API（本地性能不足时的分析员替身，花真钱、显式开启，
+    见 `quantai.llm.remote.RemoteAnalyst`）。两者同 `generate(user, system)` 鸭子接口，
+    下游（日报/作战台守护线程/新闻打分）零改动。
     """
     from pathlib import Path as _Path
 
+    cfg = load_config().llm
+    if cfg.remote.enabled:
+        from quantai.llm.remote import RemoteAnalyst
+
+        return RemoteAnalyst.from_config(cfg.remote)
+
     from quantai.llm.inference import LocalLLM
 
-    cfg = load_config().llm
     llm = LocalLLM.from_config(cfg)
     llm.gen_max_time_sec = 240.0
     llm.max_new_tokens = 2500

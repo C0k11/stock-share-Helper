@@ -228,7 +228,7 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
                 cost = sum(p.shares * p.cost_basis for p in portfolio.positions if p.symbol == p_sym)
                 pnl = shares * last - cost
                 c1, c2, c3, c4, c5 = st.columns(5)
-                c1.metric(f"📌 {p_sym} × {shares:,.0f}", f"${last:,.2f}",
+                c1.metric(f"{p_sym} × {shares:,.0f} [持仓]", f"${last:,.2f}",
                           f"{(last / prev - 1) * 100:+.2f}% 今日" if prev == prev else None)
                 c2.metric("成本均价", f"${cost / shares:,.2f}" if shares else "—")
                 c3.metric("市值", f"${shares * last:,.2f}")
@@ -256,7 +256,7 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
         )
 
     # 指标开关（放 fragment 外：自动刷新不会把打开的菜单弹回去）
-    with st.popover("指标 ⌄"):
+    with st.popover("指标"):
         show_volume = st.checkbox("Volume", True)
         show_vwap = st.checkbox("VWAP（仅盘中档有效）", intraday, disabled=not intraday)
         show_rsi = st.checkbox("RSI(14)", True)
@@ -312,144 +312,87 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
         if _REFRESH[auto]:
             from datetime import datetime as _dt
 
-            st.caption(f"⟳ 每 {auto} 自动刷新 · 最后更新 {_dt.now():%H:%M:%S}")
+            st.caption(f"每 {auto} 自动刷新 · 最后更新 {_dt.now():%H:%M:%S}")
 
     _live_view()
 
     # ================= 实时作战台（常驻分析主战场） =================
-    st.subheader("⚔ 实时作战台")
+    st.subheader("实时作战台")
     st.caption(
-        "规则引擎每 30 秒一轮（五因子 + 盘中卖压修正）· 驻留 AI 每 5 分钟一轮综述并给新闻打分入库"
-        " · **分析参考，非投资建议**"
+        "规则引擎每 30 秒一轮（五因子 + 盘中卖压修正）· 常驻分析员后台每 5 分钟一轮综述"
+        "并给新闻打分入库 · 分析参考，非投资建议"
     )
-    tact_syms = list(dict.fromkeys(held + watch))[:8]
 
     def _avg_cost(s2: str):
         sh = sum(p.shares for p in (portfolio.positions if portfolio else []) if p.symbol == s2)
         ct = sum(p.shares * p.cost_basis for p in (portfolio.positions if portfolio else []) if p.symbol == s2)
         return (ct / sh) if sh else None
 
-    def _bar_complete(sym_: str, last_ts) -> bool:
-        """尾根日线 bar 是否已走完（未走完的半根 bar 绝不进日线因子）。
+    # 作战台以真实持仓为核心；自选股按需补充（默认带上前几只，可增删）
+    tact_syms = st.multiselect(
+        "作战台标的（持仓恒在，自选可增删）",
+        options=list(dict.fromkeys(held + watch)),
+        default=list(dict.fromkeys(held + watch[:4])),
+        key="ws_tact_syms",
+    )
+    tact_syms = list(dict.fromkeys(held + tact_syms))  # 持仓永远在列
+    held_cost = {s2: (_avg_cost(s2) or 0.0) for s2 in held}
 
-        _fetch_hist 已把索引转成纽约墙钟（naive），机器也在美东时区（诚实假设，
-        换时区需改这里）。美股 bar 在其日期的 16:10 后视为完整；加密（-USD，
-        UTC 0 点切日、时间戳=起始时刻）在起始 +24h 后完整——按日期==今天判断
-        会两头翻车：盘后误剔股票完整 bar、0-20 点漏剔 crypto 半根 bar（审查实锤）。
-        """
-        import pandas as _pd
-        from datetime import datetime as _dt
-
-        if str(sym_).upper().endswith("-USD"):
-            end = last_ts + _pd.Timedelta(hours=24)
-        else:
-            end = last_ts.replace(hour=16, minute=10)
-        return _dt.now() >= end.to_pydatetime()
+    from quantai.ui.cockpit import collect_advices
 
     @st.fragment(run_every=30)
     def _tactics_board():
-        from datetime import date as _date
         from datetime import datetime as _dt
 
-        from quantai.agents.analyst import intraday_stats
-        from quantai.agents.tactician import advice_row, advise, alerts
-        from quantai.distill.scenarios import build_indicator_brief
+        from quantai.agents.tactician import advice_row, alerts
 
-        advs = []
-        for s2 in tact_syms:
-            daily = _hist(s2, "2y", "1d")
-            if daily is None or daily.empty or "close" not in daily.columns:
-                continue
-            d = daily
-            if not _bar_complete(s2, d.index[-1]):
-                d = d.iloc[:-1]  # 剔未走完的半根 bar：日线因子恒为收盘口径
-            if len(d) < 60:
-                continue
-            vals = build_indicator_brief(d, s2)[1]
-            ist = None
-            m1 = _hist(s2, "1d", "1m")
-            if m1 is not None and not m1.empty and m1.index[-1].date() == _date.today():
-                prev_close = float(d["close"].dropna().iloc[-1])
-                avg_vol = float(d["volume"].dropna().tail(20).mean()) if "volume" in d.columns else 0.0
-                ist = intraday_stats(m1, prev_close, avg_vol) or None
-            advs.append(advise(s2, vals, ist, held=s2 in held, avg_cost=_avg_cost(s2)))
-
+        advs = collect_advices(tact_syms, held_cost, _hist)
         if not advs:
             st.caption("（作战台标的暂无足量数据）")
             return
-        advs.sort(key=lambda a: (not a["held"], -abs(a["score"])))
         for al in alerts(advs)[:4]:
-            (st.warning if al.startswith("⚠") else st.info)(al)
+            (st.warning if al.startswith("[警报]") else st.info)(al)
         st.dataframe([advice_row(a) for a in advs], use_container_width=True, hide_index=True)
-        st.session_state["ws_tact_advs"] = advs
         st.caption(f"操作卡更新 {_dt.now():%H:%M:%S} · 30s/轮 · 收盘后自动退回日线口径")
 
     _tactics_board()
 
     use_ai = st.toggle(
-        "🧠 驻留 AI 实时综述（v2 学生模型常驻显存 ~10GB，5 分钟/轮，顺带新闻情绪入库）",
+        "常驻 AI 分析员（打开页面即后台加载并持续分析；本地 v2 学生 ~10GB 显存，"
+        "或 config llm.remote 外接 API）",
         value=True, key="ws_ai_on",
     )
-    # 整页 run 序号：fragment 在整页 rerun 时也会被 inline 执行（streamlit 1.52 行为）——
-    # AI fragment 靠它区分"用户交互触发的整页 run"（只渲染缓存，绝不同步生成把 UI
-    # 冻住 1 分钟）与"run_every 定时跳"（才允许真生成）。审查实锤后加的闸。
-    st.session_state["ws_run_seq"] = int(st.session_state.get("ws_run_seq", 0)) + 1
     if use_ai:
-        @st.cache_data(ttl=280, show_spinner=False)
-        def _tact_news(symbols: tuple) -> list:
-            from quantai.data.news import NewsFetcher
+        from quantai.agents.reporting import load_report_llm
+        from quantai.ui.cockpit import CockpitDaemon
 
-            return NewsFetcher().fetch_all(list(symbols), limit_per_symbol=3)
+        @st.cache_resource(show_spinner=False)
+        def _cockpit_daemon() -> CockpitDaemon:
+            # 单例守护线程：模型加载与推理全在后台，UI 永不被 60-90s 的生成挡住；
+            # 多标签页/刷新共享同一份（绝不重复加载 10GB 模型）
+            return CockpitDaemon(llm_factory=load_report_llm, interval_sec=300).start()
 
-        @st.fragment(run_every=300)
-        def _ai_tactical():
-            import time as _t
+        daemon = _cockpit_daemon()
+        daemon.configure(tact_syms, held_cost)
+
+        @st.fragment(run_every=15)
+        def _ai_view():
             from datetime import datetime as _dt
 
-            from quantai.agents.news_scorer import score_news
-            from quantai.agents.reporting import _persist_scores
-            from quantai.agents.tactician import TACTICAL_SYSTEM_PROMPT, build_tactical_brief
-
-            seq = int(st.session_state.get("ws_run_seq", 0))
-            is_full_run = seq != st.session_state.get("ws_ai_seen_seq")
-            st.session_state["ws_ai_seen_seq"] = seq
-
-            cached_out = st.session_state.get("ws_ai_out")
-            last_ts = float(st.session_state.get("ws_ai_ts") or 0.0)
-            if is_full_run:
-                # 整页交互路径：只展示已有观点（模型加载与生成都不在这里发生）
-                if cached_out:
-                    st.markdown(cached_out)
-                    st.caption(
-                        f"AI 观点生成于 {_dt.fromtimestamp(last_ts):%H:%M:%S} · 5 分钟/轮后台自动更新"
-                    )
-                else:
-                    st.info("驻留 AI 将在 5 分钟内产出首轮综述（后台加载模型，不阻塞页面）；上方规则操作卡已实时。")
-                return
-            if cached_out and _t.time() - last_ts < 240:
-                st.markdown(cached_out)
-                st.caption(f"AI 观点生成于 {_dt.fromtimestamp(last_ts):%H:%M:%S} · 5 分钟/轮自动更新")
-                return
-            advs = st.session_state.get("ws_tact_advs") or []
-            if not advs:
-                st.caption("等待首轮操作卡数据…")
-                return
-            with st.spinner("驻留 AI 生成战术综述…（首轮含模型加载；新闻打分 + 综述两次推理）"):
-                llm = _resident_llm(st)  # 延迟到定时跳里加载：首屏永不因它卡住
-                news = _tact_news(tuple(a["symbol"] for a in advs[:5]))
-                scored = score_news(news, llm) if news else []
-                if scored:
-                    _persist_scores(scored, model=str(getattr(llm, "model_name", "local")))
-                brief = build_tactical_brief(
-                    advs, scored, as_of=_dt.now().strftime("%H:%M")
+            stt = daemon.state
+            if stt.get("out"):
+                st.markdown(stt["out"])
+                st.caption(
+                    f"分析员 {stt.get('model', '?')} · 第 {stt.get('round', 0)} 轮 · "
+                    f"生成于 {_dt.fromtimestamp(stt['ts']):%H:%M:%S} · "
+                    f"本轮新闻入库 {stt.get('scored', 0)} 条 · 状态：{stt.get('status', '')}"
                 )
-                out = llm.generate(brief, system=TACTICAL_SYSTEM_PROMPT)
-            st.session_state["ws_ai_out"] = out
-            st.session_state["ws_ai_ts"] = _t.time()
-            st.markdown(out)
-            st.caption(f"AI 观点生成于 {_dt.now():%H:%M:%S} · 新闻已打分入库 {len(scored)} 条")
+            else:
+                st.info(f"常驻分析员：{stt.get('status', '启动中')}（首轮综述通常 1-2 分钟内出）")
+            if stt.get("error"):
+                st.warning(f"最近一轮异常：{stt['error']}（自动重试中）")
 
-        _ai_tactical()
+        _ai_view()
 
     # 下方区块（Market details / Holdings / News）走同一份缓存取数：
     # 自动刷新只跳动上方图表，这里在下一次整页交互时跟上（避免 tabs 被自刷弹回首个页签）
@@ -586,12 +529,12 @@ def _render_analyst_page(st) -> None:  # pragma: no cover - 需 streamlit 运行
         "也可手动触发）。盘中实时分析在**行情工作台 · 实时作战台**常驻进行，本页专注日报。"
     )
 
-    use_llm = st.toggle("🧠 驻留本地 LLM（占用约 10GB 显存，加载一次全程复用）", value=False)
+    use_llm = st.toggle("驻留本地 LLM（占用约 10GB 显存，加载一次全程复用）", value=False)
     llm = _resident_llm(st) if use_llm else None
 
     from quantai.agents.reporting import make_daily_report
 
-    if st.button("📋 生成日报" + ("（含 LLM 分析）" if use_llm else "（数据简报）")):
+    if st.button("生成日报" + ("（含 LLM 分析）" if use_llm else "（数据简报）")):
         with st.spinner("组装日报…" + ("LLM 生成中…" if use_llm else "")):
             make_daily_report(llm, log=lambda m: None)
         st.rerun()
@@ -778,7 +721,7 @@ def main() -> None:  # pragma: no cover - 需 streamlit 运行时
 
     # Tableau 一键打开（找 tableau/ 下的 .twb/.twbx；没有就开导出目录）
     tb_files = list(Path("tableau").glob("*.twb*"))
-    label = f"📊 打开 Tableau（{tb_files[0].name}）" if tb_files else "📂 打开 Tableau 数据源目录"
+    label = f"打开 Tableau（{tb_files[0].name}）" if tb_files else "打开 Tableau 数据源目录"
     if st.sidebar.button(label):
         os.startfile(str(tb_files[0]) if tb_files else str(Path("tableau/exports").resolve()))
 

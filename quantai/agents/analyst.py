@@ -51,7 +51,7 @@ def _portfolio_section(snap) -> str:
             f"{'，回踩形态' if s.is_pullback else ''}"
         )
     if snap.missing_prices:
-        lines.append(f"- ⚠ 缺行情已剔除：{', '.join(snap.missing_prices)}")
+        lines.append(f"- [注意] 缺行情已剔除：{', '.join(snap.missing_prices)}")
     return "\n".join(lines)
 
 

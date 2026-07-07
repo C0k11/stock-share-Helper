@@ -182,6 +182,21 @@ class LLMDPOConfig(_Base):
     reference_free: bool = False
 
 
+class LLMRemoteConfig(_Base):
+    """外接远程分析员（任意 OpenAI 兼容 chat API：DeepSeek/OpenAI/Anthropic 兼容端点/
+    Ollama…）。本地性能不足时顶替本地 GPU 模型出分析；**花真钱，默认关闭**，
+    key 只从环境变量读。"""
+
+    enabled: bool = False
+    base_url: str = "https://api.deepseek.com"
+    model: str = "deepseek-v4-flash"
+    api_key_env: str = "REMOTE_LLM_API_KEY"
+    temperature: float = Field(default=0.5, ge=0)
+    max_tokens: int = Field(default=2048, gt=0)
+    # 思考模式（DeepSeek V4 系支持；其它服务不识别该字段时应保持 False）。
+    thinking: bool = False
+
+
 class LLMConfig(_Base):
     model_name: str = "Qwen/Qwen3-8B"
     # HuggingFace 模型/权重缓存目录（取代旧 local_chat.py 硬编码的 "D:/Project/ml_cache/models"）。
@@ -191,6 +206,8 @@ class LLMConfig(_Base):
     inference: LLMInferenceConfig = Field(default_factory=LLMInferenceConfig)
     finetune: LLMFinetuneConfig = Field(default_factory=LLMFinetuneConfig)
     dpo: LLMDPOConfig = Field(default_factory=LLMDPOConfig)
+    # 外接远程分析员（enabled=true 时 load_report_llm 走远程，本地模型不加载）。
+    remote: LLMRemoteConfig = Field(default_factory=LLMRemoteConfig)
 
 
 # --------------------------------------------------------------------------- #

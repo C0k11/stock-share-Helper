@@ -68,6 +68,14 @@ llm:
   # 自动降级裸基座）。
   adapters:
     analyst: "models/llm/finance_v2_sft/lora_weights"
+  # 外接远程分析员：本地 GPU 不够/被占时，用任意 OpenAI 兼容 API 顶替本地模型
+  # 出分析（DeepSeek / OpenAI / Anthropic 兼容端点 / Ollama…）。花真钱，默认关闭；
+  # key 放环境变量（.env 已 gitignore），永不写进本文件。
+  remote:
+    enabled: false
+    base_url: "https://api.deepseek.com"   # 例：https://api.openai.com/v1
+    model: "deepseek-v4-flash"
+    api_key_env: "REMOTE_LLM_API_KEY"
   inference:
     device: "cuda"
     quantization: "8bit"         # 4bit | 8bit | fp16（取代旧 load_in_4bit 布尔）

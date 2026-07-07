@@ -125,13 +125,13 @@ class TestPresentation:
             advise("E", _daily(), held=False),
         ]
         out = alerts(advs)
-        assert any("BBB" in x and "⚠" in x for x in out)
-        assert any("E" in x and "🟢" in x for x in out)
+        assert any("BBB" in x and "[警报]" in x for x in out)
+        assert any("E" in x and "[机会]" in x for x in out)
 
     def test_row_and_brief_contain_numbers(self):
         a = advise("N", _daily(), _intraday(), held=True)
         row = advice_row(a)
-        assert row["动作"] == a["action"] and "📌" in row["标的"]
+        assert row["动作"] == a["action"] and "[持仓]" in row["标的"]
         brief = build_tactical_brief([a], as_of="12:00")
         assert "N" in brief and "操作卡" in brief and "12:00" in brief
 
