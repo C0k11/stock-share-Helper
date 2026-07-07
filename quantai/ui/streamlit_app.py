@@ -168,11 +168,21 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
             unsafe_allow_html=True,
         )
 
-    tf = st.segmented_control("时间档", list(_TIMEFRAMES), default="3M", label_visibility="collapsed")
+    tf_c, rf_c = st.columns([5, 1.3])
+    with tf_c:
+        tf = st.segmented_control("时间档", list(_TIMEFRAMES), default="3M", label_visibility="collapsed")
     period, interval = _TIMEFRAMES[tf or "3M"]
     intraday = interval.endswith("m") or interval.endswith("h")
+    # 自动刷新：st.fragment(run_every) 局部重跑——只刷"价格头+图"，不打扰整页交互
+    _REFRESH = {"刷新:关": None, "15s": 15, "30s": 30, "60s": 60}
+    with rf_c:
+        auto = st.selectbox(
+            "自动刷新", list(_REFRESH), index=2 if intraday else 0,
+            key="ws_auto_refresh", label_visibility="collapsed",
+        )
 
-    @st.cache_data(ttl=120 if intraday else 900, show_spinner="拉取行情…")
+    # 盘中缓存 25s：自动刷新每跳一次都能拿到新 bar（旧 120s 会连续 4 跳吃同一份缓存）
+    @st.cache_data(ttl=25 if intraday else 900, show_spinner=False)
     def _hist(symbol: str, period: str, interval: str):
         import yfinance as yf
 
@@ -191,40 +201,7 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
         except Exception:
             return {}
 
-    df = _hist(sym, period, interval)
-    if df is None or df.empty:
-        st.error(f"{sym} 在 {tf} 档取不到数据（新上市/加密标的部分粒度不支持），换个时间档试试。")
-        return
-
-    close = df["close"].astype(float).dropna()
-    last, first = float(close.iloc[-1]), float(close.iloc[0])
-    # 1D 档按券商惯例对比**昨收**（而非当日首根 bar，后者是"对比开盘"口径）
-    if tf == "1D":
-        daily = _hist(sym, "5d", "1d")
-        if daily is not None and len(daily) >= 2:
-            first = float(daily["close"].dropna().iloc[-2])
-    chg, chg_pct = last - first, (last / first - 1) * 100
-    o = float(df["open"].dropna().iloc[-1]) if "open" in df.columns else float("nan")
-    h = float(df["high"].dropna().max()) if "high" in df.columns else float("nan")
-    l = float(df["low"].dropna().min()) if "low" in df.columns else float("nan")
-    up = chg >= 0
-    color = "#26A69A" if up else "#EF5350"
-    # 自定义头部（WS 式：大价格 + 内联涨跌；不用 st.metric——$ 会触发 LaTeX、涨跌不能内联）
-    st.markdown(
-        f"""<div style="line-height:1.15;margin:2px 0 6px 0">
-  <span style="color:#8A8A93;font-size:0.95rem">{sym}</span><br>
-  <span style="font-size:2.3rem;font-weight:700">${last:,.2f}</span>
-  <span style="color:{color};font-size:1.05rem;font-weight:600;margin-left:8px">
-    {chg:+,.2f} ({chg_pct:+.2f}%) <span style="color:#8A8A93;font-weight:400">{tf}</span>
-  </span><br>
-  <span style="color:#8A8A93;font-size:0.85rem">
-    O&nbsp;${o:,.2f}&emsp;H&nbsp;${h:,.2f}&emsp;L&nbsp;${l:,.2f}&emsp;C&nbsp;${last:,.2f}
-    &emsp;·&emsp;{interval} bars</span>
-</div>""",
-        unsafe_allow_html=True,
-    )
-
-    # 指标开关（券商式弹出菜单）
+    # 指标开关（放 fragment 外：自动刷新不会把打开的菜单弹回去）
     with st.popover("指标 ⌄"):
         show_volume = st.checkbox("Volume", True)
         show_vwap = st.checkbox("VWAP（仅盘中档有效）", intraday, disabled=not intraday)
@@ -234,14 +211,64 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
         show_bb = st.checkbox("Bollinger(20,2)", False)
         kind = st.radio("图型", ["line", "candle"], index=0 if intraday else 1, horizontal=True)
 
-    st.plotly_chart(
-        workstation_figure(
-            df, sym, kind=kind, ma_windows=ma_on, show_bollinger=show_bb,
-            show_vwap=show_vwap and intraday, show_volume=show_volume,
-            show_rsi=show_rsi, show_macd=show_macd,
-        ),
-        use_container_width=True,
-    )
+    @st.fragment(run_every=_REFRESH[auto])
+    def _live_view() -> None:
+        df = _hist(sym, period, interval)
+        if df is None or df.empty:
+            st.error(f"{sym} 在 {tf} 档取不到数据（新上市/加密标的部分粒度不支持），换个时间档试试。")
+            return
+
+        close = df["close"].astype(float).dropna()
+        last, first = float(close.iloc[-1]), float(close.iloc[0])
+        # 1D 档按券商惯例对比**昨收**（而非当日首根 bar，后者是"对比开盘"口径）
+        if tf == "1D":
+            daily = _hist(sym, "5d", "1d")
+            if daily is not None and len(daily) >= 2:
+                first = float(daily["close"].dropna().iloc[-2])
+        chg, chg_pct = last - first, (last / first - 1) * 100
+        o = float(df["open"].dropna().iloc[-1]) if "open" in df.columns else float("nan")
+        h = float(df["high"].dropna().max()) if "high" in df.columns else float("nan")
+        l = float(df["low"].dropna().min()) if "low" in df.columns else float("nan")
+        up = chg >= 0
+        color = "#26A69A" if up else "#EF5350"
+        # 自定义头部（WS 式：大价格 + 内联涨跌；不用 st.metric——$ 会触发 LaTeX、涨跌不能内联）
+        st.markdown(
+            f"""<div style="line-height:1.15;margin:2px 0 6px 0">
+  <span style="color:#8A8A93;font-size:0.95rem">{sym}</span><br>
+  <span style="font-size:2.3rem;font-weight:700">${last:,.2f}</span>
+  <span style="color:{color};font-size:1.05rem;font-weight:600;margin-left:8px">
+    {chg:+,.2f} ({chg_pct:+.2f}%) <span style="color:#8A8A93;font-weight:400">{tf}</span>
+  </span><br>
+  <span style="color:#8A8A93;font-size:0.85rem">
+    O&nbsp;${o:,.2f}&emsp;H&nbsp;${h:,.2f}&emsp;L&nbsp;${l:,.2f}&emsp;C&nbsp;${last:,.2f}
+    &emsp;·&emsp;{interval} bars</span>
+</div>""",
+            unsafe_allow_html=True,
+        )
+
+        st.plotly_chart(
+            workstation_figure(
+                df, sym, kind=kind, ma_windows=ma_on, show_bollinger=show_bb,
+                show_vwap=show_vwap and intraday, show_volume=show_volume,
+                show_rsi=show_rsi, show_macd=show_macd,
+            ),
+            use_container_width=True,
+            key="ws_main_chart",
+        )
+        if _REFRESH[auto]:
+            from datetime import datetime as _dt
+
+            st.caption(f"⟳ 每 {auto} 自动刷新 · 最后更新 {_dt.now():%H:%M:%S}")
+
+    _live_view()
+
+    # 下方区块（Market details / Holdings / News）走同一份缓存取数：
+    # 自动刷新只跳动上方图表，这里在下一次整页交互时跟上（避免 tabs 被自刷弹回首个页签）
+    df = _hist(sym, period, interval)
+    if df is None or df.empty:
+        return
+    close = df["close"].astype(float).dropna()
+    last = float(close.iloc[-1])
 
     # Market details（来自 yfinance info；缺失诚实显示 —）
     info = _info(sym)
@@ -454,6 +481,12 @@ def main() -> None:  # pragma: no cover - 需 streamlit 运行时
         st.sidebar.success("API 在线")
     except Exception as exc:
         st.sidebar.error(f"API 不可达：{exc}")
+        st.info(
+            "实盘会话页需要 QuantAI API（纸面交易，零真实资金）。启动方式任选：\n\n"
+            "1. 双击 `启动仪表盘.bat`（新版会自动拉起 API）；\n"
+            "2. 或另开终端执行 `venv311\\Scripts\\python.exe scripts\\serve.py --host 127.0.0.1`，"
+            "然后回来点侧栏任意控件重试。"
+        )
         st.stop()
 
     # 实盘控制
