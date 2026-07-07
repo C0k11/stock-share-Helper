@@ -11,6 +11,7 @@ from quantai.warehouse.db import SCHEMAS, connect
 from quantai.warehouse.etl import (
     load_backtest,
     load_news,
+    load_news_scores,
     load_positions,
     load_prices,
     load_signals,
@@ -28,4 +29,5 @@ __all__ = [
     "load_signals",
     "load_backtest",
     "load_news",
+    "load_news_scores",
 ]

@@ -367,31 +367,37 @@ def _render_analyst_page(st) -> None:  # pragma: no cover - 需 streamlit 运行
 
     st.markdown(
         "**日报**（收盘口径：持仓+自选股+新闻+仓库 SQL 摘要）｜**盘中快报**（当日 1 分钟"
-        "会话：VWAP 位置、量能倍数、跌 bar 量占比等卖压代理指标）。带 LLM 的版本"
-        "（财经分析 + 新闻情绪量化）需 GPU，在终端跑："
+        "会话：VWAP 位置、量能倍数、跌 bar 量占比等卖压代理指标）。"
+        "开启驻留 LLM 后：报告带财经分析/快评，新闻情绪分自动入仓库（Tableau 情绪时间线）。"
     )
-    st.code(
-        "venv311\\Scripts\\python.exe scripts\\report.py --llm            # 日报+LLM\n"
-        "venv311\\Scripts\\python.exe scripts\\report.py --intraday --llm  # 盘中快评+新闻打分",
-        language="powershell",
-    )
-    b1, b2 = st.columns(2)
-    import subprocess, sys as _sys
 
-    if b1.button("📋 生成日报（无 LLM，秒级）"):
-        with st.spinner("组装日报…"):
-            subprocess.run([_sys.executable, "scripts/report.py"], cwd=str(Path.cwd()))
+    @st.cache_resource(show_spinner="首次加载本地 LLM（Qwen3-8B 8bit，约 30-60 秒）…")
+    def _resident_llm():
+        from quantai.agents.reporting import load_report_llm
+
+        return load_report_llm()
+
+    use_llm = st.toggle("🧠 驻留本地 LLM（占用约 10GB 显存，加载一次全程复用）", value=False)
+    llm = _resident_llm() if use_llm else None
+
+    b1, b2 = st.columns(2)
+    from quantai.agents.reporting import make_daily_report, make_intraday_report
+
+    if b1.button("📋 生成日报" + ("（含 LLM 分析）" if use_llm else "（数据简报）")):
+        with st.spinner("组装日报…" + ("LLM 生成中…" if use_llm else "")):
+            make_daily_report(llm, log=lambda m: None)
         st.rerun()
-    if b2.button("⚡ 生成盘中快报（无 LLM）"):
-        with st.spinner("拉取当日分钟数据…"):
-            subprocess.run([_sys.executable, "scripts/report.py", "--intraday"], cwd=str(Path.cwd()))
+    if b2.button("⚡ 生成盘中快报" + ("（含快评+新闻打分）" if use_llm else "（数据简报）")):
+        with st.spinner("拉取当日分钟数据…" + ("LLM 生成中…" if use_llm else "")):
+            make_intraday_report(llm, log=lambda m: None)
         st.rerun()
+
     reports = sorted(Path("data/reports").glob("*.md"), reverse=True)
     if reports:
         pick = st.selectbox("历史报告", [p.name for p in reports])
         st.markdown((Path("data/reports") / pick).read_text(encoding="utf-8"))
     else:
-        st.caption("暂无报告。点上方按钮或在终端跑 scripts/report.py。")
+        st.caption("暂无报告。点上方按钮生成。")
 
 
 def main() -> None:  # pragma: no cover - 需 streamlit 运行时

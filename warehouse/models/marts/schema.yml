@@ -90,12 +90,16 @@ models:
         tests: [not_null, unique]
 
   - name: fact_news
-    description: 新闻事实（link 粒度；date 由发布时间派生，缺失为 NULL 诚实标注）。
+    description: 新闻事实（link 粒度；LLM 情绪分 LEFT JOIN，未打分为 NULL 不冒充中性）。
     columns:
       - name: link
         tests: [not_null, unique]
       - name: title
         tests: [not_null]
+      - name: sentiment_label
+        tests:
+          - accepted_values:
+              values: ["bullish", "bearish", "neutral", ""]
 
   - name: fact_backtest_equity
     description: 回测净值曲线（run_id×date；drawdown 由 SQL 窗口派生）。

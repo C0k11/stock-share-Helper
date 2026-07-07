@@ -102,6 +102,13 @@ _DDL: dict[str, str] = {
         published TIMESTAMP,
         source VARCHAR,
         {_AUDIT})""",
+    "news_scores": f"""CREATE TABLE IF NOT EXISTS raw.news_scores (
+        link VARCHAR NOT NULL,
+        sentiment DOUBLE NOT NULL,
+        label VARCHAR,
+        model VARCHAR,
+        scored_at TIMESTAMP DEFAULT current_timestamp,
+        {_AUDIT})""",
 }
 
 
@@ -355,6 +362,31 @@ def load_news(con: DuckDBPyConnection, items: Iterable) -> int:
         con.unregister("_stg_news")
     # duckdb INSERT 返回影响行数（Count 列）
     return int(n[0]) if n else 0
+
+
+def load_news_scores(
+    con: DuckDBPyConnection, scored: Iterable[Mapping], model: str = ""
+) -> int:
+    """`news_scorer.score_news` 输出 → `raw.news_scores`。幂等键 = link（重打分覆盖旧分）。
+
+    只入**打出分**的条目（sentiment=None 的诚实缺失不落库——空分入库会被下游当 0 用）。
+    """
+    _ensure(con, _DDL["news_scores"])
+    rows = [
+        (getattr(r["item"], "link", None), float(r["sentiment"]), str(r.get("label", "")))
+        for r in scored
+        if r.get("sentiment") is not None and getattr(r.get("item"), "link", None)
+    ]
+    if not rows:
+        return 0
+    with _tx(con):
+        for link, sentiment, label in rows:
+            con.execute("DELETE FROM raw.news_scores WHERE link = ?", [link])
+            con.execute(
+                "INSERT INTO raw.news_scores (link, sentiment, label, model) VALUES (?,?,?,?)",
+                [link, sentiment, label, model],
+            )
+    return len(rows)
 
 
 # --------------------------------------------------------------------------- #

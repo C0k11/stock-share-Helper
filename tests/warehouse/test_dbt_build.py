@@ -77,14 +77,20 @@ def warehouse(tmp_path_factory):
     load_signals(con, "AAA", SignalGenerator(5, 20, 10).generate(prices["AAA"]))
     load_backtest(con, "bt1", bt, strategy="const60", symbol="AAA")
     from quantai.data.news import entries_to_items
-    from quantai.warehouse import load_news
+    from quantai.warehouse import load_news, load_news_scores
 
-    load_news(
+    news_items = entries_to_items(
+        [
+            {"title": "AAA beats estimates", "link": "https://t.test/n1", "summary": "s"},
+            {"title": "AAA faces probe", "link": "https://t.test/n2"},
+        ],
+        symbol="AAA", source="test",
+    )
+    load_news(con, news_items)
+    load_news_scores(
         con,
-        entries_to_items(
-            [{"title": "AAA beats estimates", "link": "https://t.test/n1", "summary": "s"}],
-            symbol="AAA", source="test",
-        ),
+        [{"item": news_items[0], "sentiment": 0.7, "label": "bullish"}],  # 第二条不打分
+        model="test-llm",
     )
     con.close()  # DuckDB 单写者：dbt 接管前必须放锁
 
@@ -172,3 +178,11 @@ class TestSqlVsPandasReconciliation:
             "SELECT market_value FROM marts.fact_positions WHERE symbol='BBB'"
         ).fetchone()[0]
         assert mv < 0  # 空头市值为负（与 pandas 口径一致）
+
+    def test_fact_news_sentiment_join_null_for_unscored(self, warehouse):
+        con = warehouse["con"]
+        rows = dict(
+            con.execute("SELECT link, sentiment FROM marts.fact_news ORDER BY link").fetchall()
+        )
+        assert rows["https://t.test/n1"] == pytest.approx(0.7)  # 打过分的带分
+        assert rows["https://t.test/n2"] is None  # 没打分 = NULL，不冒充 0

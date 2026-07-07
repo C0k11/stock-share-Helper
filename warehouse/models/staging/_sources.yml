@@ -61,3 +61,9 @@ sources:
             tests: [not_null]
           - name: link
             tests: [not_null, unique]
+      - name: news_scores
+        columns:
+          - name: link
+            tests: [not_null, unique]
+          - name: sentiment
+            tests: [not_null]

@@ -148,6 +148,42 @@ class TestLoadSignals:
         assert strengths <= {"strong_short", "weak_short", "neutral", "weak_long", "strong_long"}
 
 
+class TestLoadNewsScores:
+    def _scored(self):
+        from quantai.data.news import entries_to_items
+
+        items = entries_to_items(
+            [{"title": "up", "link": "https://t/1"}, {"title": "down", "link": "https://t/2"}],
+            symbol="AAA", source="test",
+        )
+        return [
+            {"item": items[0], "sentiment": 0.6, "label": "bullish"},
+            {"item": items[1], "sentiment": None, "label": "unscored"},  # 不入库
+        ]
+
+    def test_only_scored_rows_persisted(self, con):
+        from quantai.warehouse import load_news_scores
+
+        assert load_news_scores(con, self._scored(), model="m1") == 1
+        rows = con.execute("SELECT link, sentiment, label, model FROM raw.news_scores").fetchall()
+        assert rows == [("https://t/1", 0.6, "bullish", "m1")]
+
+    def test_rescore_overwrites_by_link(self, con):
+        from quantai.warehouse import load_news_scores
+
+        scored = self._scored()
+        load_news_scores(con, scored, model="m1")
+        scored[0]["sentiment"] = -0.2
+        load_news_scores(con, scored, model="m2")
+        rows = con.execute("SELECT sentiment, model FROM raw.news_scores").fetchall()
+        assert rows == [(-0.2, "m2")]  # 覆盖不追加
+
+    def test_empty_noop(self, con):
+        from quantai.warehouse import load_news_scores
+
+        assert load_news_scores(con, []) == 0
+
+
 class TestLoadBacktest:
     def test_metrics_and_curve(self, con, prices):
         weight = pd.Series(0.5, index=prices.index)
