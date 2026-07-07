@@ -162,6 +162,15 @@ class TestGeneratorPipeline:
         summary, _ = self._run(tmp_path, limit=2)
         assert summary["sft_written"] == 2
 
+    def test_empty_teacher_answer_is_failure_not_written(self, tmp_path):
+        """思考模式实测坑：content 为空必须计 failure，绝不写进训练集。"""
+        scs = list(ScenarioBuilder().build({"AAA": _prices()}))
+        summary = DistillGenerator(MockDeepSeekClient(canned="   ")).run(
+            scs, tmp_path / "s.jsonl", tmp_path / "d.jsonl"
+        )
+        assert summary["sft_written"] == 0
+        assert len(summary["failures"]) == len(scs)
+
     def test_single_failure_does_not_kill_batch(self, tmp_path):
         scs = list(ScenarioBuilder().build({"AAA": _prices()}))
 

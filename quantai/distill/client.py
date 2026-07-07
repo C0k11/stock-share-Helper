@@ -91,7 +91,15 @@ class DeepSeekClient:
                 self.usage_totals["prompt_tokens"] += int(usage.get("prompt_tokens", 0))
                 self.usage_totals["completion_tokens"] += int(usage.get("completion_tokens", 0))
                 self.usage_totals["requests"] += 1
-                return data["choices"][0]["message"]["content"]
+                content = data["choices"][0]["message"].get("content") or ""
+                if not content.strip():
+                    # 思考模式踩坑（实测）：max_tokens 被推理链耗尽时 content 为空、
+                    # token 照计——必须当失败抛出，绝不让空答案混进训练集。
+                    raise RuntimeError(
+                        "teacher returned empty content（疑似 thinking 耗尽 max_tokens，"
+                        f"finish_reason={data['choices'][0].get('finish_reason')!r}）"
+                    )
+                return content
             except requests.RequestException as exc:  # 网络层错误也退避重试
                 last_err = exc
                 time.sleep(2**attempt)

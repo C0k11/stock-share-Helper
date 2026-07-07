@@ -347,7 +347,9 @@ class DistillConfig(_Base):
     base_url: str = "https://api.deepseek.com"
     api_key_env: str = "DEEPSEEK_API_KEY"
     temperature: float = Field(default=0.7, ge=0)
-    max_tokens: int = Field(default=1024, gt=0)
+    # 思考模式下 max_tokens 会被推理链消耗——1024 实测导致 1/3 场景 content 为空
+    # （思考耗尽额度，最终答案没出来），教师批必须给足。
+    max_tokens: int = Field(default=4096, gt=0)
     out_dir: str = "data/distill"
     # 单次运行的场景数硬上限（额度保险丝）。
     max_scenarios: int = Field(default=200, gt=0)

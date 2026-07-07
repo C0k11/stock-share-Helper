@@ -89,6 +89,8 @@ class DistillGenerator:
                 break
             try:
                 answer = self.client.chat(sc.messages)
+                if not (answer or "").strip():
+                    raise RuntimeError("empty teacher answer")  # 双保险：空答案绝不落盘
                 sft_records.append(scenario_to_sft_record(sc, answer))
                 dpo_records.append(scenario_to_dpo_record(sc, chosen=answer))
                 self.on_progress(i, sc.scenario_id)
