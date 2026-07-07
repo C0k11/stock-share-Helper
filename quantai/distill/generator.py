@@ -22,11 +22,22 @@ from typing import Callable, Iterable, Optional
 from quantai.distill.scenarios import Scenario, weak_baseline_answer
 
 
+def _record_meta(scenario: Scenario) -> dict:
+    """记录 meta：固定三键 + 场景自带 meta（含 outcome 前瞻收益标注——丢了它
+    结局排序 DPO 就没料，v2 实锤踩过：手工三键把 sc.meta 整个吞了）。"""
+    return {
+        **scenario.meta,
+        "scenario_id": scenario.scenario_id,
+        "symbol": scenario.symbol,
+        "task": scenario.task,
+    }
+
+
 def scenario_to_sft_record(scenario: Scenario, teacher_answer: str) -> dict:
     """场景 + 教师回答 → SFT 行（conversations 格式）。"""
     return {
         "conversations": scenario.messages + [{"role": "assistant", "content": teacher_answer}],
-        "meta": {"scenario_id": scenario.scenario_id, "symbol": scenario.symbol, "task": scenario.task},
+        "meta": _record_meta(scenario),
     }
 
 
@@ -38,7 +49,7 @@ def scenario_to_dpo_record(
         "prompt": scenario.messages,
         "chosen": chosen,
         "rejected": rejected if rejected is not None else weak_baseline_answer(scenario),
-        "meta": {"scenario_id": scenario.scenario_id, "symbol": scenario.symbol, "task": scenario.task},
+        "meta": _record_meta(scenario),
     }
 
 
