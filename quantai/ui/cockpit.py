@@ -69,7 +69,10 @@ def collect_advices(
             d = daily
             if not bar_complete(s, d.index[-1]):
                 d = d.iloc[:-1]
-            if len(d) < 60:
+            # 门槛 15 根（两周）而非 60：新上市持仓（如 SPCX，IPO 三周）也要有卡——
+            # 算不出的因子在 build_indicator_brief 里诚实为 NaN，advise 自动跳过
+            # 不计分，理由只引用真实存在的数字；盘中卖压层不受影响（1m 数据全量）。
+            if len(d) < 15:
                 continue
             vals = build_indicator_brief(d, s)[1]
             ist = None
