@@ -106,19 +106,24 @@ class CockpitDaemon:
         }
         self._symbols: list[str] = []
         self._held_cost: dict[str, float] = {}
+        self._held_shares: dict[str, float] = {}
         self._lang = "zh"
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._kick = threading.Event()  # 提前唤醒（语言切换等）：打断轮间休眠立即重出一轮
         self._thread: Optional[threading.Thread] = None
 
-    def configure(self, symbols: list[str], held_cost: dict[str, float], lang: str = "zh") -> None:
+    def configure(
+        self, symbols: list[str], held_cost: dict[str, float], lang: str = "zh",
+        held_shares: Optional[dict[str, float]] = None,
+    ) -> None:
         """UI 每次渲染时同步标的池与语言（线程安全）。语言变化立即唤醒重出一轮——
         否则用户切了语言还要盯着旧语言的综述最多 5 分钟。"""
         with self._lock:
             lang_changed = lang != self._lang
             self._symbols = list(symbols)
             self._held_cost = dict(held_cost)
+            self._held_shares = dict(held_shares or {})
             self._lang = lang
         if lang_changed and self.state.get("round", 0) > 0:
             self._kick.set()
@@ -158,6 +163,7 @@ class CockpitDaemon:
                 with self._lock:
                     symbols = list(self._symbols)
                     held_cost = dict(self._held_cost)
+                    held_shares = dict(self._held_shares)
                     lang = self._lang
                 if not symbols:
                     self.state["status"] = "waiting_symbols"
@@ -174,8 +180,34 @@ class CockpitDaemon:
                 scored = score_news(news, llm) if news else []
                 if scored:
                     _persist_scores(scored, model=self.state["model"])
+                # 期权对冲层（持仓首标的）：BS 引擎算好整句给 LLM 转述；
+                # 无期权链/抓取失败静默跳过，绝不影响主综述
+                hedges: list[str] = []
+                try:
+                    held_syms = [a["symbol"] for a in advs if a.get("held")]
+                    if held_syms:
+                        from quantai.agents.tactician import hedge_lines
+                        from quantai.analysis.options import (
+                            chain_stats, covered_call_plan, protective_put_plan,
+                        )
+                        from quantai.data.options_chain import OptionChainFetcher
+
+                        hsym = held_syms[0]
+                        ch = OptionChainFetcher().fetch(hsym)
+                        spot = next((a.get("last") for a in advs if a["symbol"] == hsym), None)
+                        if ch and spot:
+                            sh = float(held_shares.get(hsym, 0))
+                            stats = chain_stats(ch["calls"], ch["puts"], spot)
+                            pp = protective_put_plan(sh, spot, ch["puts"], ch["days_to_expiry"])
+                            cc = covered_call_plan(sh, spot, ch["calls"], ch["days_to_expiry"])
+                            hedges = hedge_lines(pp, cc, stats, ch["expiry"], shares=sh, lang=lang)
+                except Exception:  # noqa: BLE001
+                    hedges = []
+
                 self.state["status"] = "summarizing"
-                brief = build_tactical_brief(advs, scored, as_of=datetime.now().strftime("%H:%M"))
+                brief = build_tactical_brief(
+                    advs, scored, as_of=datetime.now().strftime("%H:%M"), hedges=hedges
+                )
                 out = llm.generate(brief, system=tactical_system_prompt(lang))
                 self.state.update(
                     out=out, out_lang=lang, ts=datetime.now().timestamp(), scored=len(scored),

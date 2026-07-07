@@ -27,7 +27,12 @@ Four jobs, nothing decorative:
    cards (add/hold/trim/exit + stop references) every 30s, while a resident
    analyst — the local v2 student, or any OpenAI-compatible remote API via
    `llm.remote` — runs a background daemon thread that summarizes the board and
-   persists news sentiment every 5 minutes without ever blocking the UI.
+   persists news sentiment every 5 minutes without ever blocking the UI. A
+   **hedging desk** prices option protection deterministically (Black-Scholes
+   engine + Greeks + implied-vol solver, tested against textbook values):
+   protective-put and covered-call cards with premium %, locked max-drawdown,
+   annualized income and honest odd-lot disclosure — the LLM only narrates
+   numbers the engine computed, never does option math itself.
 3. **AI analyst** — scheduled daily and intraday reports: session statistics with
    honest OHLCV-level selling-pressure proxies (down-bar volume share, price vs
    session VWAP, volume vs 20-day average), LLM commentary from a locally served

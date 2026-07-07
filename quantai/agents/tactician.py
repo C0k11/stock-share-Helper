@@ -261,10 +261,53 @@ def alerts(advices: list[dict], lang: str = "zh") -> list[str]:
     return out
 
 
+def hedge_lines(
+    pp: Optional[dict], cc: Optional[dict], stats: Optional[dict],
+    expiry: str = "", shares: float = 0, lang: str = "zh",
+) -> list[str]:
+    """期权对冲计算结果 → 可读句子（BS 引擎算数，这里只做措辞；LLM 只转述不心算）。"""
+    zh = lang != "en"
+    out: list[str] = []
+    if stats and stats.get("atm_iv") is not None:
+        pc = stats.get("pc_volume_ratio")
+        pc_s = f"{pc:.2f}" if pc is not None else ("无量" if zh else "no volume")
+        out.append(
+            f"ATM 隐含波动率 {stats['atm_iv']:.0%}，Put/Call 成交比 {pc_s}（到期 {expiry}）"
+            if zh else
+            f"ATM implied vol {stats['atm_iv']:.0%}, put/call volume ratio {pc_s} (expiry {expiry})"
+        )
+    if pp:
+        out.append(
+            f"保护性 put：买 {pp['contracts']} 张 {pp['days_to_expiry']} 天期 行权 {pp['strike']:.0f}，"
+            f"保费 {pp['cost_pct']:.1%}，覆盖部分最大回撤锁定在 {pp['max_loss_pct_covered']:.1%}"
+            + (f"（{pp['uncovered_shares']:.0f} 股零头未覆盖）" if pp.get("uncovered_shares") else "")
+            if zh else
+            f"Protective put: buy {pp['contracts']}x {pp['days_to_expiry']}d {pp['strike']:.0f} strike, "
+            f"premium {pp['cost_pct']:.1%}, covered max drawdown locked at {pp['max_loss_pct_covered']:.1%}"
+            + (f" ({pp['uncovered_shares']:.0f} odd shares uncovered)" if pp.get("uncovered_shares") else "")
+        )
+    if cc:
+        out.append(
+            f"备兑 call：卖 {cc['contracts']} 张 行权 {cc['strike']:.0f}，收租 {cc['income_pct']:.1%}"
+            f"（年化 {cc['annualized_pct']:.0%}），涨过 {cc['strike']:.0f} 被行权（上行封顶 +{cc['upside_capped_pct']:.1%}）"
+            if zh else
+            f"Covered call: sell {cc['contracts']}x {cc['strike']:.0f} strike for {cc['income_pct']:.1%} income "
+            f"({cc['annualized_pct']:.0%} annualized); called away above {cc['strike']:.0f} (upside capped +{cc['upside_capped_pct']:.1%})"
+        )
+    if not pp and not cc and shares and shares < 100:
+        out.append(
+            f"持仓 {shares:.0f} 股不足一张合约（100 股/张），无法整张对冲——链面数据仅供参考"
+            if zh else
+            f"Holding {shares:.0f} shares is below one contract (100/lot); no whole-lot hedge possible - chain stats for reference only"
+        )
+    return out
+
+
 def build_tactical_brief(
     advices: list[dict],
     scored_news: Optional[list[dict]] = None,
     as_of: str = "",
+    hedges: Optional[list[str]] = None,
 ) -> str:
     """操作卡 + 新闻情绪 → 驻留 LLM 的战术简报（纯组装可测）。"""
     lines = [f"# 实时作战台数据{f'（{as_of}）' if as_of else ''}", "", "## 操作卡（规则引擎）"]
@@ -281,6 +324,10 @@ def build_tactical_brief(
         if a.get("risks"):
             seg += f"；风险：{'；'.join(a['risks'][:2])}"
         lines.append(seg)
+    if hedges:
+        lines.append("")
+        lines.append("## 对冲台（期权，Black-Scholes 引擎估算——只可转述数字，不要自行计算）")
+        lines.extend(f"- {h}" for h in hedges)
     lines.append("")
     lines.append("## 新闻情绪（标题级 [-1,1]）")
     if scored_news:

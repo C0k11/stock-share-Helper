@@ -421,7 +421,11 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
             return CockpitDaemon(llm_factory=load_report_llm, interval_sec=300).start()
 
         daemon = _cockpit_daemon()
-        daemon.configure(tact_syms, held_cost, lang=lang)
+        _held_sh = {
+            s2: sum(p.shares for p in (portfolio.positions if portfolio else []) if p.symbol == s2)
+            for s2 in held
+        }
+        daemon.configure(tact_syms, held_cost, lang=lang, held_shares=_held_sh)
 
         @st.fragment(run_every=15)
         def _ai_view():
@@ -444,6 +448,86 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
                 st.warning(tr(lang, "ws.ai_error", err=stt["error"]))
 
         _ai_view()
+
+    # ================= 对冲台（期权：BS 引擎确定性计算） =================
+    st.subheader(tr(lang, "hd.title"))
+    st.caption(tr(lang, "hd.caption"))
+    hc1, hc2, hc3, hc4 = st.columns([1.6, 1.1, 1.1, 1.1])
+    hd_sym = hc1.selectbox(tr(lang, "hd.symbol"), universe, key="hd_sym")
+    _real_sh = sum(p.shares for p in (portfolio.positions if portfolio else []) if p.symbol == hd_sym)
+    hd_shares = hc2.number_input(
+        tr(lang, "hd.shares"), value=float(_real_sh) if _real_sh >= 1 else 100.0,
+        min_value=1.0, step=10.0, key="hd_shares",
+    )
+    hd_floor = hc3.slider(tr(lang, "hd.floor"), 0.80, 0.98, 0.92, 0.01, key="hd_floor")
+    hd_target = hc4.slider(tr(lang, "hd.target"), 1.02, 1.20, 1.06, 0.01, key="hd_target")
+
+    @st.cache_data(ttl=300, show_spinner=False)
+    def _chain(sym2: str):
+        from quantai.data.options_chain import OptionChainFetcher
+
+        return OptionChainFetcher().fetch(sym2)
+
+    @st.fragment(run_every=120)
+    def _hedge_desk():
+        from quantai.analysis.options import (
+            chain_stats, covered_call_plan, protective_put_plan,
+        )
+
+        ch = _chain(hd_sym)
+        if ch is None:
+            st.info(tr(lang, "hd.no_chain", sym=hd_sym))
+            return
+        m1h = _hist(hd_sym, "1d", "1m")
+        dfh = _hist(hd_sym, "10d", "1d")
+        spot = None
+        if m1h is not None and not m1h.empty:
+            spot = float(m1h["close"].dropna().iloc[-1])
+        elif dfh is not None and not dfh.empty:
+            spot = float(dfh["close"].dropna().iloc[-1])
+        if not spot:
+            st.info(tr(lang, "hd.no_chain", sym=hd_sym))
+            return
+        stats = chain_stats(ch["calls"], ch["puts"], spot)
+        pc = stats.get("pc_volume_ratio")
+        st.caption(tr(
+            lang, "hd.stats",
+            iv=f"{stats['atm_iv']:.0%}" if stats.get("atm_iv") is not None else "n/a",
+            pc=f"{pc:.2f}" if pc is not None else "n/a",
+            expiry=ch["expiry"], days=ch["days_to_expiry"],
+        ))
+        pp = protective_put_plan(hd_shares, spot, ch["puts"], ch["days_to_expiry"], floor_pct=hd_floor)
+        cc = covered_call_plan(hd_shares, spot, ch["calls"], ch["days_to_expiry"], target_pct=hd_target)
+        colp, colc = st.columns(2)
+        with colp:
+            st.markdown(f"**{tr(lang, 'hd.pp_title')}**")
+            if pp:
+                unc = tr(lang, "hd.uncovered", n=f"{pp['uncovered_shares']:.0f}") if pp["uncovered_shares"] else ""
+                st.write(tr(
+                    lang, "hd.pp_line", n=pp["contracts"], days=pp["days_to_expiry"],
+                    strike=f"{pp['strike']:.0f}", prem=f"{pp['premium']:.2f}",
+                    cost=f"{pp['cost']:,.0f}", cost_pct=f"{pp['cost_pct']:.1%}",
+                    maxloss=f"{pp['max_loss_pct_covered']:.1%}", uncovered=unc,
+                ))
+            elif hd_shares < 100:
+                st.info(tr(lang, "hd.lt100", shares=f"{hd_shares:.0f}"))
+            else:
+                st.caption(tr(lang, "hd.no_quote"))
+        with colc:
+            st.markdown(f"**{tr(lang, 'hd.cc_title')}**")
+            if cc:
+                st.write(tr(
+                    lang, "hd.cc_line", n=cc["contracts"], strike=f"{cc['strike']:.0f}",
+                    prem=f"{cc['premium']:.2f}", income=f"{cc['income']:,.0f}",
+                    income_pct=f"{cc['income_pct']:.1%}", ann=f"{cc['annualized_pct']:.0%}",
+                    cap=f"{cc['upside_capped_pct']:.1%}",
+                ))
+            elif hd_shares < 100:
+                st.info(tr(lang, "hd.lt100", shares=f"{hd_shares:.0f}"))
+            else:
+                st.caption(tr(lang, "hd.no_quote"))
+
+    _hedge_desk()
 
     # 下方区块（Market details / Holdings / News）走同一份缓存取数：
     # 自动刷新只跳动上方图表，这里在下一次整页交互时跟上（避免 tabs 被自刷弹回首个页签）
