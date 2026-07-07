@@ -39,9 +39,9 @@ def _prices(n=200, seed=0) -> pd.DataFrame:
 class TestScenarioBuilder:
     def test_builds_all_tasks_per_symbol(self):
         scs = list(ScenarioBuilder().build({"AAA": _prices(), "BBB": _prices(seed=1)}))
-        assert len(scs) == 8  # 2 symbols × 4 tasks
+        assert len(scs) == 10  # 2 symbols × 5 tasks（journal 加入 decision 任务）
         ids = {s.scenario_id for s in scs}
-        assert len(ids) == 8  # 确定性且唯一
+        assert len(ids) == 10  # 确定性且唯一
 
     def test_short_series_skipped(self):
         scs = list(ScenarioBuilder(min_bars=60).build({"AAA": _prices(30)}))
@@ -180,7 +180,7 @@ class TestConcurrentGeneration:
                 return super().chat(messages, temperature)
 
         summary = DistillGenerator(Flaky()).run(scs, tmp_path / "s.jsonl", tmp_path / "d.jsonl", workers=4)
-        assert summary["sft_written"] == 3
+        assert summary["sft_written"] == len(scs) - 1  # 只有 risk 任务失败
         assert len(summary["failures"]) == 1
 
 
@@ -221,7 +221,7 @@ class TestGeneratorPipeline:
 
     def test_full_pipeline_writes_both_files(self, tmp_path):
         summary, out = self._run(tmp_path)
-        assert summary["sft_written"] == 4 and summary["dpo_written"] == 4
+        assert summary["sft_written"] == 5 and summary["dpo_written"] == 5  # 5 任务/标的
         assert summary["failures"] == []
         assert (out / "sft.jsonl").exists() and (out / "dpo.jsonl").exists()
 
@@ -251,7 +251,7 @@ class TestGeneratorPipeline:
         summary = DistillGenerator(FlakyClient()).run(
             scs, tmp_path / "s.jsonl", tmp_path / "d.jsonl"
         )
-        assert summary["sft_written"] == 3
+        assert summary["sft_written"] == len(scs) - 1
         assert len(summary["failures"]) == 1
         assert "boom" in summary["failures"][0]["error"]
 

@@ -7,7 +7,7 @@
 > dark-theme dashboard. US equities (NYSE calendar), honest by design.
 
 The codebase was rebuilt bottom-up into the typed, tested `quantai/` package
-(630+ tests). Legacy code stays in `src/` untouched.
+(700+ tests). Legacy code stays in `src/` untouched.
 
 ---
 
@@ -32,7 +32,13 @@ Four jobs, nothing decorative:
    paper-trading runtime, and an executed **teacher–student distillation flywheel**:
    DeepSeek-generated scenario batches (indicator analysis, news scoring,
    multi-symbol reports — prompts shared verbatim with production) → local
-   QLoRA SFT / DPO on a single RTX 4090.
+   QLoRA SFT / DPO on a single RTX 4090. On top of the batch flywheel, a scheduled
+   **daily decision journal** accumulates triple-labeled samples every trading day:
+   a transparent rule engine states the day's position call (citing real indicator
+   values) → the teacher independently answers the same scenario (clean SFT data)
+   and grades the system's call 0-10 (preference signal; low-scoring calls become
+   DPO rejected samples) → realized 5/20-day forward returns are backfilled once
+   the market plays out (ground truth for outcome-ranked DPO, never in prompts).
 
 ## Quick start
 
@@ -59,6 +65,11 @@ python scripts/live.py --source simulated --tickers NVDA TSLA --interval 0.1 --d
 # 6) Distillation flywheel (mock dry-run is free; real teacher runs are cost-gated)
 python scripts/distill.py --dry-run --symbols SPY NVDA
 python scripts/train.py --sft data/distill/<batch>.jsonl --confirm-compute
+
+# 7) Daily decision journal (rule engine call -> teacher answer + 0-10 grade -> training asset;
+#    idempotent per scenario, outcome returns backfilled as they mature)
+python scripts/journal.py --dry-run --symbols SPY NVDA
+python scripts/journal.py --backfill-outcomes --export-sft data/distill/journal_sft.jsonl
 ```
 
 ## Architecture

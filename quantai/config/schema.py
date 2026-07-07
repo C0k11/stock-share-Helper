@@ -358,6 +358,10 @@ class DistillConfig(_Base):
     # 场景构造：最少 K 线根数 / 回看年数
     min_bars: int = Field(default=60, gt=0)
     history_years: int = Field(default=2, gt=0)
+    # 每日决策日志飞轮（scripts/journal.py）：产物目录 + 单日场景数上限（额度保险丝，
+    # 每场景 = 2 次教师调用：独立作答 + 评审打分）。
+    journal_dir: str = "data/distill/journal"
+    journal_daily_cap: int = Field(default=16, gt=0)
 
 
 # --------------------------------------------------------------------------- #

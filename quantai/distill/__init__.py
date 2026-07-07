@@ -16,6 +16,17 @@ from quantai.distill.generator import (
     scenario_to_sft_record,
     write_jsonl,
 )
+from quantai.distill.journal import (
+    REVIEW_SYSTEM_PROMPT,
+    backfill_outcomes,
+    build_review_messages,
+    journal_to_dpo_records,
+    journal_to_sft_records,
+    load_journal,
+    parse_review_score,
+    rule_student_answer,
+    run_daily_journal,
+)
 from quantai.distill.scenarios import (
     Scenario,
     ScenarioBuilder,
@@ -35,4 +46,13 @@ __all__ = [
     "scenario_to_sft_record",
     "scenario_to_dpo_record",
     "write_jsonl",
+    "REVIEW_SYSTEM_PROMPT",
+    "rule_student_answer",
+    "build_review_messages",
+    "parse_review_score",
+    "run_daily_journal",
+    "backfill_outcomes",
+    "load_journal",
+    "journal_to_sft_records",
+    "journal_to_dpo_records",
 ]

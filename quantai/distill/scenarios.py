@@ -39,6 +39,11 @@ _TASKS: dict[str, str] = {
     "risk": "请评估当前持有该股的风险暴露（波动环境、回撤风险、需要警惕的技术位）。",
     "pullback": "该股当前是否处于上升趋势中的回踩买点？请结合均线与回撤幅度论证。",
     "volatility": "请分析该股当前的波动率环境（挤压还是扩张），及其对仓位管理的含义。",
+    # journal 飞轮主任务：明确到"下一交易日怎么操作"（比 trend 更贴决策）。
+    "decision": (
+        "结合以上数据，给出下一交易日对该股的仓位操作建议"
+        "（加仓/持有/减仓/观望，四选一明确写出），论证你的选择并给出失效条件。"
+    ),
 }
 
 
@@ -202,6 +207,11 @@ def build_historical_scenarios(
         outcomes: dict = {}
         for sym, df in prices.items():
             if df is None or df.empty:
+                continue
+            if d > df.index[-1]:
+                # 该标的历史在采样日之前就结束了：`df.loc[:d]` 会整段返回同一份
+                # 数据，后续每个采样日都产出 scenario_id 相同、prompt 相同的重复
+                # 场景（重复花教师钱 + 训练集重复行，审查实锤）。直接跳过。
                 continue
             trunc = df.loc[:d]
             if len(trunc) < min_bars:
