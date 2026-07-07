@@ -133,33 +133,40 @@ offline (CPU-only, no keys) and stays testable.
 
 ### Teacher-student distillation & evolution flywheel (offline by design)
 
+**Stage 1 — Distillation** (cost-gated: real teacher calls require
+`--run --confirm-spend`, key from env only):
+
 ```mermaid
 flowchart TB
-    subgraph DISTILL["Distillation — cost-gated, --confirm-spend"]
-        direction TB
-        MKT["real market data + news"] --> SCN["ScenarioBuilder — indicator / news-scoring / report tasks"]
-        SCN --> TCH["DeepSeek teacher — key from env only"]
-        TCH --> SFT["SFT JSONL"]
-        TCH --> DPD["DPO preference pairs"]
-    end
-    subgraph TRAIN["Student training — offline"]
-        direction TB
-        QLR["QLoRA fine-tune — local Qwen student"] --> ADP["LoRA adapter"]
-        DPO["DPO training"] --> ADP
-    end
-    subgraph FLYWHEEL["Evolution flywheel — offline"]
-        direction TB
-        TRJ["paper-trading trajectories"] --> REC["evolution recorder"]
-        REC --> DSB["DPO dataset builder"]
-    end
-    SFT --> QLR
-    DPD --> DPO
-    DSB --> DPO
-    ADP --> HOT["hot-reload adapter into agents"]
-    HOT -.-> TRJ
-    BND["Honest boundary: NO online gradient updates —<br/>online_gradient_step raises NotImplementedError"]
-    style BND fill:#7f1d1d,color:#fff,stroke:#ef5350
+    MKT["real market data + news"] --> SCN["ScenarioBuilder — indicator / news-scoring / report tasks<br/>(prompts shared verbatim with production)"]
+    SCN --> TCH["DeepSeek teacher"]
+    TCH --> SFT["SFT JSONL — conversations"]
+    TCH --> DPD["DPO preference pairs — teacher = chosen, hollow baseline = rejected"]
 ```
+
+**Stage 2 — Student training** (local RTX 4090, `--confirm-compute` gated):
+
+```mermaid
+flowchart TB
+    SFT["SFT JSONL"] --> QLR["QLoRA fine-tune — 4-bit NF4 Qwen student"]
+    DPD["DPO preference pairs"] --> DPO["DPO alignment on top of SFT adapter"]
+    QLR --> ADP["LoRA adapter"]
+    DPO --> ADP
+    ADP --> HOT["hot-reload adapter into agents / reports"]
+```
+
+**Stage 3 — Evolution flywheel** (paper-trading experience feeds the next round):
+
+```mermaid
+flowchart TB
+    TRJ["paper-trading trajectories"] --> REC["evolution recorder — decisions + realized PnL"]
+    REC --> DSB["DPO dataset builder — outcome-ranked preference pairs"]
+    DSB --> NXT["next DPO round"]
+```
+
+> **Honest boundary:** there are NO online gradient updates — all learning is
+> offline batch training; `online_gradient_step()` raises `NotImplementedError`
+> by design.
 
 ## Data stack (DA/DE-grade, not a sticker)
 
