@@ -201,6 +201,12 @@ class QLoRAFineTuner:
             else None
         )
 
+        # 归还分片加载留下的碎片化预留（实测 4bit 加载后 allocated 8.6GB 但
+        # reserved 12.7GB）——不还这 ~4GB，训练态会顶满 24GB 触发驱动 sysmem
+        # fallback，PCIe 20+GB/s 搬运把每步拖到分钟级（实锤三次"假忙碌"）。
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+
         use_bf16 = bool(torch.cuda.is_available())
         args_dict = build_training_arguments_dict(
             self.cfg, output_dir=str(self.output_dir / "checkpoints"), use_bf16=use_bf16
