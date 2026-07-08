@@ -25,7 +25,7 @@ Four jobs, nothing decorative:
    1-minute bars, VWAP, indicator toggles) with a real-position banner and an
    always-on **tactics board**: a five-factor rule engine emits per-symbol action
    cards (add/hold/trim/exit + stop references) every 30s, while a resident
-   analyst — the local v2 student, or any OpenAI-compatible remote API via
+   analyst — the local v3 student, or any OpenAI-compatible remote API via
    `llm.remote` — runs a background daemon thread that summarizes the board and
    persists news sentiment every 5 minutes without ever blocking the UI. A
    **hedging desk** prices option protection deterministically (Black-Scholes
@@ -43,13 +43,19 @@ Four jobs, nothing decorative:
    paper-trading runtime, and an executed **teacher–student distillation flywheel**:
    DeepSeek-generated scenario batches (indicator analysis, news scoring,
    multi-symbol reports — prompts shared verbatim with production) → local
-   QLoRA SFT / DPO on a single RTX 4090. The **v2 student is live**: 1,129
-   teacher samples sampled across 25 historical dates (bull/bear/chop coverage),
-   QLoRA-trained in 26 minutes (eval-loss 0.957), passed the blind-eval gate —
-   zero repetition collapse and more prompt-number citations than the base model
-   in 12/14 held-out + never-seen-symbol cases — and now serves as the
-   production analyst adapter (v1 was rejected by the same gate and never
-   shipped). On top of the batch flywheel, a scheduled
+   QLoRA SFT / DPO on a single RTX 4090. The **v3 student is live**: 7,308
+   teacher samples spanning 50 historical dates (bull/bear/chop coverage) plus a
+   dedicated **options curriculum** — premium selling, buy-vs-sell timing,
+   0-7-day ("0DTE") risk discipline and hedge-plan review, every prompt fed
+   real option chains and engine-computed Greeks so the student learns to cite
+   and judge, never to compute. Trained overnight at seq 2560 (5.5 h,
+   eval-loss 0.794; the max-seq ladder and VRAM-baseline gate live in
+   `scripts/night_train_v3.py`), passed the blind-eval gate — zero repetition
+   collapse across 26 cases, complete three-section structure on held-out option
+   symbols never seen in training, and roughly double the base model's
+   prompt-number citations on fresh symbols — and now serves as the production
+   analyst adapter (v1 was rejected by the same gate and never shipped; v2
+   served before v3 replaced it). On top of the batch flywheel, a scheduled
    **daily decision journal** accumulates triple-labeled samples every trading day:
    a transparent rule engine states the day's position call (citing real indicator
    values) → the teacher independently answers the same scenario (clean SFT data)
