@@ -7,7 +7,7 @@
 > dark-theme dashboard. US equities (NYSE calendar), honest by design.
 
 The codebase was rebuilt bottom-up into the typed, tested `quantai/` package
-(700+ tests). Legacy code stays in `src/` untouched.
+(748 tests). Legacy code stays in `src/` untouched.
 
 ---
 
@@ -210,7 +210,7 @@ flowchart TB
     PQ --> RAW["DuckDB raw — pandas EL, idempotent + transactional, audit cols"]
     RAW --> STG["staging — dbt views, cleaning only"]
     STG --> MRT["marts — dbt tables, Kimball star schema + LLM sentiment"]
-    MRT --> TST["dbt tests — 80 assertions, all green"]
+    MRT --> TST["dbt tests — 68 tests, all green"]
     MRT --> CSV["CSV exports — tableau/exports/"]
     MRT --> JDBC["DuckDB JDBC"]
     CSV --> TAB["Tableau dashboards — 5 views"]
@@ -229,7 +229,7 @@ flowchart TB
   implied probabilities** via the public Gamma API — Fed decisions, macro events —
   snapshotted daily into a probability time series), `fact_backtest_results`,
   `fact_backtest_equity` (SQL drawdown).
-- **dbt tests**: 89 assertions (not-null/enums/relationships/grain uniqueness on
+- **dbt tests**: 68 tests (not-null/enums/relationships/grain uniqueness on
   every fact/OHLC sanity/PnL consistency/drawdown ≤ 0/warn on unpriceable
   positions) — all passing on real market data.
 - **Reconciliation**: pytest runs a real `dbt build` and asserts SQL and pandas
