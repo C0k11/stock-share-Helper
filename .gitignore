@@ -146,3 +146,4 @@ tableau/exports/
 # Power BI local state (machine-local cache/settings, saved by Desktop)
 powerbi/**/.pbi/cache.abf
 powerbi/**/.pbi/localSettings.json
+runs/
