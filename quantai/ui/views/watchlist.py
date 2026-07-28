@@ -52,7 +52,8 @@ def render() -> None:  # pragma: no cover - 需 streamlit 运行时
         for sym in syms:
             df = prices.get(sym)
             if df is None or df.empty or "close" not in df.columns:
-                rows.append({"标的": sym, "现价": None, "日涨跌%": None, "RSI14": None, "20D波动%": None})
+                rows.append({"标的": sym, "现价": None, "日涨跌%": None, "RSI14": None,
+                             "20D已实现波动%(年化)": None})
                 continue
             close = df["close"].astype(float).dropna()
             if close.empty:
@@ -65,7 +66,8 @@ def render() -> None:  # pragma: no cover - 需 streamlit 运行时
                     "现价": round(last, 2),
                     "日涨跌%": round((last / prev - 1) * 100, 2) if prev == prev else None,
                     "RSI14": round(float(rsi(close, 14).iloc[-1]), 1) if len(close) > 14 else None,
-                    "20D波动%": round(float(realized_volatility(close, 20).iloc[-1]) * 100, 1)
+                    # 口径入列名：20 个交易 bar 的样本 std（ddof=1）× sqrt(252) 年化
+                    "20D已实现波动%(年化)": round(float(realized_volatility(close, 20).iloc[-1]) * 100, 1)
                     if len(close) > 20
                     else None,
                 }

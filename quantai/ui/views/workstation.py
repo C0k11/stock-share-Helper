@@ -169,6 +169,7 @@ def render() -> None:  # pragma: no cover - 需 streamlit 运行时
             # 轻交互：无工具栏 + 滚轮缩放（配合图内十字线统一悬浮读数）
             config={"displayModeBar": False, "scrollZoom": True},
         )
+        st.caption(tr(lang, "ws.indicator_note"))
         if _REFRESH[auto]:
             from datetime import datetime as _dt
 

@@ -4,9 +4,8 @@
 故可离线单测（断言 trace 结构/主题），渲染层（streamlit_app）只管 `st.plotly_chart`。
 指标全部复用 `quantai.analysis`（与 CLI/仓库同一套数字）。
 
-主题：暗色专业风：涨 #26A69A（青绿）/ 跌 #EF5350（红），背景 #1B1B1F，
-网格低对比。美股惯例：绿涨红跌。色值统一取自 `quantai.ui.theme`（设计令牌，
-与 Power BI 主题同源），本文件不再散落硬编码。
+主题：暗色专业风，美股惯例绿涨红跌。全部色值取自 `quantai.ui.theme`
+（设计令牌唯一定义处，与 Power BI 主题同源）——本文件不写任何 hex。
 """
 
 from __future__ import annotations

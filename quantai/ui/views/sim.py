@@ -144,6 +144,8 @@ def _render_ytd_replay(st) -> None:  # pragma: no cover - 需 streamlit 运行�
     chart = pd.DataFrame({tr(lang, "sim.strategy"): total})
     if out["bench"] is not None:
         chart[tr(lang, "sim.spy_bh")] = out["bench"]
+    # 口径提级到图上方（原页脚 footnote 上移——读者先看到算法再看到曲线）
+    st.caption(tr(lang, "sim.footnote"))
     st.line_chart(chart, use_container_width=True)
 
     st.subheader(tr(lang, "sim.positions"))
@@ -153,7 +155,6 @@ def _render_ytd_replay(st) -> None:  # pragma: no cover - 需 streamlit 运行�
         st.caption(tr(lang, "sim.all_flat"))
     st.subheader(tr(lang, "sim.per_symbol"))
     st.dataframe(out["rows"], use_container_width=True, hide_index=True)
-    st.caption(tr(lang, "sim.footnote"))
 
 
 def render() -> None:  # pragma: no cover - 需 streamlit 运行时
