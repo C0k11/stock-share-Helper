@@ -74,13 +74,22 @@ table dim_date
 
 		annotation SummarizationSetBy = Automatic
 
+	column year_quarter
+		dataType: string
+		lineageTag: 7f3a9c2e-4b1d-4e8a-9c6f-2d5e8a1b3c4d
+		summarizeBy: none
+		sourceColumn: year_quarter
+
+		annotation SummarizationSetBy = Automatic
+
 	partition dim_date = m
 		mode: import
 		source =
 				let
 					Source = Csv.Document(File.Contents(ExportFolder & "\dim_date.csv"), [Delimiter = ",", Columns = 8, Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
 					Headers = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
-					Typed = Table.TransformColumnTypes(Headers, {{"date", type date}, {"year", Int64.Type}, {"quarter", Int64.Type}, {"month", Int64.Type}, {"year_month", type text}, {"day_of_week", Int64.Type}, {"is_trading_day", type logical}, {"is_early_close", type logical}})
+					Typed = Table.TransformColumnTypes(Headers, {{"date", type date}, {"year", Int64.Type}, {"quarter", Int64.Type}, {"month", Int64.Type}, {"year_month", type text}, {"day_of_week", Int64.Type}, {"is_trading_day", type logical}, {"is_early_close", type logical}}),
+					WithYQ = Table.AddColumn(Typed, "year_quarter", each Text.From([year]) & "Q" & Text.From([quarter]), type text)
 				in
-					Typed
+					WithYQ
 

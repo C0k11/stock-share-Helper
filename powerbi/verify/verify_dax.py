@@ -42,9 +42,12 @@ def main() -> int:
 
     dfs = {t: pd.read_csv(EXPORTS / f"{t}.csv", encoding="utf-8") for t in TABLES}
 
-    # ---- 1. 每张表行数 ----
+    # ---- 1. 每张表行数（dim_symbol 模型侧比 CSV 多 1 行：M 末尾 append 的 (untagged)）----
     for t in TABLES:
-        add(f"rowcount_{t}", f"{t}.csv row count", len(dfs[t]))
+        if t == "dim_symbol":
+            add(f"rowcount_{t}", f"{t}.csv rows + 1 M-appended (untagged)", len(dfs[t]) + 1)
+        else:
+            add(f"rowcount_{t}", f"{t}.csv row count", len(dfs[t]))
 
     # ---- 2. SPY 最后 5 个交易行的 Rolling Vol 20D (Ann) / MA20 / MA50 / MA200 ----
     px = dfs["fact_prices"].copy()
@@ -125,6 +128,21 @@ def main() -> int:
         int((pd.to_datetime(dfs["fact_backtest_equity"]["date"]) == "2026-07-27").sum()))
     add("rel_news_SPY", "fact_news rows via dim_symbol=SPY",
         int((nw2["symbol"] == "SPY").sum()))
+
+    # ---- 8b. 空白成员防回归（fact_news.symbol 有 500 空值，M 层重映射为 (untagged)）----
+    # 注意：普通 DISTINCTCOUNT(dim_symbol[symbol])=35 抓不到回归——RI 违规造出的虚拟空白行
+    # 也被 DISTINCTCOUNT 计入，修复前(34实体+1虚拟空白)与修复后(35实体)都返回 35，永远绿。
+    # 改用三点组合：NOBLANK 证明 (untagged) 成员存在；untagged 行数证明 500 条真实新闻挂上了；
+    # canary 证明没有任何 fact_news 行落在 RI 虚拟空白成员上（任何新的未匹配值都会让它变红）。
+    n_null_sym = int(nw2["symbol"].isna().sum())
+    add("rel_news_untagged",
+        "fact_news rows via dim_symbol=(untagged) - null symbols remapped in M",
+        n_null_sym)
+    add("dim_symbol_noblank",
+        "DISTINCTCOUNTNOBLANK(dim_symbol.symbol) - 34 real symbols + (untagged)",
+        int(dfs["dim_symbol"]["symbol"].nunique()) + 1)
+    add("blank_member_canary",
+        "fact_news rows on RI-violation blank member - must be BLANK", "BLANK")
 
     # ---- 9. 编码金丝雀：event_title 必须含弯引号（U+2019），乱码则 Power Query 读错 ----
     ev = dfs["fact_event_odds"]

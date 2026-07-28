@@ -372,6 +372,9 @@ table _Measures
 			        "rel_positions_20260727", CALCULATE ( COUNTROWS ( fact_positions ), REMOVEFILTERS (), dim_date[date] = DATE ( 2026, 7, 27 ) ),
 			        "rel_equity_20260727", CALCULATE ( COUNTROWS ( fact_backtest_equity ), REMOVEFILTERS (), dim_date[date] = DATE ( 2026, 7, 27 ) ),
 			        "rel_news_SPY", CALCULATE ( COUNTROWS ( fact_news ), REMOVEFILTERS (), dim_symbol[symbol] = "SPY" ),
+			        "rel_news_untagged", CALCULATE ( COUNTROWS ( fact_news ), REMOVEFILTERS (), dim_symbol[symbol] = "(untagged)" ),
+			        "dim_symbol_noblank", CALCULATE ( DISTINCTCOUNTNOBLANK ( dim_symbol[symbol] ), REMOVEFILTERS () ),
+			        "blank_member_canary", CALCULATE ( COUNTROWS ( fact_news ), REMOVEFILTERS (), ISBLANK ( dim_symbol[symbol] ) ),
 			        BLANK ()
 			    )
 		displayFolder: QA

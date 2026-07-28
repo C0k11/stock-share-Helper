@@ -1,6 +1,6 @@
 check_id,description,expected
 rowcount_dim_date,dim_date.csv row count,731
-rowcount_dim_symbol,dim_symbol.csv row count,34
+rowcount_dim_symbol,dim_symbol.csv rows + 1 M-appended (untagged),35
 rowcount_fact_prices,fact_prices.csv row count,15920
 rowcount_fact_signals,fact_signals.csv row count,15920
 rowcount_fact_news,fact_news.csv row count,5581
@@ -62,4 +62,7 @@ rel_odds_20260715,fact_event_odds rows via dim_date=2026-07-15,165
 rel_positions_20260727,fact_positions rows via dim_date=2026-07-27,1
 rel_equity_20260727,fact_backtest_equity rows via dim_date=2026-07-27,1
 rel_news_SPY,fact_news rows via dim_symbol=SPY,120
+rel_news_untagged,fact_news rows via dim_symbol=(untagged) - null symbols remapped in M,500
+dim_symbol_noblank,DISTINCTCOUNTNOBLANK(dim_symbol.symbol) - 34 real symbols + (untagged),35
+blank_member_canary,fact_news rows on RI-violation blank member - must be BLANK,BLANK
 encoding_curly_quote_rows,event_title rows containing U+2019,55

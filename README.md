@@ -246,9 +246,11 @@ flowchart TB
   reads ~10% low on current data), **sample** standard deviation
   (`STDEVX.S` = pandas `ddof=1`), and **BLANK on short windows**. A hidden QA
   page reconciles the live DAX against pandas-computed expectations from the
-  same CSVs: **52/53 checks PASS at 1e-6** (one skipped by design —
-  `fact_trades` is empty). Free Desktop only: no Publish-to-web, so the
-  deliverable is the project + screenshots, reproducible locally.
+  same CSVs: **66/67 checks PASS at 1e-6** (one skipped by design —
+  `fact_trades` is empty), split into measure-arithmetic checks and
+  model-wiring checks (relationship propagation + blank-member canaries) that
+  provably turn red when a join breaks. Free Desktop only: no Publish-to-web,
+  so the deliverable is the project + screenshots, reproducible locally.
 
 ## Integrity notes (deliberate, tested)
 

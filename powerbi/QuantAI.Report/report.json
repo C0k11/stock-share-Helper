@@ -1,21 +1,7 @@
 {
-  "config": "{\"version\":\"5.66\",\"themeCollection\":{\"baseTheme\":{\"name\":\"CY24SU10\",\"type\":2,\"version\":{\"visual\":\"1.8.79\",\"report\":\"2.0.79\",\"page\":\"1.3.79\"}},\"customTheme\":{\"name\":\"quantai-dark.json\",\"type\":1,\"version\":{\"visual\":\"1.8.79\",\"report\":\"2.0.79\",\"page\":\"1.3.79\"}}},\"activeSectionIndex\":5,\"defaultDrillFilterOtherVisuals\":true,\"linguisticSchemaSyncVersion\":2,\"settings\":{\"useNewFilterPaneExperience\":true,\"useEnhancedTooltips\":false}}",
+  "config": "{\"version\": \"5.43\", \"themeCollection\": {\"baseTheme\": {\"name\": \"CY24SU10\", \"version\": \"5.43\", \"type\": 2}, \"customTheme\": {\"name\": \"quantai-dark.json\", \"version\": \"5.43\", \"type\": 1}}, \"activeSectionIndex\": 0, \"defaultDrillFilterOtherVisuals\": true, \"settings\": {\"useNewFilterPaneExperience\": true}}",
   "layoutOptimization": 0,
   "resourcePackages": [
-    {
-      "resourcePackage": {
-        "disabled": false,
-        "items": [
-          {
-            "name": "CY24SU10",
-            "path": "BaseThemes/CY24SU10.json",
-            "type": 202
-          }
-        ],
-        "name": "SharedResources",
-        "type": 2
-      }
-    },
     {
       "resourcePackage": {
         "disabled": false,
@@ -29,485 +15,490 @@
         "name": "RegisteredResources",
         "type": 1
       }
+    },
+    {
+      "resourcePackage": {
+        "disabled": false,
+        "items": [
+          {
+            "name": "CY24SU10",
+            "path": "BaseThemes/CY24SU10.json",
+            "type": 202
+          }
+        ],
+        "name": "SharedResources",
+        "type": 2
+      }
     }
   ],
   "sections": [
     {
       "config": "{}",
-      "displayName": "Backtest vs Benchmark",
-      "displayOption": 1,
-      "filters": "[]",
-      "height": 720.00,
-      "name": "sec_backtest",
-      "ordinal": 2,
-      "visualContainers": [
-        {
-          "config": "{\"name\":\"bt_card_0\",\"layouts\":[{\"id\":0,\"position\":{\"x\":20,\"y\":20,\"width\":195,\"height\":100,\"z\":0}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.Sharpe\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Sharpe\"},\"Name\":\"_Measures.Sharpe\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"22D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Sharpe'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 100.00,
-          "width": 195.00,
-          "x": 20.00,
-          "y": 20.00,
-          "z": 0.00
-        },
-        {
-          "config": "{\"name\":\"bt_card_1\",\"layouts\":[{\"id\":0,\"position\":{\"x\":230,\"y\":20,\"width\":195,\"height\":100,\"z\":1000}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.CAGR\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"CAGR\"},\"Name\":\"_Measures.CAGR\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"22D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'CAGR'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 100.00,
-          "width": 195.00,
-          "x": 230.00,
-          "y": 20.00,
-          "z": 1000.00
-        },
-        {
-          "config": "{\"name\":\"bt_card_2\",\"layouts\":[{\"id\":0,\"position\":{\"x\":440,\"y\":20,\"width\":195,\"height\":100,\"z\":2000}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.Annual Volatility\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Annual Volatility\"},\"Name\":\"_Measures.Annual Volatility\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"22D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Annual vol'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 100.00,
-          "width": 195.00,
-          "x": 440.00,
-          "y": 20.00,
-          "z": 2000.00
-        },
-        {
-          "config": "{\"name\":\"bt_card_3\",\"layouts\":[{\"id\":0,\"position\":{\"x\":650,\"y\":20,\"width\":195,\"height\":100,\"z\":3000}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.Max Drawdown\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Max Drawdown\"},\"Name\":\"_Measures.Max Drawdown\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"22D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Max drawdown'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 100.00,
-          "width": 195.00,
-          "x": 650.00,
-          "y": 20.00,
-          "z": 3000.00
-        },
-        {
-          "config": "{\"name\":\"bt_card_4\",\"layouts\":[{\"id\":0,\"position\":{\"x\":860,\"y\":20,\"width\":195,\"height\":100,\"z\":4000}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.Win Rate\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Win Rate\"},\"Name\":\"_Measures.Win Rate\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"22D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Win rate'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 100.00,
-          "width": 195.00,
-          "x": 860.00,
-          "y": 20.00,
-          "z": 4000.00
-        },
-        {
-          "config": "{\"name\":\"bt_card_5\",\"layouts\":[{\"id\":0,\"position\":{\"x\":1070,\"y\":20,\"width\":195,\"height\":100,\"z\":5000}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.Total Return\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Total Return\"},\"Name\":\"_Measures.Total Return\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"22D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Total return'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 100.00,
-          "width": 195.00,
-          "x": 1070.00,
-          "y": 20.00,
-          "z": 5000.00
-        },
-        {
-          "config": "{\"name\":\"bt_dd_area\",\"layouts\":[{\"id\":0,\"position\":{\"x\":20,\"y\":420,\"width\":1240,\"height\":150,\"z\":7000}}],\"singleVisual\":{\"visualType\":\"areaChart\",\"projections\":{\"Category\":[{\"queryRef\":\"fact_backtest_equity.date\",\"active\":true}],\"Y\":[{\"queryRef\":\"_Measures.Drawdown\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"e\",\"Entity\":\"fact_backtest_equity\",\"Type\":0},{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"e\"}},\"Property\":\"date\"},\"Name\":\"fact_backtest_equity.date\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Drawdown\"},\"Name\":\"_Measures.Drawdown\"}]},\"drillFilterOtherVisuals\":true,\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Drawdown'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 150.00,
-          "width": 1240.00,
-          "x": 20.00,
-          "y": 420.00,
-          "z": 7000.00
-        },
-        {
-          "config": "{\"name\":\"bt_equity_line\",\"layouts\":[{\"id\":0,\"position\":{\"x\":20,\"y\":130,\"width\":1240,\"height\":280,\"z\":6000}}],\"singleVisual\":{\"visualType\":\"lineChart\",\"projections\":{\"Category\":[{\"queryRef\":\"fact_backtest_equity.date\",\"active\":true}],\"Y\":[{\"queryRef\":\"_Measures.Equity Indexed 100\"},{\"queryRef\":\"_Measures.SPY Indexed 100\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"e\",\"Entity\":\"fact_backtest_equity\",\"Type\":0},{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"e\"}},\"Property\":\"date\"},\"Name\":\"fact_backtest_equity.date\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Equity Indexed 100\"},\"Name\":\"_Measures.Equity Indexed 100\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"SPY Indexed 100\"},\"Name\":\"_Measures.SPY Indexed 100\"}]},\"drillFilterOtherVisuals\":true,\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Strategy vs SPY buy-and-hold (indexed to 100)'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 280.00,
-          "width": 1240.00,
-          "x": 20.00,
-          "y": 130.00,
-          "z": 6000.00
-        },
-        {
-          "config": "{\"name\":\"bt_table\",\"layouts\":[{\"id\":0,\"position\":{\"x\":20,\"y\":580,\"width\":1240,\"height\":120,\"z\":8000}}],\"singleVisual\":{\"visualType\":\"tableEx\",\"projections\":{\"Values\":[{\"queryRef\":\"fact_backtest_results.run_id\"},{\"queryRef\":\"fact_backtest_results.strategy\"},{\"queryRef\":\"fact_backtest_results.symbol\"},{\"queryRef\":\"fact_backtest_results.fill_timing\"},{\"queryRef\":\"_Measures.Total Return\"},{\"queryRef\":\"_Measures.CAGR\"},{\"queryRef\":\"_Measures.Annual Volatility\"},{\"queryRef\":\"_Measures.Sharpe\"},{\"queryRef\":\"_Measures.Max Drawdown\"},{\"queryRef\":\"_Measures.Win Rate\"},{\"queryRef\":\"fact_backtest_results.trading_days\"},{\"queryRef\":\"fact_backtest_results.start_date\"},{\"queryRef\":\"fact_backtest_results.end_date\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"r\",\"Entity\":\"fact_backtest_results\",\"Type\":0},{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"r\"}},\"Property\":\"run_id\"},\"Name\":\"fact_backtest_results.run_id\"},{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"r\"}},\"Property\":\"strategy\"},\"Name\":\"fact_backtest_results.strategy\"},{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"r\"}},\"Property\":\"symbol\"},\"Name\":\"fact_backtest_results.symbol\"},{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"r\"}},\"Property\":\"fill_timing\"},\"Name\":\"fact_backtest_results.fill_timing\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Total Return\"},\"Name\":\"_Measures.Total Return\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"CAGR\"},\"Name\":\"_Measures.CAGR\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Annual Volatility\"},\"Name\":\"_Measures.Annual Volatility\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Sharpe\"},\"Name\":\"_Measures.Sharpe\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Max Drawdown\"},\"Name\":\"_Measures.Max Drawdown\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Win Rate\"},\"Name\":\"_Measures.Win Rate\"},{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"r\"}},\"Property\":\"trading_days\"},\"Name\":\"fact_backtest_results.trading_days\"},{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"r\"}},\"Property\":\"start_date\"},\"Name\":\"fact_backtest_results.start_date\"},{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"r\"}},\"Property\":\"end_date\"},\"Name\":\"fact_backtest_results.end_date\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"total\":[{\"properties\":{\"totals\":{\"expr\":{\"Literal\":{\"Value\":\"false\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Backtest run detail'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 120.00,
-          "width": 1240.00,
-          "x": 20.00,
-          "y": 580.00,
-          "z": 8000.00
-        }
-      ],
-      "width": 1280.00
-    },
-    {
-      "config": "{}",
       "displayName": "Market Overview",
       "displayOption": 1,
       "filters": "[]",
-      "height": 720.00,
+      "height": 900.0,
       "name": "sec_market_overview",
+      "ordinal": 0,
       "visualContainers": [
         {
-          "config": "{\"name\":\"mo_52w_bar\",\"layouts\":[{\"id\":0,\"position\":{\"x\":780,\"y\":220,\"width\":480,\"height\":290,\"z\":10000}}],\"singleVisual\":{\"visualType\":\"barChart\",\"projections\":{\"Category\":[{\"queryRef\":\"dim_symbol.symbol\",\"active\":true}],\"Y\":[{\"queryRef\":\"_Measures.Pct From 52W High (Latest)\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"s\",\"Entity\":\"dim_symbol\",\"Type\":0},{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"s\"}},\"Property\":\"symbol\"},\"Name\":\"dim_symbol.symbol\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Pct From 52W High (Latest)\"},\"Name\":\"_Measures.Pct From 52W High (Latest)\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"dataPoint\":[{\"properties\":{\"fill\":{\"solid\":{\"color\":{\"expr\":{\"FillRule\":{\"Input\":{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Entity\":\"_Measures\"}},\"Property\":\"Pct From 52W High (Latest)\"}},\"FillRule\":{\"linearGradient2\":{\"min\":{\"color\":{\"Literal\":{\"Value\":\"'#EF5350'\"}}},\"max\":{\"color\":{\"Literal\":{\"Value\":\"'#1B1B1F'\"}}},\"nullColoringStrategy\":{\"strategy\":{\"Literal\":{\"Value\":\"'asZero'\"}}}}}}}}}}},\"selector\":{\"data\":[{\"dataViewWildcard\":{\"matchingOption\":1}}]}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'% from 52-week high (latest)'\"}}}}}]}}}",
+          "config": "{\"name\": \"mo_slicer_date\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 25.0, \"y\": 25.0, \"width\": 375.0, \"height\": 100.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"slicer\", \"projections\": {\"Values\": [{\"queryRef\": \"dim_date.date\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"d\", \"Entity\": \"dim_date\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"d\"}}, \"Property\": \"date\"}, \"Name\": \"dim_date.date\"}]}, \"drillFilterOtherVisuals\": true}}",
           "filters": "[]",
-          "height": 290.00,
-          "width": 480.00,
-          "x": 780.00,
-          "y": 220.00,
-          "z": 10000.00
+          "height": 100.0,
+          "width": 375.0,
+          "x": 25.0,
+          "y": 25.0,
+          "z": 0
         },
         {
-          "config": "{\"name\":\"mo_card_cost\",\"layouts\":[{\"id\":0,\"position\":{\"x\":270,\"y\":100,\"width\":240,\"height\":110,\"z\":6000}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.Cost Value\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Cost Value\"},\"Name\":\"_Measures.Cost Value\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"22D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Position cost (latest)'\"}}}}}]}}}",
+          "config": "{\"name\": \"mo_slicer_symbol\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 425.0, \"y\": 25.0, \"width\": 250.0, \"height\": 100.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"slicer\", \"projections\": {\"Values\": [{\"queryRef\": \"dim_symbol.symbol\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"s\", \"Entity\": \"dim_symbol\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"s\"}}, \"Property\": \"symbol\"}, \"Name\": \"dim_symbol.symbol\"}]}, \"drillFilterOtherVisuals\": true, \"objects\": {\"data\": [{\"properties\": {\"mode\": {\"expr\": {\"Literal\": {\"Value\": \"'Dropdown'\"}}}}}]}}}",
           "filters": "[]",
-          "height": 110.00,
-          "width": 240.00,
-          "x": 270.00,
-          "y": 100.00,
-          "z": 6000.00
+          "height": 100.0,
+          "width": 250.0,
+          "x": 425.0,
+          "y": 25.0,
+          "z": 0
         },
         {
-          "config": "{\"name\":\"mo_card_mv\",\"layouts\":[{\"id\":0,\"position\":{\"x\":20,\"y\":100,\"width\":240,\"height\":110,\"z\":5000}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.Market Value\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Market Value\"},\"Name\":\"_Measures.Market Value\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"22D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Position market value (latest)'\"}}}}}]}}}",
+          "config": "{\"name\": \"mo_slicer_trading\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 700.0, \"y\": 25.0, \"width\": 225.0, \"height\": 100.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"slicer\", \"projections\": {\"Values\": [{\"queryRef\": \"dim_date.is_trading_day\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"d\", \"Entity\": \"dim_date\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"d\"}}, \"Property\": \"is_trading_day\"}, \"Name\": \"dim_date.is_trading_day\"}]}, \"drillFilterOtherVisuals\": true, \"objects\": {\"data\": [{\"properties\": {\"mode\": {\"expr\": {\"Literal\": {\"Value\": \"'Dropdown'\"}}}}}]}}}",
           "filters": "[]",
-          "height": 110.00,
-          "width": 240.00,
-          "x": 20.00,
-          "y": 100.00,
-          "z": 5000.00
+          "height": 100.0,
+          "width": 225.0,
+          "x": 700.0,
+          "y": 25.0,
+          "z": 0
         },
         {
-          "config": "{\"name\":\"mo_card_pnl\",\"layouts\":[{\"id\":0,\"position\":{\"x\":520,\"y\":100,\"width\":240,\"height\":110,\"z\":7000}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.Unrealized PnL\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Unrealized PnL\"},\"Name\":\"_Measures.Unrealized PnL\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"22D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Unrealized PnL (latest)'\"}}}}}]}}}",
+          "config": "{\"name\": \"mo_card_symbols\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 950.0, \"y\": 25.0, \"width\": 300.0, \"height\": 100.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.Symbols Tracked\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Symbols Tracked\"}, \"Name\": \"_Measures.Symbols Tracked\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Symbols'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"16D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
           "filters": "[]",
-          "height": 110.00,
-          "width": 240.00,
-          "x": 520.00,
-          "y": 100.00,
-          "z": 7000.00
+          "height": 100.0,
+          "width": 300.0,
+          "x": 950.0,
+          "y": 25.0,
+          "z": 0
         },
         {
-          "config": "{\"name\":\"mo_card_pnlpct\",\"layouts\":[{\"id\":0,\"position\":{\"x\":770,\"y\":100,\"width\":240,\"height\":110,\"z\":8000}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.Unrealized PnL %\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Unrealized PnL %\"},\"Name\":\"_Measures.Unrealized PnL %\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"22D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Unrealized PnL %'\"}}}}}]}}}",
+          "config": "{\"name\": \"mo_card_tdays\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 1275.0, \"y\": 25.0, \"width\": 300.0, \"height\": 100.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.Trading Days\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Trading Days\"}, \"Name\": \"_Measures.Trading Days\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Trading days'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"16D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
           "filters": "[]",
-          "height": 110.00,
-          "width": 240.00,
-          "x": 770.00,
-          "y": 100.00,
-          "z": 8000.00
+          "height": 100.0,
+          "width": 300.0,
+          "x": 1275.0,
+          "y": 25.0,
+          "z": 0
         },
         {
-          "config": "{\"name\":\"mo_card_symbols\",\"layouts\":[{\"id\":0,\"position\":{\"x\":800,\"y\":20,\"width\":220,\"height\":74,\"z\":3000}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.Symbols Tracked\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Symbols Tracked\"},\"Name\":\"_Measures.Symbols Tracked\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"18D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Symbols'\"}}}}}]}}}",
+          "config": "{\"name\": \"mo_card_mv\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 25.0, \"y\": 143.75, \"width\": 375.0, \"height\": 137.5, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.Market Value\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Market Value\"}, \"Name\": \"_Measures.Market Value\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Position market value (latest)'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"20D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
           "filters": "[]",
-          "height": 74.00,
-          "width": 220.00,
-          "x": 800.00,
-          "y": 20.00,
-          "z": 3000.00
+          "height": 137.5,
+          "width": 375.0,
+          "x": 25.0,
+          "y": 143.75,
+          "z": 0
         },
         {
-          "config": "{\"name\":\"mo_card_tdays\",\"layouts\":[{\"id\":0,\"position\":{\"x\":1030,\"y\":20,\"width\":220,\"height\":74,\"z\":4000}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.Trading Days\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Trading Days\"},\"Name\":\"_Measures.Trading Days\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"18D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Trading days'\"}}}}}]}}}",
+          "config": "{\"name\": \"mo_card_cost\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 412.5, \"y\": 143.75, \"width\": 375.0, \"height\": 137.5, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.Cost Value\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Cost Value\"}, \"Name\": \"_Measures.Cost Value\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Position cost (latest)'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"20D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
           "filters": "[]",
-          "height": 74.00,
-          "width": 220.00,
-          "x": 1030.00,
-          "y": 20.00,
-          "z": 4000.00
+          "height": 137.5,
+          "width": 375.0,
+          "x": 412.5,
+          "y": 143.75,
+          "z": 0
         },
         {
-          "config": "{\"name\":\"mo_close_line\",\"layouts\":[{\"id\":0,\"position\":{\"x\":20,\"y\":220,\"width\":740,\"height\":290,\"z\":9000}}],\"singleVisual\":{\"visualType\":\"lineChart\",\"projections\":{\"Category\":[{\"queryRef\":\"dim_date.date\",\"active\":true}],\"Series\":[{\"queryRef\":\"dim_symbol.symbol\"}],\"Y\":[{\"queryRef\":\"_Measures.Close\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"d\",\"Entity\":\"dim_date\",\"Type\":0},{\"Name\":\"s\",\"Entity\":\"dim_symbol\",\"Type\":0},{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"d\"}},\"Property\":\"date\"},\"Name\":\"dim_date.date\"},{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"s\"}},\"Property\":\"symbol\"},\"Name\":\"dim_symbol.symbol\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Close\"},\"Name\":\"_Measures.Close\"}]},\"drillFilterOtherVisuals\":true,\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Close over time by symbol (default SPY/QQQ/DIA - use slicer for more)'\"}}}}}]}}}",
-          "filters": "[{\"expression\":{\"Column\":{\"Expression\":{\"SourceRef\":{\"Entity\":\"dim_symbol\"}},\"Property\":\"symbol\"}},\"filter\":{\"Version\":2,\"From\":[{\"Name\":\"s\",\"Entity\":\"dim_symbol\",\"Type\":0}],\"Where\":[{\"Condition\":{\"In\":{\"Expressions\":[{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"s\"}},\"Property\":\"symbol\"}}],\"Values\":[[{\"Literal\":{\"Value\":\"'SPY'\"}}],[{\"Literal\":{\"Value\":\"'QQQ'\"}}],[{\"Literal\":{\"Value\":\"'DIA'\"}}]]}}}]},\"type\":\"Categorical\",\"howCreated\":1}]",
-          "height": 290.00,
-          "width": 740.00,
-          "x": 20.00,
-          "y": 220.00,
-          "z": 9000.00
+          "config": "{\"name\": \"mo_card_pnl\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 800.0, \"y\": 143.75, \"width\": 375.0, \"height\": 137.5, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.Unrealized PnL\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Unrealized PnL\"}, \"Name\": \"_Measures.Unrealized PnL\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Unrealized PnL (latest)'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"20D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 137.5,
+          "width": 375.0,
+          "x": 800.0,
+          "y": 143.75,
+          "z": 0
         },
         {
-          "config": "{\"name\":\"mo_slicer_date\",\"layouts\":[{\"id\":0,\"position\":{\"x\":20,\"y\":20,\"width\":300,\"height\":70,\"z\":0}}],\"singleVisual\":{\"visualType\":\"slicer\",\"projections\":{\"Values\":[{\"queryRef\":\"dim_date.date\",\"active\":true}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"d\",\"Entity\":\"dim_date\",\"Type\":0}],\"Select\":[{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"d\"}},\"Property\":\"date\"},\"Name\":\"dim_date.date\"}]},\"drillFilterOtherVisuals\":true}}",
+          "config": "{\"name\": \"mo_card_pnlpct\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 1187.5, \"y\": 143.75, \"width\": 387.5, \"height\": 137.5, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.Unrealized PnL %\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Unrealized PnL %\"}, \"Name\": \"_Measures.Unrealized PnL %\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Unrealized PnL %'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"20D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
           "filters": "[]",
-          "height": 70.00,
-          "width": 300.00,
-          "x": 20.00,
-          "y": 20.00,
-          "z": 0.00
+          "height": 137.5,
+          "width": 387.5,
+          "x": 1187.5,
+          "y": 143.75,
+          "z": 0
         },
         {
-          "config": "{\"name\":\"mo_slicer_symbol\",\"layouts\":[{\"id\":0,\"position\":{\"x\":340,\"y\":20,\"width\":220,\"height\":70,\"z\":1000}}],\"singleVisual\":{\"visualType\":\"slicer\",\"projections\":{\"Values\":[{\"queryRef\":\"dim_symbol.symbol\",\"active\":true}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"s\",\"Entity\":\"dim_symbol\",\"Type\":0}],\"Select\":[{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"s\"}},\"Property\":\"symbol\"},\"Name\":\"dim_symbol.symbol\"}]},\"drillFilterOtherVisuals\":true}}",
-          "filters": "[]",
-          "height": 70.00,
-          "width": 220.00,
-          "x": 340.00,
-          "y": 20.00,
-          "z": 1000.00
+          "config": "{\"name\": \"mo_close_line\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 25.0, \"y\": 300.0, \"width\": 925.0, \"height\": 575.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"lineChart\", \"projections\": {\"Category\": [{\"queryRef\": \"dim_date.date\"}], \"Series\": [{\"queryRef\": \"dim_symbol.symbol\"}], \"Y\": [{\"queryRef\": \"_Measures.Close\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"d\", \"Entity\": \"dim_date\", \"Type\": 0}, {\"Name\": \"s\", \"Entity\": \"dim_symbol\", \"Type\": 0}, {\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"d\"}}, \"Property\": \"date\"}, \"Name\": \"dim_date.date\"}, {\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"s\"}}, \"Property\": \"symbol\"}, \"Name\": \"dim_symbol.symbol\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Close\"}, \"Name\": \"_Measures.Close\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Close over time by symbol (default SPY/QQQ/DIA - use slicer for more)'\"}}}}}]}}}",
+          "filters": "[{\"expression\": {\"Column\": {\"Expression\": {\"SourceRef\": {\"Entity\": \"dim_symbol\"}}, \"Property\": \"symbol\"}}, \"filter\": {\"Version\": 2, \"From\": [{\"Name\": \"s\", \"Entity\": \"dim_symbol\", \"Type\": 0}], \"Where\": [{\"Condition\": {\"In\": {\"Expressions\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"s\"}}, \"Property\": \"symbol\"}}], \"Values\": [[{\"Literal\": {\"Value\": \"'SPY'\"}}], [{\"Literal\": {\"Value\": \"'QQQ'\"}}], [{\"Literal\": {\"Value\": \"'DIA'\"}}]]}}}]}, \"type\": \"Categorical\", \"howCreated\": 1}]",
+          "height": 575.0,
+          "width": 925.0,
+          "x": 25.0,
+          "y": 300.0,
+          "z": 0
         },
         {
-          "config": "{\"name\":\"mo_slicer_trading\",\"layouts\":[{\"id\":0,\"position\":{\"x\":580,\"y\":20,\"width\":200,\"height\":70,\"z\":2000}}],\"singleVisual\":{\"visualType\":\"slicer\",\"projections\":{\"Values\":[{\"queryRef\":\"dim_date.is_trading_day\",\"active\":true}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"d\",\"Entity\":\"dim_date\",\"Type\":0}],\"Select\":[{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"d\"}},\"Property\":\"is_trading_day\"},\"Name\":\"dim_date.is_trading_day\"}]},\"drillFilterOtherVisuals\":true}}",
+          "config": "{\"name\": \"mo_52w_bar\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 975.0, \"y\": 300.0, \"width\": 600.0, \"height\": 575.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"barChart\", \"projections\": {\"Category\": [{\"queryRef\": \"dim_symbol.symbol\"}], \"Y\": [{\"queryRef\": \"_Measures.Pct From 52W High (Latest)\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"s\", \"Entity\": \"dim_symbol\", \"Type\": 0}, {\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"s\"}}, \"Property\": \"symbol\"}, \"Name\": \"dim_symbol.symbol\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Pct From 52W High (Latest)\"}, \"Name\": \"_Measures.Pct From 52W High (Latest)\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'% from 52-week high (latest)'\"}}}}}]}, \"objects\": {\"dataPoint\": [{\"properties\": {\"fill\": {\"solid\": {\"color\": {\"expr\": {\"FillRule\": {\"Input\": {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Entity\": \"_Measures\"}}, \"Property\": \"Pct From 52W High (Latest)\"}}, \"FillRule\": {\"linearGradient2\": {\"min\": {\"color\": {\"Literal\": {\"Value\": \"'#EF5350'\"}}}, \"max\": {\"color\": {\"Literal\": {\"Value\": \"'#1B1B1F'\"}}}, \"nullColoringStrategy\": {\"strategy\": {\"Literal\": {\"Value\": \"'asZero'\"}}}}}}}}}}}, \"selector\": {\"data\": [{\"dataViewWildcard\": {\"matchingOption\": 1}}]}}]}}}",
           "filters": "[]",
-          "height": 70.00,
-          "width": 200.00,
-          "x": 580.00,
-          "y": 20.00,
-          "z": 2000.00
-        },
-        {
-          "config": "{\"name\":\"mo_table\",\"layouts\":[{\"id\":0,\"position\":{\"x\":20,\"y\":520,\"width\":1240,\"height\":180,\"z\":11000}}],\"singleVisual\":{\"visualType\":\"tableEx\",\"projections\":{\"Values\":[{\"queryRef\":\"dim_symbol.symbol\"},{\"queryRef\":\"_Measures.Last Close\"},{\"queryRef\":\"_Measures.Daily Return\"},{\"queryRef\":\"_Measures.Rolling Vol 20D (Ann)\"},{\"queryRef\":\"_Measures.Pct From 52W High (Latest)\"},{\"queryRef\":\"dim_symbol.price_bars\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"s\",\"Entity\":\"dim_symbol\",\"Type\":0},{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"s\"}},\"Property\":\"symbol\"},\"Name\":\"dim_symbol.symbol\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Last Close\"},\"Name\":\"_Measures.Last Close\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Daily Return\"},\"Name\":\"_Measures.Daily Return\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Rolling Vol 20D (Ann)\"},\"Name\":\"_Measures.Rolling Vol 20D (Ann)\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Pct From 52W High (Latest)\"},\"Name\":\"_Measures.Pct From 52W High (Latest)\"},{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"s\"}},\"Property\":\"price_bars\"},\"Name\":\"dim_symbol.price_bars\"}],\"OrderBy\":[{\"Direction\":1,\"Expression\":{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"s\"}},\"Property\":\"symbol\"}}}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"total\":[{\"properties\":{\"totals\":{\"expr\":{\"Literal\":{\"Value\":\"false\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Symbol snapshot'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 180.00,
-          "width": 1240.00,
-          "x": 20.00,
-          "y": 520.00,
-          "z": 11000.00
+          "height": 575.0,
+          "width": 600.0,
+          "x": 975.0,
+          "y": 300.0,
+          "z": 0
         }
       ],
-      "width": 1280.00
-    },
-    {
-      "config": "{}",
-      "displayName": "News & Event Odds",
-      "displayOption": 1,
-      "filters": "[]",
-      "height": 720.00,
-      "name": "sec_news_events",
-      "ordinal": 4,
-      "visualContainers": [
-        {
-          "config": "{\"name\":\"nw_by_date\",\"layouts\":[{\"id\":0,\"position\":{\"x\":20,\"y\":130,\"width\":740,\"height\":260,\"z\":5000}}],\"singleVisual\":{\"visualType\":\"columnChart\",\"projections\":{\"Category\":[{\"queryRef\":\"dim_date.date\",\"active\":true}],\"Series\":[{\"queryRef\":\"fact_news.source\"}],\"Y\":[{\"queryRef\":\"_Measures.News Count\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"d\",\"Entity\":\"dim_date\",\"Type\":0},{\"Name\":\"n\",\"Entity\":\"fact_news\",\"Type\":0},{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"d\"}},\"Property\":\"date\"},\"Name\":\"dim_date.date\"},{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"n\"}},\"Property\":\"source\"},\"Name\":\"fact_news.source\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"News Count\"},\"Name\":\"_Measures.News Count\"}]},\"drillFilterOtherVisuals\":true,\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'News volume by date and source'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 260.00,
-          "width": 740.00,
-          "x": 20.00,
-          "y": 130.00,
-          "z": 5000.00
-        },
-        {
-          "config": "{\"name\":\"nw_card_cov\",\"layouts\":[{\"id\":0,\"position\":{\"x\":500,\"y\":20,\"width\":220,\"height\":100,\"z\":2000}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.Scored Coverage %\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Scored Coverage %\"},\"Name\":\"_Measures.Scored Coverage %\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"22D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Sentiment coverage - most news is unscored'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 100.00,
-          "width": 220.00,
-          "x": 500.00,
-          "y": 20.00,
-          "z": 2000.00
-        },
-        {
-          "config": "{\"name\":\"nw_card_markets\",\"layouts\":[{\"id\":0,\"position\":{\"x\":940,\"y\":20,\"width\":180,\"height\":100,\"z\":4000}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.Odds Markets\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Odds Markets\"},\"Name\":\"_Measures.Odds Markets\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"18D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Polymarket markets'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 100.00,
-          "width": 180.00,
-          "x": 940.00,
-          "y": 20.00,
-          "z": 4000.00
-        },
-        {
-          "config": "{\"name\":\"nw_card_scored\",\"layouts\":[{\"id\":0,\"position\":{\"x\":260,\"y\":20,\"width\":220,\"height\":100,\"z\":1000}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.Scored News\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Scored News\"},\"Name\":\"_Measures.Scored News\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"22D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Scored (of 5,581)'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 100.00,
-          "width": 220.00,
-          "x": 260.00,
-          "y": 20.00,
-          "z": 1000.00
-        },
-        {
-          "config": "{\"name\":\"nw_card_syms\",\"layouts\":[{\"id\":0,\"position\":{\"x\":740,\"y\":20,\"width\":180,\"height\":100,\"z\":3000}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.News Symbols\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"News Symbols\"},\"Name\":\"_Measures.News Symbols\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"18D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Symbols with news'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 100.00,
-          "width": 180.00,
-          "x": 740.00,
-          "y": 20.00,
-          "z": 3000.00
-        },
-        {
-          "config": "{\"name\":\"nw_card_total\",\"layouts\":[{\"id\":0,\"position\":{\"x\":20,\"y\":20,\"width\":220,\"height\":100,\"z\":0}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.News Count\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"News Count\"},\"Name\":\"_Measures.News Count\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"22D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'News rows'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 100.00,
-          "width": 220.00,
-          "x": 20.00,
-          "y": 20.00,
-          "z": 0.00
-        },
-        {
-          "config": "{\"name\":\"nw_cat_bar\",\"layouts\":[{\"id\":0,\"position\":{\"x\":780,\"y\":130,\"width\":480,\"height\":260,\"z\":6000}}],\"singleVisual\":{\"visualType\":\"barChart\",\"projections\":{\"Category\":[{\"queryRef\":\"fact_event_odds.category\",\"active\":true}],\"Y\":[{\"queryRef\":\"_Measures.Odds Markets\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"e\",\"Entity\":\"fact_event_odds\",\"Type\":0},{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"e\"}},\"Property\":\"category\"},\"Name\":\"fact_event_odds.category\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Odds Markets\"},\"Name\":\"_Measures.Odds Markets\"}]},\"drillFilterOtherVisuals\":true,\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Event markets by category'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 260.00,
-          "width": 480.00,
-          "x": 780.00,
-          "y": 130.00,
-          "z": 6000.00
-        },
-        {
-          "config": "{\"name\":\"nw_odds_line\",\"layouts\":[{\"id\":0,\"position\":{\"x\":20,\"y\":400,\"width\":620,\"height\":300,\"z\":7000}}],\"singleVisual\":{\"visualType\":\"lineChart\",\"projections\":{\"Category\":[{\"queryRef\":\"dim_date.date\",\"active\":true}],\"Series\":[{\"queryRef\":\"fact_event_odds.category\"}],\"Y\":[{\"queryRef\":\"_Measures.Avg Yes Price\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"d\",\"Entity\":\"dim_date\",\"Type\":0},{\"Name\":\"e\",\"Entity\":\"fact_event_odds\",\"Type\":0},{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"d\"}},\"Property\":\"date\"},\"Name\":\"dim_date.date\"},{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"e\"}},\"Property\":\"category\"},\"Name\":\"fact_event_odds.category\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Avg Yes Price\"},\"Name\":\"_Measures.Avg Yes Price\"}]},\"drillFilterOtherVisuals\":true,\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Avg implied probability by category over time'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 300.00,
-          "width": 620.00,
-          "x": 20.00,
-          "y": 400.00,
-          "z": 7000.00
-        },
-        {
-          "config": "{\"name\":\"nw_odds_table\",\"layouts\":[{\"id\":0,\"position\":{\"x\":660,\"y\":400,\"width\":600,\"height\":300,\"z\":8000}}],\"singleVisual\":{\"visualType\":\"tableEx\",\"projections\":{\"Values\":[{\"queryRef\":\"fact_event_odds.question\"},{\"queryRef\":\"fact_event_odds.category\"},{\"queryRef\":\"_Measures.Latest Yes Price\"},{\"queryRef\":\"Avg(fact_event_odds.prob_change_1d)\"},{\"queryRef\":\"_Measures.Odds Volume 24h\"},{\"queryRef\":\"fact_event_odds.end_date\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"e\",\"Entity\":\"fact_event_odds\",\"Type\":0},{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"e\"}},\"Property\":\"question\"},\"Name\":\"fact_event_odds.question\"},{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"e\"}},\"Property\":\"category\"},\"Name\":\"fact_event_odds.category\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Latest Yes Price\"},\"Name\":\"_Measures.Latest Yes Price\"},{\"Aggregation\":{\"Expression\":{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"e\"}},\"Property\":\"prob_change_1d\"}},\"Function\":1},\"Name\":\"Avg(fact_event_odds.prob_change_1d)\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Odds Volume 24h\"},\"Name\":\"_Measures.Odds Volume 24h\"},{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"e\"}},\"Property\":\"end_date\"},\"Name\":\"fact_event_odds.end_date\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"total\":[{\"properties\":{\"totals\":{\"expr\":{\"Literal\":{\"Value\":\"false\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Event odds detail'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 300.00,
-          "width": 600.00,
-          "x": 660.00,
-          "y": 400.00,
-          "z": 8000.00
-        }
-      ],
-      "width": 1280.00
-    },
-    {
-      "config": "{\"visibility\":1}",
-      "displayName": "QA",
-      "displayOption": 1,
-      "filters": "[]",
-      "height": 720.00,
-      "name": "sec_qa",
-      "ordinal": 5,
-      "visualContainers": [
-        {
-          "config": "{\"name\":\"qa_pass_card\",\"layouts\":[{\"id\":0,\"position\":{\"x\":40,\"y\":40,\"width\":280,\"height\":120,\"z\":0}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.QA Pass Count\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"QA Pass Count\"},\"Name\":\"_Measures.QA Pass Count\"}]},\"drillFilterOtherVisuals\":true,\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Checks PASS'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 120.00,
-          "width": 280.00,
-          "x": 40.00,
-          "y": 40.00,
-          "z": 0.00
-        },
-        {
-          "config": "{\"name\":\"qa_table\",\"layouts\":[{\"id\":0,\"position\":{\"x\":40,\"y\":200,\"width\":1200,\"height\":480,\"z\":2000}}],\"singleVisual\":{\"visualType\":\"tableEx\",\"projections\":{\"Values\":[{\"queryRef\":\"qa_expected.check_id\"},{\"queryRef\":\"qa_expected.description\"},{\"queryRef\":\"qa_expected.expected\"},{\"queryRef\":\"_Measures.QA Actual (display)\"},{\"queryRef\":\"_Measures.QA Status\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"q\",\"Entity\":\"qa_expected\",\"Type\":0},{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"q\"}},\"Property\":\"check_id\"},\"Name\":\"qa_expected.check_id\"},{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"q\"}},\"Property\":\"description\"},\"Name\":\"qa_expected.description\"},{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"q\"}},\"Property\":\"expected\"},\"Name\":\"qa_expected.expected\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"QA Actual (display)\"},\"Name\":\"_Measures.QA Actual (display)\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"QA Status\"},\"Name\":\"_Measures.QA Status\"}],\"OrderBy\":[{\"Direction\":1,\"Expression\":{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"q\"}},\"Property\":\"check_id\"}}}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"total\":[{\"properties\":{\"totals\":{\"expr\":{\"Literal\":{\"Value\":\"false\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'DAX vs pandas reconciliation (rel. tol 1e-6)'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 480.00,
-          "width": 1200.00,
-          "x": 40.00,
-          "y": 200.00,
-          "z": 2000.00
-        },
-        {
-          "config": "{\"name\":\"qa_total_card\",\"layouts\":[{\"id\":0,\"position\":{\"x\":360,\"y\":40,\"width\":280,\"height\":120,\"z\":1000}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.QA Total Count\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"QA Total Count\"},\"Name\":\"_Measures.QA Total Count\"}]},\"drillFilterOtherVisuals\":true,\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Checks total (1 skipped by design)'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 120.00,
-          "width": 280.00,
-          "x": 360.00,
-          "y": 40.00,
-          "z": 1000.00
-        }
-      ],
-      "width": 1280.00
-    },
-    {
-      "config": "{}",
-      "displayName": "Risk & Volatility",
-      "displayOption": 1,
-      "filters": "[]",
-      "height": 720.00,
-      "name": "sec_risk",
-      "ordinal": 3,
-      "visualContainers": [
-        {
-          "config": "{\"name\":\"rk_52w_bar\",\"layouts\":[{\"id\":0,\"position\":{\"x\":780,\"y\":420,\"width\":480,\"height\":280,\"z\":5000}}],\"singleVisual\":{\"visualType\":\"barChart\",\"projections\":{\"Category\":[{\"queryRef\":\"dim_symbol.symbol\",\"active\":true}],\"Y\":[{\"queryRef\":\"_Measures.Pct From 52W High (Latest)\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"s\",\"Entity\":\"dim_symbol\",\"Type\":0},{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"s\"}},\"Property\":\"symbol\"},\"Name\":\"dim_symbol.symbol\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Pct From 52W High (Latest)\"},\"Name\":\"_Measures.Pct From 52W High (Latest)\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"dataPoint\":[{\"properties\":{\"fill\":{\"solid\":{\"color\":{\"expr\":{\"FillRule\":{\"Input\":{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Entity\":\"_Measures\"}},\"Property\":\"Pct From 52W High (Latest)\"}},\"FillRule\":{\"linearGradient2\":{\"min\":{\"color\":{\"Literal\":{\"Value\":\"'#EF5350'\"}}},\"max\":{\"color\":{\"Literal\":{\"Value\":\"'#1B1B1F'\"}}},\"nullColoringStrategy\":{\"strategy\":{\"Literal\":{\"Value\":\"'asZero'\"}}}}}}}}}}},\"selector\":{\"data\":[{\"dataViewWildcard\":{\"matchingOption\":1}}]}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'% from 52-week high (latest)'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 280.00,
-          "width": 480.00,
-          "x": 780.00,
-          "y": 420.00,
-          "z": 5000.00
-        },
-        {
-          "config": "{\"name\":\"rk_card_best\",\"layouts\":[{\"id\":0,\"position\":{\"x\":20,\"y\":20,\"width\":220,\"height\":100,\"z\":0}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.Best Day\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Best Day\"},\"Name\":\"_Measures.Best Day\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"22D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Best day'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 100.00,
-          "width": 220.00,
-          "x": 20.00,
-          "y": 20.00,
-          "z": 0.00
-        },
-        {
-          "config": "{\"name\":\"rk_card_p05\",\"layouts\":[{\"id\":0,\"position\":{\"x\":500,\"y\":20,\"width\":220,\"height\":100,\"z\":2000}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.Return P05\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Return P05\"},\"Name\":\"_Measures.Return P05\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"22D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'5th percentile daily return'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 100.00,
-          "width": 220.00,
-          "x": 500.00,
-          "y": 20.00,
-          "z": 2000.00
-        },
-        {
-          "config": "{\"name\":\"rk_card_worst\",\"layouts\":[{\"id\":0,\"position\":{\"x\":260,\"y\":20,\"width\":220,\"height\":100,\"z\":1000}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.Worst Day\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Worst Day\"},\"Name\":\"_Measures.Worst Day\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"22D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Worst day'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 100.00,
-          "width": 220.00,
-          "x": 260.00,
-          "y": 20.00,
-          "z": 1000.00
-        },
-        {
-          "config": "{\"name\":\"rk_hist\",\"layouts\":[{\"id\":0,\"position\":{\"x\":20,\"y\":420,\"width\":740,\"height\":280,\"z\":4000}}],\"singleVisual\":{\"visualType\":\"columnChart\",\"projections\":{\"Category\":[{\"queryRef\":\"fact_prices.ret_bin\",\"active\":true}],\"Y\":[{\"queryRef\":\"_Measures.Price Rows\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"f\",\"Entity\":\"fact_prices\",\"Type\":0},{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"f\"}},\"Property\":\"ret_bin\"},\"Name\":\"fact_prices.ret_bin\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Price Rows\"},\"Name\":\"_Measures.Price Rows\"}],\"OrderBy\":[{\"Direction\":1,\"Expression\":{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"f\"}},\"Property\":\"ret_bin\"}}}]},\"drillFilterOtherVisuals\":true,\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Daily return distribution (bin 0.5%)'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 280.00,
-          "width": 740.00,
-          "x": 20.00,
-          "y": 420.00,
-          "z": 4000.00
-        },
-        {
-          "config": "{\"name\":\"rk_vol_line\",\"layouts\":[{\"id\":0,\"position\":{\"x\":20,\"y\":130,\"width\":1240,\"height\":280,\"z\":3000}}],\"singleVisual\":{\"visualType\":\"lineChart\",\"projections\":{\"Category\":[{\"queryRef\":\"dim_date.date\",\"active\":true}],\"Series\":[{\"queryRef\":\"dim_symbol.symbol\"}],\"Y\":[{\"queryRef\":\"_Measures.Rolling Vol 20D (Ann)\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"d\",\"Entity\":\"dim_date\",\"Type\":0},{\"Name\":\"s\",\"Entity\":\"dim_symbol\",\"Type\":0},{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"d\"}},\"Property\":\"date\"},\"Name\":\"dim_date.date\"},{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"s\"}},\"Property\":\"symbol\"},\"Name\":\"dim_symbol.symbol\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Rolling Vol 20D (Ann)\"},\"Name\":\"_Measures.Rolling Vol 20D (Ann)\"}]},\"drillFilterOtherVisuals\":true,\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Rolling 20-trading-day volatility, annualized sqrt(252) - blank until 20 bars'\"}}}}}]}}}",
-          "filters": "[]",
-          "height": 280.00,
-          "width": 1240.00,
-          "x": 20.00,
-          "y": 130.00,
-          "z": 3000.00
-        }
-      ],
-      "width": 1280.00
+      "width": 1600.0
     },
     {
       "config": "{}",
       "displayName": "Signals",
       "displayOption": 1,
       "filters": "[]",
-      "height": 720.00,
+      "height": 900.0,
       "name": "sec_signals",
       "ordinal": 1,
       "visualContainers": [
         {
-          "config": "{\"name\":\"sig_card_long\",\"layouts\":[{\"id\":0,\"position\":{\"x\":20,\"y\":20,\"width\":220,\"height\":100,\"z\":0}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.Strong Long %\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Strong Long %\"},\"Name\":\"_Measures.Strong Long %\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"22D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'strong_long share'\"}}}}}]}}}",
+          "config": "{\"name\": \"sig_card_long\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 25.0, \"y\": 25.0, \"width\": 275.0, \"height\": 118.75, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.Strong Long %\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Strong Long %\"}, \"Name\": \"_Measures.Strong Long %\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'strong_long share'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"20D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
           "filters": "[]",
-          "height": 100.00,
-          "width": 220.00,
-          "x": 20.00,
-          "y": 20.00,
-          "z": 0.00
+          "height": 118.75,
+          "width": 275.0,
+          "x": 25.0,
+          "y": 25.0,
+          "z": 0
         },
         {
-          "config": "{\"name\":\"sig_card_short\",\"layouts\":[{\"id\":0,\"position\":{\"x\":260,\"y\":20,\"width\":220,\"height\":100,\"z\":1000}}],\"singleVisual\":{\"visualType\":\"card\",\"projections\":{\"Values\":[{\"queryRef\":\"_Measures.Strong Short %\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Strong Short %\"},\"Name\":\"_Measures.Strong Short %\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"labels\":[{\"properties\":{\"fontSize\":{\"expr\":{\"Literal\":{\"Value\":\"22D\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'strong_short share'\"}}}}}]}}}",
+          "config": "{\"name\": \"sig_card_short\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 25.0, \"y\": 156.25, \"width\": 275.0, \"height\": 118.75, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.Strong Short %\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Strong Short %\"}, \"Name\": \"_Measures.Strong Short %\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'strong_short share'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"20D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
           "filters": "[]",
-          "height": 100.00,
-          "width": 220.00,
-          "x": 260.00,
-          "y": 20.00,
-          "z": 1000.00
+          "height": 118.75,
+          "width": 275.0,
+          "x": 25.0,
+          "y": 156.25,
+          "z": 0
         },
         {
-          "config": "{\"name\":\"sig_combo\",\"layouts\":[{\"id\":0,\"position\":{\"x\":20,\"y\":560,\"width\":1240,\"height\":140,\"z\":5000}}],\"singleVisual\":{\"visualType\":\"lineClusteredColumnComboChart\",\"projections\":{\"Category\":[{\"queryRef\":\"dim_date.date\",\"active\":true}],\"Y\":[{\"queryRef\":\"_Measures.Composite Signal\"}],\"Y2\":[{\"queryRef\":\"_Measures.Close\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"d\",\"Entity\":\"dim_date\",\"Type\":0},{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"d\"}},\"Property\":\"date\"},\"Name\":\"dim_date.date\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Composite Signal\"},\"Name\":\"_Measures.Composite Signal\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Close\"},\"Name\":\"_Measures.Close\"}]},\"drillFilterOtherVisuals\":true,\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Composite signal (bars) vs close (line) - filter one symbol'\"}}}}}]}}}",
+          "config": "{\"name\": \"sig_strength_bar\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 325.0, \"y\": 25.0, \"width\": 1250.0, \"height\": 250.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"barChart\", \"projections\": {\"Category\": [{\"queryRef\": \"dim_symbol.symbol\"}], \"Series\": [{\"queryRef\": \"fact_signals.signal_strength\"}], \"Y\": [{\"queryRef\": \"_Measures.Signal Days\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"s\", \"Entity\": \"dim_symbol\", \"Type\": 0}, {\"Name\": \"f\", \"Entity\": \"fact_signals\", \"Type\": 0}, {\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"s\"}}, \"Property\": \"symbol\"}, \"Name\": \"dim_symbol.symbol\"}, {\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"f\"}}, \"Property\": \"signal_strength\"}, \"Name\": \"fact_signals.signal_strength\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Signal Days\"}, \"Name\": \"_Measures.Signal Days\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Signal strength mix by symbol'\"}}}}}]}}}",
           "filters": "[]",
-          "height": 140.00,
-          "width": 1240.00,
-          "x": 20.00,
-          "y": 560.00,
-          "z": 5000.00
+          "height": 250.0,
+          "width": 1250.0,
+          "x": 325.0,
+          "y": 25.0,
+          "z": 0
         },
         {
-          "config": "{\"name\":\"sig_matrix\",\"layouts\":[{\"id\":0,\"position\":{\"x\":20,\"y\":130,\"width\":620,\"height\":420,\"z\":2000}}],\"singleVisual\":{\"visualType\":\"pivotTable\",\"projections\":{\"Rows\":[{\"queryRef\":\"dim_symbol.symbol\",\"active\":true}],\"Columns\":[{\"queryRef\":\"dim_date.year_month\",\"active\":true}],\"Values\":[{\"queryRef\":\"_Measures.Composite Signal\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"s\",\"Entity\":\"dim_symbol\",\"Type\":0},{\"Name\":\"d\",\"Entity\":\"dim_date\",\"Type\":0},{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"s\"}},\"Property\":\"symbol\"},\"Name\":\"dim_symbol.symbol\"},{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"d\"}},\"Property\":\"year_month\"},\"Name\":\"dim_date.year_month\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Composite Signal\"},\"Name\":\"_Measures.Composite Signal\"}]},\"drillFilterOtherVisuals\":true,\"objects\":{\"values\":[{\"properties\":{\"backColor\":{\"solid\":{\"color\":{\"expr\":{\"FillRule\":{\"Input\":{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Entity\":\"_Measures\"}},\"Property\":\"Composite Signal\"}},\"FillRule\":{\"linearGradient3\":{\"min\":{\"color\":{\"Literal\":{\"Value\":\"'#EF5350'\"}}},\"mid\":{\"color\":{\"Literal\":{\"Value\":\"'#1B1B1F'\"}}},\"max\":{\"color\":{\"Literal\":{\"Value\":\"'#26A69A'\"}}},\"nullColoringStrategy\":{\"strategy\":{\"Literal\":{\"Value\":\"'asNoColor'\"}}}}}}}}}}},\"selector\":{\"data\":[{\"dataViewWildcard\":{\"matchingOption\":1}}]}}],\"total\":[{\"properties\":{}}],\"subTotals\":[{\"properties\":{\"rowSubtotals\":{\"expr\":{\"Literal\":{\"Value\":\"false\"}}},\"columnSubtotals\":{\"expr\":{\"Literal\":{\"Value\":\"false\"}}}}}]},\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Avg composite signal - symbol x month (red short / green long)'\"}}}}}]}}}",
+          "config": "{\"name\": \"sig_matrix\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 25.0, \"y\": 287.5, \"width\": 925.0, \"height\": 300.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"pivotTable\", \"projections\": {\"Rows\": [{\"queryRef\": \"dim_symbol.symbol\"}], \"Columns\": [{\"queryRef\": \"dim_date.year_quarter\"}], \"Values\": [{\"queryRef\": \"_Measures.Composite Signal\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"s\", \"Entity\": \"dim_symbol\", \"Type\": 0}, {\"Name\": \"d\", \"Entity\": \"dim_date\", \"Type\": 0}, {\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"s\"}}, \"Property\": \"symbol\"}, \"Name\": \"dim_symbol.symbol\"}, {\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"d\"}}, \"Property\": \"year_quarter\"}, \"Name\": \"dim_date.year_quarter\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Composite Signal\"}, \"Name\": \"_Measures.Composite Signal\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Avg composite signal - symbol x quarter (red short / green long)'\"}}}}}]}, \"objects\": {\"values\": [{\"properties\": {\"backColor\": {\"solid\": {\"color\": {\"expr\": {\"FillRule\": {\"Input\": {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Entity\": \"_Measures\"}}, \"Property\": \"Composite Signal\"}}, \"FillRule\": {\"linearGradient3\": {\"min\": {\"color\": {\"Literal\": {\"Value\": \"'#EF5350'\"}}}, \"mid\": {\"color\": {\"Literal\": {\"Value\": \"'#1B1B1F'\"}}}, \"max\": {\"color\": {\"Literal\": {\"Value\": \"'#26A69A'\"}}}, \"nullColoringStrategy\": {\"strategy\": {\"Literal\": {\"Value\": \"'noColor'\"}}}}}}}}}}}, \"selector\": {\"data\": [{\"dataViewWildcard\": {\"matchingOption\": 1}}], \"metadata\": \"_Measures.Composite Signal\"}}], \"total\": [{\"properties\": {\"totals\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}], \"subTotals\": [{\"properties\": {\"rowSubtotals\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}, \"columnSubtotals\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
           "filters": "[]",
-          "height": 420.00,
-          "width": 620.00,
-          "x": 20.00,
-          "y": 130.00,
-          "z": 2000.00
+          "height": 300.0,
+          "width": 925.0,
+          "x": 25.0,
+          "y": 287.5,
+          "z": 0
         },
         {
-          "config": "{\"name\":\"sig_strength_bar\",\"layouts\":[{\"id\":0,\"position\":{\"x\":660,\"y\":130,\"width\":600,\"height\":240,\"z\":3000}}],\"singleVisual\":{\"visualType\":\"barChart\",\"projections\":{\"Category\":[{\"queryRef\":\"dim_symbol.symbol\",\"active\":true}],\"Series\":[{\"queryRef\":\"fact_signals.signal_strength\"}],\"Y\":[{\"queryRef\":\"_Measures.Signal Days\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"s\",\"Entity\":\"dim_symbol\",\"Type\":0},{\"Name\":\"f\",\"Entity\":\"fact_signals\",\"Type\":0},{\"Name\":\"m\",\"Entity\":\"_Measures\",\"Type\":0}],\"Select\":[{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"s\"}},\"Property\":\"symbol\"},\"Name\":\"dim_symbol.symbol\"},{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"f\"}},\"Property\":\"signal_strength\"},\"Name\":\"fact_signals.signal_strength\"},{\"Measure\":{\"Expression\":{\"SourceRef\":{\"Source\":\"m\"}},\"Property\":\"Signal Days\"},\"Name\":\"_Measures.Signal Days\"}]},\"drillFilterOtherVisuals\":true,\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Signal strength mix by symbol'\"}}}}}]}}}",
+          "config": "{\"name\": \"sig_sub_avg\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 975.0, \"y\": 287.5, \"width\": 600.0, \"height\": 300.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"clusteredColumnChart\", \"projections\": {\"Y\": [{\"queryRef\": \"Avg(fact_signals.trend_signal)\"}, {\"queryRef\": \"Avg(fact_signals.momentum_signal)\"}, {\"queryRef\": \"Avg(fact_signals.ma_cross_signal)\"}, {\"queryRef\": \"Avg(fact_signals.breakout_signal)\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"f\", \"Entity\": \"fact_signals\", \"Type\": 0}], \"Select\": [{\"Aggregation\": {\"Expression\": {\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"f\"}}, \"Property\": \"trend_signal\"}}, \"Function\": 1}, \"Name\": \"Avg(fact_signals.trend_signal)\"}, {\"Aggregation\": {\"Expression\": {\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"f\"}}, \"Property\": \"momentum_signal\"}}, \"Function\": 1}, \"Name\": \"Avg(fact_signals.momentum_signal)\"}, {\"Aggregation\": {\"Expression\": {\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"f\"}}, \"Property\": \"ma_cross_signal\"}}, \"Function\": 1}, \"Name\": \"Avg(fact_signals.ma_cross_signal)\"}, {\"Aggregation\": {\"Expression\": {\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"f\"}}, \"Property\": \"breakout_signal\"}}, \"Function\": 1}, \"Name\": \"Avg(fact_signals.breakout_signal)\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Component signal averages'\"}}}}}]}}}",
           "filters": "[]",
-          "height": 240.00,
-          "width": 600.00,
-          "x": 660.00,
-          "y": 130.00,
-          "z": 3000.00
+          "height": 300.0,
+          "width": 600.0,
+          "x": 975.0,
+          "y": 287.5,
+          "z": 0
         },
         {
-          "config": "{\"name\":\"sig_sub_avg\",\"layouts\":[{\"id\":0,\"position\":{\"x\":660,\"y\":390,\"width\":600,\"height\":160,\"z\":4000}}],\"singleVisual\":{\"visualType\":\"clusteredColumnChart\",\"projections\":{\"Y\":[{\"queryRef\":\"Avg(fact_signals.trend_signal)\"},{\"queryRef\":\"Avg(fact_signals.momentum_signal)\"},{\"queryRef\":\"Avg(fact_signals.ma_cross_signal)\"},{\"queryRef\":\"Avg(fact_signals.breakout_signal)\"}]},\"prototypeQuery\":{\"Version\":2,\"From\":[{\"Name\":\"f\",\"Entity\":\"fact_signals\",\"Type\":0}],\"Select\":[{\"Aggregation\":{\"Expression\":{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"f\"}},\"Property\":\"trend_signal\"}},\"Function\":1},\"Name\":\"Avg(fact_signals.trend_signal)\"},{\"Aggregation\":{\"Expression\":{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"f\"}},\"Property\":\"momentum_signal\"}},\"Function\":1},\"Name\":\"Avg(fact_signals.momentum_signal)\"},{\"Aggregation\":{\"Expression\":{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"f\"}},\"Property\":\"ma_cross_signal\"}},\"Function\":1},\"Name\":\"Avg(fact_signals.ma_cross_signal)\"},{\"Aggregation\":{\"Expression\":{\"Column\":{\"Expression\":{\"SourceRef\":{\"Source\":\"f\"}},\"Property\":\"breakout_signal\"}},\"Function\":1},\"Name\":\"Avg(fact_signals.breakout_signal)\"}]},\"drillFilterOtherVisuals\":true,\"vcObjects\":{\"title\":[{\"properties\":{\"show\":{\"expr\":{\"Literal\":{\"Value\":\"true\"}}},\"text\":{\"expr\":{\"Literal\":{\"Value\":\"'Component signal averages'\"}}}}}]}}}",
+          "config": "{\"name\": \"sig_combo\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 25.0, \"y\": 600.0, \"width\": 1550.0, \"height\": 275.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"lineClusteredColumnComboChart\", \"projections\": {\"Category\": [{\"queryRef\": \"dim_date.date\"}], \"Y\": [{\"queryRef\": \"_Measures.Composite Signal\"}], \"Y2\": [{\"queryRef\": \"_Measures.Close\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"d\", \"Entity\": \"dim_date\", \"Type\": 0}, {\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"d\"}}, \"Property\": \"date\"}, \"Name\": \"dim_date.date\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Composite Signal\"}, \"Name\": \"_Measures.Composite Signal\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Close\"}, \"Name\": \"_Measures.Close\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Composite signal (bars) vs close (line) - filter one symbol'\"}}}}}]}}}",
           "filters": "[]",
-          "height": 160.00,
-          "width": 600.00,
-          "x": 660.00,
-          "y": 390.00,
-          "z": 4000.00
+          "height": 275.0,
+          "width": 1550.0,
+          "x": 25.0,
+          "y": 600.0,
+          "z": 0
         }
       ],
-      "width": 1280.00
+      "width": 1600.0
+    },
+    {
+      "config": "{}",
+      "displayName": "Backtest vs Benchmark",
+      "displayOption": 1,
+      "filters": "[]",
+      "height": 900.0,
+      "name": "sec_backtest",
+      "ordinal": 2,
+      "visualContainers": [
+        {
+          "config": "{\"name\": \"bt_card_0\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 25.0, \"y\": 25.0, \"width\": 243.75, \"height\": 125.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.Sharpe\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Sharpe\"}, \"Name\": \"_Measures.Sharpe\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Sharpe'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"16D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 125.0,
+          "width": 243.75,
+          "x": 25.0,
+          "y": 25.0,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"bt_card_1\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 287.5, \"y\": 25.0, \"width\": 243.75, \"height\": 125.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.CAGR\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"CAGR\"}, \"Name\": \"_Measures.CAGR\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'CAGR'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"16D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 125.0,
+          "width": 243.75,
+          "x": 287.5,
+          "y": 25.0,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"bt_card_2\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 550.0, \"y\": 25.0, \"width\": 243.75, \"height\": 125.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.Annual Volatility\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Annual Volatility\"}, \"Name\": \"_Measures.Annual Volatility\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Annual vol'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"16D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 125.0,
+          "width": 243.75,
+          "x": 550.0,
+          "y": 25.0,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"bt_card_3\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 812.5, \"y\": 25.0, \"width\": 243.75, \"height\": 125.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.Max Drawdown\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Max Drawdown\"}, \"Name\": \"_Measures.Max Drawdown\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Max drawdown'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"16D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 125.0,
+          "width": 243.75,
+          "x": 812.5,
+          "y": 25.0,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"bt_card_4\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 1075.0, \"y\": 25.0, \"width\": 243.75, \"height\": 125.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.Win Rate\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Win Rate\"}, \"Name\": \"_Measures.Win Rate\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Win rate'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"16D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 125.0,
+          "width": 243.75,
+          "x": 1075.0,
+          "y": 25.0,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"bt_card_5\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 1337.5, \"y\": 25.0, \"width\": 243.75, \"height\": 125.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.Total Return\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Total Return\"}, \"Name\": \"_Measures.Total Return\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Total return'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"16D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 125.0,
+          "width": 243.75,
+          "x": 1337.5,
+          "y": 25.0,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"bt_equity_line\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 25.0, \"y\": 162.5, \"width\": 1550.0, \"height\": 337.5, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"lineChart\", \"projections\": {\"Category\": [{\"queryRef\": \"fact_backtest_equity.date\"}], \"Y\": [{\"queryRef\": \"_Measures.Equity Indexed 100\"}, {\"queryRef\": \"_Measures.SPY Indexed 100\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"e\", \"Entity\": \"fact_backtest_equity\", \"Type\": 0}, {\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"e\"}}, \"Property\": \"date\"}, \"Name\": \"fact_backtest_equity.date\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Equity Indexed 100\"}, \"Name\": \"_Measures.Equity Indexed 100\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"SPY Indexed 100\"}, \"Name\": \"_Measures.SPY Indexed 100\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Strategy vs SPY buy-and-hold (indexed to 100)'\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 337.5,
+          "width": 1550.0,
+          "x": 25.0,
+          "y": 162.5,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"bt_dd_area\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 25.0, \"y\": 512.5, \"width\": 1550.0, \"height\": 162.5, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"areaChart\", \"projections\": {\"Category\": [{\"queryRef\": \"fact_backtest_equity.date\"}], \"Y\": [{\"queryRef\": \"_Measures.Drawdown\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"e\", \"Entity\": \"fact_backtest_equity\", \"Type\": 0}, {\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"e\"}}, \"Property\": \"date\"}, \"Name\": \"fact_backtest_equity.date\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Drawdown\"}, \"Name\": \"_Measures.Drawdown\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Drawdown'\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 162.5,
+          "width": 1550.0,
+          "x": 25.0,
+          "y": 512.5,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"bt_table\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 25.0, \"y\": 687.5, \"width\": 1550.0, \"height\": 187.5, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"tableEx\", \"projections\": {\"Values\": [{\"queryRef\": \"fact_backtest_results.run_id\"}, {\"queryRef\": \"fact_backtest_results.strategy\"}, {\"queryRef\": \"fact_backtest_results.fill_timing\"}, {\"queryRef\": \"_Measures.Sharpe\"}, {\"queryRef\": \"_Measures.CAGR\"}, {\"queryRef\": \"_Measures.Annual Volatility\"}, {\"queryRef\": \"_Measures.Max Drawdown\"}, {\"queryRef\": \"_Measures.Win Rate\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"r\", \"Entity\": \"fact_backtest_results\", \"Type\": 0}, {\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"r\"}}, \"Property\": \"run_id\"}, \"Name\": \"fact_backtest_results.run_id\"}, {\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"r\"}}, \"Property\": \"strategy\"}, \"Name\": \"fact_backtest_results.strategy\"}, {\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"r\"}}, \"Property\": \"fill_timing\"}, \"Name\": \"fact_backtest_results.fill_timing\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Sharpe\"}, \"Name\": \"_Measures.Sharpe\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"CAGR\"}, \"Name\": \"_Measures.CAGR\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Annual Volatility\"}, \"Name\": \"_Measures.Annual Volatility\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Max Drawdown\"}, \"Name\": \"_Measures.Max Drawdown\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Win Rate\"}, \"Name\": \"_Measures.Win Rate\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Backtest run detail'\"}}}}}]}, \"objects\": {\"total\": [{\"properties\": {\"totals\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}], \"subTotals\": [{\"properties\": {\"rowSubtotals\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}, \"columnSubtotals\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 187.5,
+          "width": 1550.0,
+          "x": 25.0,
+          "y": 687.5,
+          "z": 0
+        }
+      ],
+      "width": 1600.0
+    },
+    {
+      "config": "{}",
+      "displayName": "Risk & Volatility",
+      "displayOption": 1,
+      "filters": "[]",
+      "height": 900.0,
+      "name": "sec_risk",
+      "ordinal": 3,
+      "visualContainers": [
+        {
+          "config": "{\"name\": \"rk_card_best\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 25.0, \"y\": 25.0, \"width\": 275.0, \"height\": 125.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.Best Day\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Best Day\"}, \"Name\": \"_Measures.Best Day\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Best day'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"20D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 125.0,
+          "width": 275.0,
+          "x": 25.0,
+          "y": 25.0,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"rk_card_worst\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 325.0, \"y\": 25.0, \"width\": 275.0, \"height\": 125.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.Worst Day\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Worst Day\"}, \"Name\": \"_Measures.Worst Day\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Worst day'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"20D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 125.0,
+          "width": 275.0,
+          "x": 325.0,
+          "y": 25.0,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"rk_card_p05\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 625.0, \"y\": 25.0, \"width\": 275.0, \"height\": 125.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.Return P05\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Return P05\"}, \"Name\": \"_Measures.Return P05\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'5th percentile daily return'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"20D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 125.0,
+          "width": 275.0,
+          "x": 625.0,
+          "y": 25.0,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"rk_vol_line\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 25.0, \"y\": 162.5, \"width\": 1550.0, \"height\": 350.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"lineChart\", \"projections\": {\"Category\": [{\"queryRef\": \"dim_date.date\"}], \"Series\": [{\"queryRef\": \"dim_symbol.symbol\"}], \"Y\": [{\"queryRef\": \"_Measures.Rolling Vol 20D (Ann)\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"d\", \"Entity\": \"dim_date\", \"Type\": 0}, {\"Name\": \"s\", \"Entity\": \"dim_symbol\", \"Type\": 0}, {\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"d\"}}, \"Property\": \"date\"}, \"Name\": \"dim_date.date\"}, {\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"s\"}}, \"Property\": \"symbol\"}, \"Name\": \"dim_symbol.symbol\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Rolling Vol 20D (Ann)\"}, \"Name\": \"_Measures.Rolling Vol 20D (Ann)\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Rolling 20-trading-day volatility, annualized sqrt(252) - blank until 20 bars'\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 350.0,
+          "width": 1550.0,
+          "x": 25.0,
+          "y": 162.5,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"rk_hist\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 25.0, \"y\": 525.0, \"width\": 925.0, \"height\": 350.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"columnChart\", \"projections\": {\"Category\": [{\"queryRef\": \"fact_prices.ret_bin\"}], \"Y\": [{\"queryRef\": \"_Measures.Price Rows\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"f\", \"Entity\": \"fact_prices\", \"Type\": 0}, {\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"f\"}}, \"Property\": \"ret_bin\"}, \"Name\": \"fact_prices.ret_bin\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Price Rows\"}, \"Name\": \"_Measures.Price Rows\"}], \"OrderBy\": [{\"Direction\": 1, \"Expression\": {\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"f\"}}, \"Property\": \"ret_bin\"}}}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Daily return distribution (bin 0.5%)'\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 350.0,
+          "width": 925.0,
+          "x": 25.0,
+          "y": 525.0,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"rk_52w_bar\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 975.0, \"y\": 525.0, \"width\": 600.0, \"height\": 350.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"barChart\", \"projections\": {\"Category\": [{\"queryRef\": \"dim_symbol.symbol\"}], \"Y\": [{\"queryRef\": \"_Measures.Pct From 52W High (Latest)\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"s\", \"Entity\": \"dim_symbol\", \"Type\": 0}, {\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"s\"}}, \"Property\": \"symbol\"}, \"Name\": \"dim_symbol.symbol\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Pct From 52W High (Latest)\"}, \"Name\": \"_Measures.Pct From 52W High (Latest)\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'% from 52-week high (latest)'\"}}}}}]}, \"objects\": {\"dataPoint\": [{\"properties\": {\"fill\": {\"solid\": {\"color\": {\"expr\": {\"FillRule\": {\"Input\": {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Entity\": \"_Measures\"}}, \"Property\": \"Pct From 52W High (Latest)\"}}, \"FillRule\": {\"linearGradient2\": {\"min\": {\"color\": {\"Literal\": {\"Value\": \"'#EF5350'\"}}}, \"max\": {\"color\": {\"Literal\": {\"Value\": \"'#1B1B1F'\"}}}, \"nullColoringStrategy\": {\"strategy\": {\"Literal\": {\"Value\": \"'asZero'\"}}}}}}}}}}}, \"selector\": {\"data\": [{\"dataViewWildcard\": {\"matchingOption\": 1}}]}}]}}}",
+          "filters": "[]",
+          "height": 350.0,
+          "width": 600.0,
+          "x": 975.0,
+          "y": 525.0,
+          "z": 0
+        }
+      ],
+      "width": 1600.0
+    },
+    {
+      "config": "{}",
+      "displayName": "News & Event Odds",
+      "displayOption": 1,
+      "filters": "[]",
+      "height": 900.0,
+      "name": "sec_news_events",
+      "ordinal": 4,
+      "visualContainers": [
+        {
+          "config": "{\"name\": \"nw_card_total\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 25.0, \"y\": 25.0, \"width\": 275.0, \"height\": 125.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.News Count\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"News Count\"}, \"Name\": \"_Measures.News Count\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'News rows'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"20D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 125.0,
+          "width": 275.0,
+          "x": 25.0,
+          "y": 25.0,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"nw_card_scored\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 325.0, \"y\": 25.0, \"width\": 275.0, \"height\": 125.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.Scored News\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Scored News\"}, \"Name\": \"_Measures.Scored News\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Scored (of 5,581)'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"20D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 125.0,
+          "width": 275.0,
+          "x": 325.0,
+          "y": 25.0,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"nw_card_cov\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 625.0, \"y\": 25.0, \"width\": 275.0, \"height\": 125.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.Scored Coverage %\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Scored Coverage %\"}, \"Name\": \"_Measures.Scored Coverage %\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Sentiment coverage - most news is unscored'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"20D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 125.0,
+          "width": 275.0,
+          "x": 625.0,
+          "y": 25.0,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"nw_card_syms\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 925.0, \"y\": 25.0, \"width\": 225.0, \"height\": 125.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.News Symbols\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"News Symbols\"}, \"Name\": \"_Measures.News Symbols\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Symbols with news'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"16D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 125.0,
+          "width": 225.0,
+          "x": 925.0,
+          "y": 25.0,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"nw_card_markets\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 1175.0, \"y\": 25.0, \"width\": 225.0, \"height\": 125.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.Odds Markets\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Odds Markets\"}, \"Name\": \"_Measures.Odds Markets\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Polymarket markets'\"}}}, \"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"12D\"}}}}}]}, \"objects\": {\"labels\": [{\"properties\": {\"fontSize\": {\"expr\": {\"Literal\": {\"Value\": \"16D\"}}}}}], \"categoryLabels\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 125.0,
+          "width": 225.0,
+          "x": 1175.0,
+          "y": 25.0,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"nw_by_date\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 25.0, \"y\": 162.5, \"width\": 925.0, \"height\": 325.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"columnChart\", \"projections\": {\"Category\": [{\"queryRef\": \"dim_date.date\"}], \"Series\": [{\"queryRef\": \"fact_news.source\"}], \"Y\": [{\"queryRef\": \"_Measures.News Count\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"d\", \"Entity\": \"dim_date\", \"Type\": 0}, {\"Name\": \"n\", \"Entity\": \"fact_news\", \"Type\": 0}, {\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"d\"}}, \"Property\": \"date\"}, \"Name\": \"dim_date.date\"}, {\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"n\"}}, \"Property\": \"source\"}, \"Name\": \"fact_news.source\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"News Count\"}, \"Name\": \"_Measures.News Count\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'News volume by date and source'\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 325.0,
+          "width": 925.0,
+          "x": 25.0,
+          "y": 162.5,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"nw_cat_bar\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 975.0, \"y\": 162.5, \"width\": 600.0, \"height\": 325.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"barChart\", \"projections\": {\"Category\": [{\"queryRef\": \"fact_event_odds.category\"}], \"Y\": [{\"queryRef\": \"_Measures.Odds Markets\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"e\", \"Entity\": \"fact_event_odds\", \"Type\": 0}, {\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"e\"}}, \"Property\": \"category\"}, \"Name\": \"fact_event_odds.category\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Odds Markets\"}, \"Name\": \"_Measures.Odds Markets\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Event markets by category'\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 325.0,
+          "width": 600.0,
+          "x": 975.0,
+          "y": 162.5,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"nw_odds_line\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 25.0, \"y\": 500.0, \"width\": 775.0, \"height\": 375.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"lineChart\", \"projections\": {\"Category\": [{\"queryRef\": \"dim_date.date\"}], \"Series\": [{\"queryRef\": \"fact_event_odds.category\"}], \"Y\": [{\"queryRef\": \"_Measures.Avg Yes Price\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"d\", \"Entity\": \"dim_date\", \"Type\": 0}, {\"Name\": \"e\", \"Entity\": \"fact_event_odds\", \"Type\": 0}, {\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"d\"}}, \"Property\": \"date\"}, \"Name\": \"dim_date.date\"}, {\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"e\"}}, \"Property\": \"category\"}, \"Name\": \"fact_event_odds.category\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Avg Yes Price\"}, \"Name\": \"_Measures.Avg Yes Price\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Avg implied probability by category over time'\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 375.0,
+          "width": 775.0,
+          "x": 25.0,
+          "y": 500.0,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"nw_odds_table\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 825.0, \"y\": 500.0, \"width\": 750.0, \"height\": 375.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"tableEx\", \"projections\": {\"Values\": [{\"queryRef\": \"fact_event_odds.question\"}, {\"queryRef\": \"fact_event_odds.category\"}, {\"queryRef\": \"_Measures.Latest Yes Price\"}, {\"queryRef\": \"Avg(fact_event_odds.prob_change_1d)\"}, {\"queryRef\": \"_Measures.Odds Volume 24h\"}, {\"queryRef\": \"fact_event_odds.end_date\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"e\", \"Entity\": \"fact_event_odds\", \"Type\": 0}, {\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"e\"}}, \"Property\": \"question\"}, \"Name\": \"fact_event_odds.question\"}, {\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"e\"}}, \"Property\": \"category\"}, \"Name\": \"fact_event_odds.category\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Latest Yes Price\"}, \"Name\": \"_Measures.Latest Yes Price\"}, {\"Aggregation\": {\"Expression\": {\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"e\"}}, \"Property\": \"prob_change_1d\"}}, \"Function\": 1}, \"Name\": \"Avg(fact_event_odds.prob_change_1d)\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"Odds Volume 24h\"}, \"Name\": \"_Measures.Odds Volume 24h\"}, {\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"e\"}}, \"Property\": \"end_date\"}, \"Name\": \"fact_event_odds.end_date\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Event odds detail'\"}}}}}]}, \"objects\": {\"total\": [{\"properties\": {\"totals\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}], \"subTotals\": [{\"properties\": {\"rowSubtotals\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}, \"columnSubtotals\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 375.0,
+          "width": 750.0,
+          "x": 825.0,
+          "y": 500.0,
+          "z": 0
+        }
+      ],
+      "width": 1600.0
+    },
+    {
+      "config": "{\"visibility\": 1}",
+      "displayName": "QA",
+      "displayOption": 1,
+      "filters": "[]",
+      "height": 900.0,
+      "name": "sec_qa",
+      "ordinal": 5,
+      "visualContainers": [
+        {
+          "config": "{\"name\": \"qa_pass_card\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 50.0, \"y\": 50.0, \"width\": 350.0, \"height\": 150.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.QA Pass Count\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"QA Pass Count\"}, \"Name\": \"_Measures.QA Pass Count\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Checks PASS'\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 150.0,
+          "width": 350.0,
+          "x": 50.0,
+          "y": 50.0,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"qa_total_card\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 450.0, \"y\": 50.0, \"width\": 350.0, \"height\": 150.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"card\", \"projections\": {\"Values\": [{\"queryRef\": \"_Measures.QA Total Count\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"QA Total Count\"}, \"Name\": \"_Measures.QA Total Count\"}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'Checks total (1 skipped by design)'\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 150.0,
+          "width": 350.0,
+          "x": 450.0,
+          "y": 50.0,
+          "z": 0
+        },
+        {
+          "config": "{\"name\": \"qa_table\", \"layouts\": [{\"id\": 0, \"position\": {\"x\": 50.0, \"y\": 250.0, \"width\": 1500.0, \"height\": 600.0, \"z\": 0}}], \"singleVisual\": {\"visualType\": \"tableEx\", \"projections\": {\"Values\": [{\"queryRef\": \"qa_expected.check_id\"}, {\"queryRef\": \"qa_expected.description\"}, {\"queryRef\": \"qa_expected.expected\"}, {\"queryRef\": \"_Measures.QA Actual (display)\"}, {\"queryRef\": \"_Measures.QA Status\"}]}, \"prototypeQuery\": {\"Version\": 2, \"From\": [{\"Name\": \"q\", \"Entity\": \"qa_expected\", \"Type\": 0}, {\"Name\": \"m\", \"Entity\": \"_Measures\", \"Type\": 0}], \"Select\": [{\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"q\"}}, \"Property\": \"check_id\"}, \"Name\": \"qa_expected.check_id\"}, {\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"q\"}}, \"Property\": \"description\"}, \"Name\": \"qa_expected.description\"}, {\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"q\"}}, \"Property\": \"expected\"}, \"Name\": \"qa_expected.expected\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"QA Actual (display)\"}, \"Name\": \"_Measures.QA Actual (display)\"}, {\"Measure\": {\"Expression\": {\"SourceRef\": {\"Source\": \"m\"}}, \"Property\": \"QA Status\"}, \"Name\": \"_Measures.QA Status\"}], \"OrderBy\": [{\"Direction\": 1, \"Expression\": {\"Column\": {\"Expression\": {\"SourceRef\": {\"Source\": \"q\"}}, \"Property\": \"check_id\"}}}]}, \"drillFilterOtherVisuals\": true, \"vcObjects\": {\"title\": [{\"properties\": {\"show\": {\"expr\": {\"Literal\": {\"Value\": \"true\"}}}, \"text\": {\"expr\": {\"Literal\": {\"Value\": \"'DAX vs pandas reconciliation (rel. tol 1e-6)'\"}}}}}]}, \"objects\": {\"total\": [{\"properties\": {\"totals\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}], \"subTotals\": [{\"properties\": {\"rowSubtotals\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}, \"columnSubtotals\": {\"expr\": {\"Literal\": {\"Value\": \"false\"}}}}}]}}}",
+          "filters": "[]",
+          "height": 600.0,
+          "width": 1500.0,
+          "x": 50.0,
+          "y": 250.0,
+          "z": 0
+        }
+      ],
+      "width": 1600.0
     }
-  ],
-  "theme": "quantai-dark.json"
+  ]
 }

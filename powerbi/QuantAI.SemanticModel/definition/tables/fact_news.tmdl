@@ -93,7 +93,8 @@ table fact_news
 				let
 					Source = Csv.Document(File.Contents(ExportFolder & "\fact_news.csv"), [Delimiter = ",", Columns = 10, Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
 					Headers = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
-					Typed = Table.TransformColumnTypes(Headers, {{"link", type text}, {"symbol", type text}, {"title", type text}, {"summary", type text}, {"date", type date}, {"published", type datetime}, {"source", type text}, {"sentiment", type number}, {"sentiment_label", type text}, {"scored_at", type text}})
+					Typed = Table.TransformColumnTypes(Headers, {{"link", type text}, {"symbol", type text}, {"title", type text}, {"summary", type text}, {"date", type date}, {"published", type datetime}, {"source", type text}, {"sentiment", type number}, {"sentiment_label", type text}, {"scored_at", type text}}),
+					FilledSymbol = Table.TransformColumns(Typed, {{"symbol", each if _ = null or _ = "" then "(untagged)" else _, type text}})
 				in
-					Typed
+					FilledSymbol
 

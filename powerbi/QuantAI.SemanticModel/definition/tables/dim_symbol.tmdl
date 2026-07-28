@@ -55,7 +55,8 @@ table dim_symbol
 				let
 					Source = Csv.Document(File.Contents(ExportFolder & "\dim_symbol.csv"), [Delimiter = ",", Columns = 5, Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
 					Headers = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
-					Typed = Table.TransformColumnTypes(Headers, {{"symbol", type text}, {"first_price_date", type date}, {"last_price_date", type date}, {"price_bars", Int64.Type}, {"is_currently_held", type logical}})
+					Typed = Table.TransformColumnTypes(Headers, {{"symbol", type text}, {"first_price_date", type date}, {"last_price_date", type date}, {"price_bars", Int64.Type}, {"is_currently_held", type logical}}),
+					WithUntagged = Table.InsertRows(Typed, Table.RowCount(Typed), {[symbol = "(untagged)", first_price_date = null, last_price_date = null, price_bars = null, is_currently_held = null]})
 				in
-					Typed
+					WithUntagged
 
