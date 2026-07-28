@@ -1,57 +1,116 @@
 table fact_positions
+	lineageTag: 94cace12-80f2-4ca5-b7ab-c7ddfed32e59
 
 	column as_of
 		dataType: dateTime
-		formatString: yyyy-mm-dd
+		formatString: Long Date
+		lineageTag: 5663b6cc-ab77-4777-8b5c-eb15e705a06a
 		summarizeBy: none
+		sourceColumn: as_of
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	column symbol
 		dataType: string
+		lineageTag: a049c325-b07b-4d66-a99e-862c8d058c30
 		summarizeBy: none
+		sourceColumn: symbol
+
+		annotation SummarizationSetBy = Automatic
 
 	column shares
 		dataType: double
-		summarizeBy: none
+		lineageTag: ca95f992-5ae0-40e6-94ac-1c39329f9914
+		summarizeBy: sum
+		sourceColumn: shares
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	column avg_cost
 		dataType: double
-		formatString: #,0.00
-		summarizeBy: none
+		lineageTag: 11f8a3b0-072e-46e2-8de9-c8f007932231
+		summarizeBy: sum
+		sourceColumn: avg_cost
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	column first_open_date
 		dataType: dateTime
-		formatString: yyyy-mm-dd
+		formatString: Long Date
+		lineageTag: 56cda6ac-8ac4-4b01-aa99-2d7ce7217e3f
 		summarizeBy: none
+		sourceColumn: first_open_date
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	column last_close
 		dataType: double
-		formatString: #,0.00
-		summarizeBy: none
+		lineageTag: 438c411c-c5b9-4c2f-88a5-ddb2db499eea
+		summarizeBy: sum
+		sourceColumn: last_close
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	column price_date
 		dataType: dateTime
-		formatString: yyyy-mm-dd
+		formatString: Long Date
+		lineageTag: 60f210f4-e08c-426e-aa41-e5e476509f9f
 		summarizeBy: none
+		sourceColumn: price_date
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	column cost_value
 		dataType: double
-		formatString: #,0.00
-		summarizeBy: none
+		lineageTag: 4ec7c9cf-09b4-4208-a618-e6643c017709
+		summarizeBy: sum
+		sourceColumn: cost_value
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	column market_value
 		dataType: double
-		formatString: #,0.00
-		summarizeBy: none
+		lineageTag: f6512b17-0667-4ed8-b2b4-11f58ca14142
+		summarizeBy: sum
+		sourceColumn: market_value
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	column unrealized_pnl
 		dataType: double
-		formatString: #,0.00
-		summarizeBy: none
+		lineageTag: 1d195e15-7d78-47fc-9bea-bed2a244bbe8
+		summarizeBy: sum
+		sourceColumn: unrealized_pnl
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	column unrealized_pnl_pct
 		dataType: double
-		formatString: 0.00%;-0.00%;0.00%
-		summarizeBy: none
+		lineageTag: 92688675-6624-4364-91b8-25f49b73b6a5
+		summarizeBy: sum
+		sourceColumn: unrealized_pnl_pct
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	partition fact_positions = m
 		mode: import
@@ -62,3 +121,4 @@ table fact_positions
 					Typed = Table.TransformColumnTypes(Headers, {{"as_of", type date}, {"symbol", type text}, {"shares", type number}, {"avg_cost", type number}, {"first_open_date", type date}, {"last_close", type number}, {"price_date", type date}, {"cost_value", type number}, {"market_value", type number}, {"unrealized_pnl", type number}, {"unrealized_pnl_pct", type number}})
 				in
 					Typed
+

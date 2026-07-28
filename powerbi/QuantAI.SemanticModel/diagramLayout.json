@@ -1,0 +1,154 @@
+{
+  "version": "1.1.0",
+  "diagrams": [
+    {
+      "ordinal": 0,
+      "scrollPosition": {
+        "x": 0,
+        "y": 0
+      },
+      "nodes": [
+        {
+          "location": {
+            "x": 1099.0238868703459,
+            "y": 599.5684551548502
+          },
+          "nodeIndex": "_Measures",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 357.38519743121105,
+            "y": 570.84626641118859
+          },
+          "nodeIndex": "dim_date",
+          "size": {
+            "height": 272,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 338.30188889398261,
+            "y": 288.765694600751
+          },
+          "nodeIndex": "dim_symbol",
+          "size": {
+            "height": 200,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 606.04128447699031,
+            "y": 895.94955330205357
+          },
+          "nodeIndex": "fact_backtest_equity",
+          "size": {
+            "height": 200,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 865.023886870346,
+            "y": 1149.1369103097004
+          },
+          "nodeIndex": "fact_backtest_results",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 136.3344072463467,
+            "y": 896.40713056444929
+          },
+          "nodeIndex": "fact_event_odds",
+          "size": {
+            "height": 296,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 644.36867252404943,
+            "y": 275.50245191815065
+          },
+          "nodeIndex": "fact_news",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 70.676038455542255,
+            "y": 541.93427008592278
+          },
+          "nodeIndex": "fact_positions",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 50,
+            "y": 188.30850672376448
+          },
+          "nodeIndex": "fact_prices",
+          "size": {
+            "height": 300,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 571.16150698057481,
+            "y": -50
+          },
+          "nodeIndex": "fact_signals",
+          "size": {
+            "height": 272,
+            "width": 234
+          },
+          "zIndex": 0
+        },
+        {
+          "location": {
+            "x": 1383.0238868703459,
+            "y": 673.5684551548502
+          },
+          "nodeIndex": "qa_expected",
+          "size": {
+            "height": 152,
+            "width": 234
+          },
+          "zIndex": 0
+        }
+      ],
+      "name": "All tables",
+      "zoomValue": 100,
+      "pinKeyFieldsToTop": false,
+      "showExtraHeaderInfo": false,
+      "hideKeyFieldsWhenCollapsed": false,
+      "tablesLocked": false
+    }
+  ],
+  "selectedDiagram": "All tables",
+  "defaultDiagram": "All tables"
+}

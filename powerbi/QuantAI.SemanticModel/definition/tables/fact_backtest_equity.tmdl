@@ -1,28 +1,54 @@
 table fact_backtest_equity
+	lineageTag: 7f401c5c-097f-44ce-93ae-ea5c4201ecac
 
 	column run_id
 		dataType: string
+		lineageTag: c7797381-4868-4cfa-81c8-e9668e6d4c54
 		summarizeBy: none
+		sourceColumn: run_id
+
+		annotation SummarizationSetBy = Automatic
 
 	column date
 		dataType: dateTime
-		formatString: yyyy-mm-dd
+		formatString: Long Date
+		lineageTag: c00c3895-af0a-4ef4-91aa-9b2aac56b88c
 		summarizeBy: none
+		sourceColumn: date
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	column equity
 		dataType: double
-		formatString: #,0.00
-		summarizeBy: none
+		lineageTag: 74c4acf8-4ca0-4d1e-9917-5cae3d4fad51
+		summarizeBy: sum
+		sourceColumn: equity
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	column daily_return
 		dataType: double
-		formatString: 0.00%;-0.00%;0.00%
-		summarizeBy: none
+		lineageTag: 66d4eb05-f647-438f-a7fa-8cf65f93dcbb
+		summarizeBy: sum
+		sourceColumn: daily_return
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	column drawdown
 		dataType: double
-		formatString: 0.00%;-0.00%;0.00%
-		summarizeBy: none
+		lineageTag: ee6c118b-e63d-4b96-95f0-2398252b0ff8
+		summarizeBy: sum
+		sourceColumn: drawdown
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	partition fact_backtest_equity = m
 		mode: import
@@ -33,3 +59,4 @@ table fact_backtest_equity
 					Typed = Table.TransformColumnTypes(Headers, {{"run_id", type text}, {"date", type date}, {"equity", type number}, {"daily_return", type number}, {"drawdown", type number}})
 				in
 					Typed
+

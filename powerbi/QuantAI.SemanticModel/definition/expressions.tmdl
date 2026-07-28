@@ -1,5 +1,10 @@
 expression ExportFolder = "D:\Project\Stock\tableau\exports" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+	lineageTag: ed213d34-2939-4002-824a-7c6ff11d7b35
+
 	annotation PBI_ResultType = Text
 
 expression VerifyFolder = "D:\Project\Stock\powerbi\verify" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+	lineageTag: e320ab08-6fcf-4f15-8205-aef9836d1141
+
 	annotation PBI_ResultType = Text
+

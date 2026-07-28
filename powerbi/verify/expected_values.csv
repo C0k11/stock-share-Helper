@@ -51,4 +51,15 @@ sig_neutral,signal_strength == neutral,10
 news_total,fact_news rows,5581
 news_scored,fact_news rows with sentiment,122
 news_coverage,scored / total,0.02185988174
+rel_prices_20260727,fact_prices rows via dim_date=2026-07-27,33
+rel_composite_AAPL_202411,Composite Signal via dim_date.year_month=2024-11 + dim_symbol=AAPL,-0.23
+rel_composite_CRM_202411,Composite Signal via dim_date.year_month=2024-11 + dim_symbol=CRM,-0.2
+rel_composite_DRAM_202411,"Composite Signal DRAM 2024-11 - no rows, must be BLANK",BLANK
+rel_news_2026-07-24,fact_news rows via dim_date=2026-07-24,270
+rel_news_2026-07-25,fact_news rows via dim_date=2026-07-25,128
+rel_news_2026-07-26,fact_news rows via dim_date=2026-07-26,102
+rel_odds_20260715,fact_event_odds rows via dim_date=2026-07-15,165
+rel_positions_20260727,fact_positions rows via dim_date=2026-07-27,1
+rel_equity_20260727,fact_backtest_equity rows via dim_date=2026-07-27,1
+rel_news_SPY,fact_news rows via dim_symbol=SPY,120
 encoding_curly_quote_rows,event_title rows containing U+2019,55

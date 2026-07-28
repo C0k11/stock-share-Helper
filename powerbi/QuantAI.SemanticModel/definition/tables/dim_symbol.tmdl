@@ -1,28 +1,53 @@
 table dim_symbol
+	lineageTag: 39748dc1-8f9f-4807-9512-362814b0de41
 
 	column symbol
 		dataType: string
+		lineageTag: 57370a3b-ff5e-413c-934e-9c5bbf42c6ee
 		summarizeBy: none
-		isKey
+		sourceColumn: symbol
+
+		annotation SummarizationSetBy = Automatic
 
 	column first_price_date
 		dataType: dateTime
-		formatString: yyyy-mm-dd
+		formatString: Long Date
+		lineageTag: 30515935-44b8-4f63-9b65-18687f5807e1
 		summarizeBy: none
+		sourceColumn: first_price_date
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	column last_price_date
 		dataType: dateTime
-		formatString: yyyy-mm-dd
+		formatString: Long Date
+		lineageTag: 52721d40-a8d5-4abb-981c-3cdcad72fac7
 		summarizeBy: none
+		sourceColumn: last_price_date
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	column price_bars
 		dataType: int64
 		formatString: 0
-		summarizeBy: none
+		lineageTag: 1c78b98a-3dad-4ab9-88e2-3e062d5c4735
+		summarizeBy: sum
+		sourceColumn: price_bars
+
+		annotation SummarizationSetBy = Automatic
 
 	column is_currently_held
 		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: cdfd7dff-6ba0-4da6-b4b8-b6ec05920908
 		summarizeBy: none
+		sourceColumn: is_currently_held
+
+		annotation SummarizationSetBy = Automatic
 
 	partition dim_symbol = m
 		mode: import
@@ -33,3 +58,4 @@ table dim_symbol
 					Typed = Table.TransformColumnTypes(Headers, {{"symbol", type text}, {"first_price_date", type date}, {"last_price_date", type date}, {"price_bars", Int64.Type}, {"is_currently_held", type logical}})
 				in
 					Typed
+

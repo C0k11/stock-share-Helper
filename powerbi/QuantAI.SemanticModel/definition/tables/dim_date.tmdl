@@ -1,43 +1,78 @@
 table dim_date
-	dataCategory: Time
+	lineageTag: 8d752815-316f-4c6f-8c98-9fe59579266d
 
 	column date
 		dataType: dateTime
-		formatString: yyyy-mm-dd
+		formatString: Long Date
+		lineageTag: 32bee094-ec6f-4ec5-9626-fbbab5d116a9
 		summarizeBy: none
-		isKey
+		sourceColumn: date
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	column year
 		dataType: int64
 		formatString: 0
+		lineageTag: 9cd2b32c-8e7b-4016-9838-2b72e8e52714
 		summarizeBy: none
+		sourceColumn: year
+
+		annotation SummarizationSetBy = Automatic
 
 	column quarter
 		dataType: int64
 		formatString: 0
+		lineageTag: 2d0b7411-eeee-497d-9f4b-06052183df1d
 		summarizeBy: none
+		sourceColumn: quarter
+
+		annotation SummarizationSetBy = Automatic
 
 	column month
 		dataType: int64
 		formatString: 0
+		lineageTag: 2dc787cb-ec08-41cd-8267-ff8726d42f15
 		summarizeBy: none
+		sourceColumn: month
+
+		annotation SummarizationSetBy = Automatic
 
 	column year_month
 		dataType: string
+		lineageTag: 3fd9d241-f16c-4c08-9bb0-1787ce8f28b3
 		summarizeBy: none
+		sourceColumn: year_month
+
+		annotation SummarizationSetBy = Automatic
 
 	column day_of_week
 		dataType: int64
 		formatString: 0
+		lineageTag: d3dffbfb-704b-440b-904d-1bb485769b42
 		summarizeBy: none
+		sourceColumn: day_of_week
+
+		annotation SummarizationSetBy = Automatic
 
 	column is_trading_day
 		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: 41d7d41c-d65f-4345-bab0-5692501921c3
 		summarizeBy: none
+		sourceColumn: is_trading_day
+
+		annotation SummarizationSetBy = Automatic
 
 	column is_early_close
 		dataType: boolean
+		formatString: """TRUE"";""TRUE"";""FALSE"""
+		lineageTag: 98774e4a-3800-4310-9907-b1c0dc8c91d8
 		summarizeBy: none
+		sourceColumn: is_early_close
+
+		annotation SummarizationSetBy = Automatic
 
 	partition dim_date = m
 		mode: import
@@ -48,3 +83,4 @@ table dim_date
 					Typed = Table.TransformColumnTypes(Headers, {{"date", type date}, {"year", Int64.Type}, {"quarter", Int64.Type}, {"month", Int64.Type}, {"year_month", type text}, {"day_of_week", Int64.Type}, {"is_trading_day", type logical}, {"is_early_close", type logical}})
 				in
 					Typed
+

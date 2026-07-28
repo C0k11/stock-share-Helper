@@ -1,53 +1,103 @@
 table fact_prices
-
-	column symbol
-		dataType: string
-		summarizeBy: none
-
-	column date
-		dataType: dateTime
-		formatString: yyyy-mm-dd
-		summarizeBy: none
-
-	column open
-		dataType: double
-		summarizeBy: none
-
-	column high
-		dataType: double
-		summarizeBy: none
-
-	column low
-		dataType: double
-		summarizeBy: none
-
-	column close
-		dataType: double
-		summarizeBy: none
-
-	column volume
-		dataType: int64
-		formatString: #,0
-		summarizeBy: none
-
-	/// 每标的第一根 bar 为空（无前收可差分）——保持 blank，绝不替 0。
-	column daily_return
-		dataType: double
-		formatString: 0.00%;-0.00%;0.00%
-		summarizeBy: none
-
-	/// 每标的前 52 周为空（窗口不足）——保持 blank。
-	column pct_from_52w_high
-		dataType: double
-		formatString: 0.00%;-0.00%;0.00%
-		summarizeBy: none
+	lineageTag: c7dc098a-107e-4889-9f21-3681aea8e133
 
 	/// 直方图分箱（bin 0.005）：Power BI 原生 Group/Bin 是 GUI 态构件，
 	/// 计算列版本可入库可 diff，语义等价。
 	column ret_bin = ROUND ( fact_prices[daily_return] / 0.005, 0 ) * 0.005
 		dataType: double
 		formatString: 0.0%;-0.0%;0.0%
+		lineageTag: 21ce4347-f859-4c1d-9aa5-afbdb73f7df0
+		summarizeBy: sum
+
+		annotation SummarizationSetBy = Automatic
+
+	column symbol
+		dataType: string
+		lineageTag: 065394a9-cc08-4286-960e-2f5bba9cc4f9
 		summarizeBy: none
+		sourceColumn: symbol
+
+		annotation SummarizationSetBy = Automatic
+
+	column date
+		dataType: dateTime
+		formatString: Long Date
+		lineageTag: 0ff55c98-1a6e-41ff-9371-703ce73cd150
+		summarizeBy: none
+		sourceColumn: date
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
+
+	column open
+		dataType: double
+		lineageTag: 7db507f2-d3be-420f-a6d6-bdafb35bc867
+		summarizeBy: sum
+		sourceColumn: open
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column high
+		dataType: double
+		lineageTag: 3566b7e2-7544-4774-961b-0cd3adb05bcd
+		summarizeBy: sum
+		sourceColumn: high
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column low
+		dataType: double
+		lineageTag: 1dc668fd-76e3-4f53-898e-f60d3a1d42ab
+		summarizeBy: sum
+		sourceColumn: low
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column close
+		dataType: double
+		lineageTag: e10f8d09-2999-42b4-bd71-fee5474f40d1
+		summarizeBy: sum
+		sourceColumn: close
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column volume
+		dataType: int64
+		formatString: 0
+		lineageTag: 1196ec48-a749-44f0-9cc6-4cec487ce166
+		summarizeBy: sum
+		sourceColumn: volume
+
+		annotation SummarizationSetBy = Automatic
+
+	column daily_return
+		dataType: double
+		lineageTag: 1a5cd64a-6d2e-42a6-9116-c1252c7a535f
+		summarizeBy: sum
+		sourceColumn: daily_return
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
+	column pct_from_52w_high
+		dataType: double
+		lineageTag: 09a9d0fb-4e50-430d-8ed3-4f920ac5bc7e
+		summarizeBy: sum
+		sourceColumn: pct_from_52w_high
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	partition fact_prices = m
 		mode: import
@@ -58,3 +108,4 @@ table fact_prices
 					Typed = Table.TransformColumnTypes(Headers, {{"symbol", type text}, {"date", type date}, {"open", type number}, {"high", type number}, {"low", type number}, {"close", type number}, {"volume", Int64.Type}, {"daily_return", type number}, {"pct_from_52w_high", type number}})
 				in
 					Typed
+

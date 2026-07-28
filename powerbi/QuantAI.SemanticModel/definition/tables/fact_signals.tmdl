@@ -1,42 +1,78 @@
 table fact_signals
+	lineageTag: cce11bfc-da34-4c97-a0dd-da3896485f3a
 
 	column symbol
 		dataType: string
+		lineageTag: e04b8d8d-e5ac-4800-b8df-41d2883b98b3
 		summarizeBy: none
+		sourceColumn: symbol
+
+		annotation SummarizationSetBy = Automatic
 
 	column date
 		dataType: dateTime
-		formatString: yyyy-mm-dd
+		formatString: Long Date
+		lineageTag: 5ede4b79-dbba-4478-8a9b-b792d31793dc
 		summarizeBy: none
+		sourceColumn: date
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	column trend_signal
 		dataType: int64
 		formatString: 0
-		summarizeBy: none
+		lineageTag: 0e09d43d-6538-4bf7-8a21-2cb6c5fcb8b8
+		summarizeBy: sum
+		sourceColumn: trend_signal
+
+		annotation SummarizationSetBy = Automatic
 
 	column momentum_signal
 		dataType: int64
 		formatString: 0
-		summarizeBy: none
+		lineageTag: ac3583ed-87fd-45a2-b839-d831bcb7ee28
+		summarizeBy: sum
+		sourceColumn: momentum_signal
+
+		annotation SummarizationSetBy = Automatic
 
 	column ma_cross_signal
 		dataType: int64
 		formatString: 0
-		summarizeBy: none
+		lineageTag: 49d73e9d-550a-4fab-b5ca-fb8dcee1dab5
+		summarizeBy: sum
+		sourceColumn: ma_cross_signal
+
+		annotation SummarizationSetBy = Automatic
 
 	column breakout_signal
 		dataType: int64
 		formatString: 0
-		summarizeBy: none
+		lineageTag: 583cb1b9-0dee-4d4a-a087-440cada51418
+		summarizeBy: sum
+		sourceColumn: breakout_signal
+
+		annotation SummarizationSetBy = Automatic
 
 	column composite_signal
 		dataType: double
-		formatString: 0.00
-		summarizeBy: none
+		lineageTag: 322932f0-ca54-4819-be40-e7f196ba3488
+		summarizeBy: sum
+		sourceColumn: composite_signal
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	column signal_strength
 		dataType: string
+		lineageTag: ed5c3853-7af1-4880-b13e-462041fa8ec0
 		summarizeBy: none
+		sourceColumn: signal_strength
+
+		annotation SummarizationSetBy = Automatic
 
 	partition fact_signals = m
 		mode: import
@@ -47,3 +83,4 @@ table fact_signals
 					Typed = Table.TransformColumnTypes(Headers, {{"symbol", type text}, {"date", type date}, {"trend_signal", Int64.Type}, {"momentum_signal", Int64.Type}, {"ma_cross_signal", Int64.Type}, {"breakout_signal", Int64.Type}, {"composite_signal", type number}, {"signal_strength", type text}})
 				in
 					Typed
+

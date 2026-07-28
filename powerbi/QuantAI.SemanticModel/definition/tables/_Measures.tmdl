@@ -5,20 +5,7 @@
 /// 2) WINDOW_STDEV 是样本标准差 → STDEVX.S（ddof=1），不是 STDEVX.P；
 /// 3) 窗口不足 20 行返回 BLANK，绝不拿半截窗口算个像样的数。
 table _Measures
-
-	column '_'
-		dataType: string
-		isHidden
-		summarizeBy: none
-
-	partition _Measures = m
-		mode: import
-		source =
-				let
-					Source = Table.FromRows({}, type table [#"_" = text])
-				in
-					Source
-
+	lineageTag: dd77eedf-17ed-474d-89f7-f6cbc1980a09
 
 	measure 'Rolling Vol 20D (Ann)' =
 			VAR CurrentDate = MAX ( dim_date[date] )
@@ -38,6 +25,7 @@ table _Measures
 			    IF ( COUNTROWS ( Window20 ) = 20, STDEVX.S ( Rets, [@ret] ) * SQRT ( 252 ) )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Windowed
+		lineageTag: f6d0cfc6-3610-424a-9eab-27c12cc8e817
 
 	measure 'MA 20' =
 			VAR CurrentDate = MAX ( dim_date[date] )
@@ -49,6 +37,7 @@ table _Measures
 			RETURN IF ( COUNTROWS ( W ) = 20, AVERAGEX ( W, CALCULATE ( AVERAGE ( fact_prices[close] ) ) ) )
 		formatString: #,0.00
 		displayFolder: Windowed
+		lineageTag: ec9787ce-b9f7-4eb2-a983-241a5cc690e9
 
 	measure 'MA 50' =
 			VAR CurrentDate = MAX ( dim_date[date] )
@@ -60,6 +49,7 @@ table _Measures
 			RETURN IF ( COUNTROWS ( W ) = 50, AVERAGEX ( W, CALCULATE ( AVERAGE ( fact_prices[close] ) ) ) )
 		formatString: #,0.00
 		displayFolder: Windowed
+		lineageTag: fbc965a2-9ebe-4f4d-b22e-aaa188b5edb9
 
 	measure 'MA 200' =
 			VAR CurrentDate = MAX ( dim_date[date] )
@@ -71,6 +61,7 @@ table _Measures
 			RETURN IF ( COUNTROWS ( W ) = 200, AVERAGEX ( W, CALCULATE ( AVERAGE ( fact_prices[close] ) ) ) )
 		formatString: #,0.00
 		displayFolder: Windowed
+		lineageTag: 68e15960-4e1b-48cf-a017-3b36843b5b02
 
 	measure 'SPY Indexed 100' =
 			VAR CurDate = MAX ( fact_backtest_equity[date] )
@@ -85,6 +76,7 @@ table _Measures
 			RETURN DIVIDE ( Cur, Base ) * 100
 		formatString: 0.0
 		displayFolder: Windowed
+		lineageTag: 46eb8db8-977d-499e-8b5b-848b722950b8
 
 	measure 'Equity Indexed 100' =
 			VAR CurDate = MAX ( fact_backtest_equity[date] )
@@ -98,19 +90,22 @@ table _Measures
 			RETURN DIVIDE ( Cur, Base ) * 100
 		formatString: 0.0
 		displayFolder: Windowed
+		lineageTag: c9555a2b-0564-4b13-ab87-7966d93cd1c1
 
-
-	measure 'Close' = AVERAGE ( fact_prices[close] )
+	measure Close = AVERAGE ( fact_prices[close] )
 		formatString: #,0.00
 		displayFolder: Prices
+		lineageTag: 2f2d22c0-4a0b-4183-9da0-4c9b96f53736
 
-	measure 'Volume' = SUM ( fact_prices[volume] )
+	measure Volume = SUM ( fact_prices[volume] )
 		formatString: #,0
 		displayFolder: Prices
+		lineageTag: a67b92b2-5586-4c36-805f-92ca275117e2
 
 	measure 'Daily Return' = AVERAGE ( fact_prices[daily_return] )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Prices
+		lineageTag: aa989a7d-fcdb-45f8-aa20-14fb49c7c167
 
 	measure 'Last Close' =
 			VAR d = CALCULATE ( MAX ( fact_prices[date] ), ALLSELECTED ( dim_date ) )
@@ -118,6 +113,7 @@ table _Measures
 			                   fact_prices[date] = d )
 		formatString: #,0.00
 		displayFolder: Prices
+		lineageTag: deff7b32-d495-439a-94a3-f463eeedd3c2
 
 	measure 'Pct From 52W High (Latest)' =
 			VAR d = CALCULATE ( MAX ( fact_prices[date] ), ALLSELECTED ( dim_date ) )
@@ -125,32 +121,37 @@ table _Measures
 			                   REMOVEFILTERS ( dim_date ), fact_prices[date] = d )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Prices
+		lineageTag: e3fb1b2a-54b0-4705-823c-ee2126897887
 
 	measure 'Symbols Tracked' = DISTINCTCOUNT ( fact_prices[symbol] )
 		formatString: 0
 		displayFolder: Prices
+		lineageTag: 1d69b29d-8e19-4a9a-9777-5c7e175b0f00
 
 	measure 'Trading Days' = CALCULATE ( COUNTROWS ( dim_date ), dim_date[is_trading_day] = TRUE () )
 		formatString: 0
 		displayFolder: Prices
-
+		lineageTag: 24f02c63-5f63-4af1-807c-74a7231fc8a2
 
 	measure 'Worst Day' = MIN ( fact_prices[daily_return] )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Risk
+		lineageTag: 1da2d1f9-eb31-4d49-ba32-e7dec1c27010
 
 	measure 'Best Day' = MAX ( fact_prices[daily_return] )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Risk
+		lineageTag: d5274146-d0d7-4c5e-a949-aab448f63481
 
 	measure 'Return P05' = PERCENTILEX.INC ( fact_prices, fact_prices[daily_return], 0.05 )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Risk
-
+		lineageTag: 04f20bfd-902c-4154-a393-6697fe2df7fc
 
 	measure 'Latest As Of' = CALCULATE ( MAX ( fact_positions[as_of] ), REMOVEFILTERS () )
 		formatString: yyyy-mm-dd
 		displayFolder: Positions
+		lineageTag: e85f2bf7-5fac-4222-8551-2d63ccabbded
 
 	measure 'Market Value' =
 			VAR d = [Latest As Of]
@@ -158,6 +159,7 @@ table _Measures
 			            fact_positions[as_of] = d )
 		formatString: #,0.00
 		displayFolder: Positions
+		lineageTag: f24bacb5-8620-4785-89e2-b49bb7984f2b
 
 	measure 'Cost Value' =
 			VAR d = [Latest As Of]
@@ -165,6 +167,7 @@ table _Measures
 			            fact_positions[as_of] = d )
 		formatString: #,0.00
 		displayFolder: Positions
+		lineageTag: bb1b25af-5e5a-4bad-b444-7dd7b352b34e
 
 	measure 'Unrealized PnL' =
 			VAR d = [Latest As Of]
@@ -172,100 +175,120 @@ table _Measures
 			            fact_positions[as_of] = d )
 		formatString: #,0.00
 		displayFolder: Positions
+		lineageTag: b97b5929-623e-4241-b57f-3c3a653f317e
 
 	measure 'Unrealized PnL %' = DIVIDE ( [Unrealized PnL], ABS ( [Cost Value] ) )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Positions
+		lineageTag: b2462aab-2033-4516-9913-b3ac256fe2bc
 
 	measure 'PnL Colour' = IF ( [Unrealized PnL] >= 0, "#26A69A", "#EF5350" )
 		displayFolder: Positions
-
+		lineageTag: cde3979a-2559-4f88-a014-cedfedb81f6c
 
 	measure 'Composite Signal' = AVERAGE ( fact_signals[composite_signal] )
 		formatString: 0.00
 		displayFolder: Signals
+		lineageTag: 1c243db5-bc69-4967-8183-5b1b8cefd3e4
 
 	measure 'Signal Days' = COUNTROWS ( fact_signals )
 		formatString: #,0
 		displayFolder: Signals
+		lineageTag: 5a1decdf-2bb5-46e8-97b3-4bcf2958a234
 
 	measure 'Strong Long %' =
 			DIVIDE ( CALCULATE ( COUNTROWS ( fact_signals ),
 			         fact_signals[signal_strength] = "strong_long" ), COUNTROWS ( fact_signals ) )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Signals
+		lineageTag: b957a9c9-459f-4e74-9168-46acb4f5a523
 
 	measure 'Strong Short %' =
 			DIVIDE ( CALCULATE ( COUNTROWS ( fact_signals ),
 			         fact_signals[signal_strength] = "strong_short" ), COUNTROWS ( fact_signals ) )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Signals
+		lineageTag: 53d0ade5-bd1d-411a-8df8-b36ac3efe531
 
-
-	measure 'Sharpe' = MAX ( fact_backtest_results[sharpe] )
+	measure Sharpe = MAX ( fact_backtest_results[sharpe] )
 		formatString: 0.00
 		displayFolder: Backtest
+		lineageTag: 6aad7ab6-236e-4425-8ff1-ba845703927e
 
-	measure 'CAGR' = MAX ( fact_backtest_results[cagr] )
+	measure CAGR = MAX ( fact_backtest_results[cagr] )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Backtest
+		lineageTag: 34f11863-4549-41b7-9e99-69e79f412376
 
 	measure 'Annual Volatility' = MAX ( fact_backtest_results[annual_volatility] )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Backtest
+		lineageTag: 59b56b7c-f99a-4b27-9e5b-b5ccf8d0f20b
 
 	measure 'Max Drawdown' = MAX ( fact_backtest_results[max_drawdown] )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Backtest
+		lineageTag: 4ef243ac-f045-4342-b690-619824ea0ee5
 
 	measure 'Win Rate' = MAX ( fact_backtest_results[win_rate] )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Backtest
+		lineageTag: 56f06001-f36b-4de7-91ea-89596f66b7e9
 
 	measure 'Total Return' = MAX ( fact_backtest_results[total_return] )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Backtest
+		lineageTag: 1e1586c8-0d0e-4734-9248-aa716a31ceaf
 
-	measure 'Drawdown' = MIN ( fact_backtest_equity[drawdown] )
+	measure Drawdown = MIN ( fact_backtest_equity[drawdown] )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Backtest
-
+		lineageTag: d686d35a-dc77-403f-b954-55ffd508c580
 
 	measure 'Price Rows' = COUNTROWS ( fact_prices )
 		formatString: #,0
 		displayFolder: Risk
+		lineageTag: dffba7b7-2b79-4c5d-956f-aa5d75e242af
 
 	measure 'News Symbols' = DISTINCTCOUNT ( fact_news[symbol] )
 		formatString: 0
 		displayFolder: News & Events
+		lineageTag: 1bfa115f-cd83-43b1-8923-c9e0626e68ca
 
 	measure 'Avg Yes Price' = AVERAGE ( fact_event_odds[yes_price] )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: News & Events
+		lineageTag: 9f58699a-4307-4e3e-8397-7f98e726e4f1
 
 	measure 'Odds Markets' = DISTINCTCOUNT ( fact_event_odds[market_id] )
 		formatString: 0
 		displayFolder: News & Events
+		lineageTag: 9813d41a-71e4-4741-b5f3-3ddca67372ca
 
 	measure 'News Count' = COUNTROWS ( fact_news )
 		formatString: #,0
 		displayFolder: News & Events
+		lineageTag: e9f12ed2-ce02-4cac-a420-298f2b482823
 
 	measure 'Scored News' = CALCULATE ( COUNTROWS ( fact_news ), NOT ISBLANK ( fact_news[sentiment] ) )
 		formatString: #,0
 		displayFolder: News & Events
+		lineageTag: 5bb3a325-b5dd-46f4-add0-032f9dd8f0b5
 
 	measure 'Scored Coverage %' = DIVIDE ( [Scored News], [News Count] )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: News & Events
+		lineageTag: 8e8315e1-a481-43b2-8261-e759e696d976
 
 	measure 'Avg Sentiment' = AVERAGE ( fact_news[sentiment] )
 		formatString: 0.00
 		displayFolder: News & Events
+		lineageTag: 0a47ec93-7bd3-4a06-981a-b6a481ad7dec
 
 	measure 'Odds Volume 24h' = SUM ( fact_event_odds[volume_24h] )
 		formatString: #,0.00
 		displayFolder: News & Events
+		lineageTag: 7378179a-cbd7-48e2-a4b5-fba6c1e90935
 
 	measure 'Latest Yes Price' =
 			VAR d = CALCULATE ( MAX ( fact_event_odds[as_of] ), ALLSELECTED ( dim_date ) )
@@ -273,7 +296,7 @@ table _Measures
 			                   REMOVEFILTERS ( dim_date ), fact_event_odds[as_of] = d )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: News & Events
-
+		lineageTag: 505d3825-d64f-41da-ba94-7bae3fb56e4e
 
 	measure 'QA Actual Value' =
 			VAR cid = SELECTEDVALUE ( qa_expected[check_id] )
@@ -338,9 +361,21 @@ table _Measures
 			        "news_coverage", CALCULATE ( [Scored Coverage %], REMOVEFILTERS () ),
 			        "encoding_curly_quote_rows",
 			            CALCULATE ( COUNTROWS ( FILTER ( fact_event_odds, CONTAINSSTRING ( fact_event_odds[event_title], UNICHAR ( 8217 ) ) ) ), REMOVEFILTERS () ),
+			        "rel_prices_20260727", CALCULATE ( COUNTROWS ( fact_prices ), REMOVEFILTERS (), dim_date[date] = DATE ( 2026, 7, 27 ) ),
+			        "rel_composite_AAPL_202411", CALCULATE ( [Composite Signal], REMOVEFILTERS (), dim_date[year_month] = "2024-11", dim_symbol[symbol] = "AAPL" ),
+			        "rel_composite_CRM_202411", CALCULATE ( [Composite Signal], REMOVEFILTERS (), dim_date[year_month] = "2024-11", dim_symbol[symbol] = "CRM" ),
+			        "rel_composite_DRAM_202411", CALCULATE ( [Composite Signal], REMOVEFILTERS (), dim_date[year_month] = "2024-11", dim_symbol[symbol] = "DRAM" ),
+			        "rel_news_2026-07-24", CALCULATE ( COUNTROWS ( fact_news ), REMOVEFILTERS (), dim_date[date] = DATE ( 2026, 7, 24 ) ),
+			        "rel_news_2026-07-25", CALCULATE ( COUNTROWS ( fact_news ), REMOVEFILTERS (), dim_date[date] = DATE ( 2026, 7, 25 ) ),
+			        "rel_news_2026-07-26", CALCULATE ( COUNTROWS ( fact_news ), REMOVEFILTERS (), dim_date[date] = DATE ( 2026, 7, 26 ) ),
+			        "rel_odds_20260715", CALCULATE ( COUNTROWS ( fact_event_odds ), REMOVEFILTERS (), dim_date[date] = DATE ( 2026, 7, 15 ) ),
+			        "rel_positions_20260727", CALCULATE ( COUNTROWS ( fact_positions ), REMOVEFILTERS (), dim_date[date] = DATE ( 2026, 7, 27 ) ),
+			        "rel_equity_20260727", CALCULATE ( COUNTROWS ( fact_backtest_equity ), REMOVEFILTERS (), dim_date[date] = DATE ( 2026, 7, 27 ) ),
+			        "rel_news_SPY", CALCULATE ( COUNTROWS ( fact_news ), REMOVEFILTERS (), dim_symbol[symbol] = "SPY" ),
 			        BLANK ()
 			    )
 		displayFolder: QA
+		lineageTag: ec5c3a20-5445-48a0-a0e7-88f16f321f2c
 
 	measure 'QA Status' =
 			VAR cid = SELECTEDVALUE ( qa_expected[check_id] )
@@ -351,12 +386,15 @@ table _Measures
 			        cid = "rowcount_fact_trades", "SKIPPED — not loaded by design (source has 0 rows)",
 			        cid = "pos_latest_as_of",
 			            IF ( FORMAT ( [Latest As Of], "yyyy-MM-dd" ) = expT, "PASS", "FAIL" ),
+			        expT = "BLANK",
+			            IF ( ISBLANK ( [QA Actual Value] ), "PASS", "FAIL — expected BLANK, got a value" ),
 			        ISBLANK ( [QA Actual Value] ), "FAIL — actual is blank",
 			        ABS ( [QA Actual Value] - VALUE ( expT ) )
 			            <= 0.000001 * MAX ( ABS ( VALUE ( expT ) ), 0.000001 ), "PASS",
 			        "FAIL"
 			    )
 		displayFolder: QA
+		lineageTag: bb808063-2e5a-4ebf-ab2d-a22891398a8b
 
 	measure 'QA Actual (display)' =
 			VAR cid = SELECTEDVALUE ( qa_expected[check_id] )
@@ -365,12 +403,31 @@ table _Measures
 			         FORMAT ( [Latest As Of], "yyyy-MM-dd" ),
 			         FORMAT ( [QA Actual Value], "0.##########" ) )
 		displayFolder: QA
+		lineageTag: ce30aa86-0b4f-4e30-90d8-75247340d0e3
 
-	measure 'QA Pass Count' =
-			COUNTROWS ( FILTER ( VALUES ( qa_expected[check_id] ), [QA Status] = "PASS" ) )
+	measure 'QA Pass Count' = COUNTROWS ( FILTER ( VALUES ( qa_expected[check_id] ), [QA Status] = "PASS" ) )
 		formatString: 0
 		displayFolder: QA
+		lineageTag: db2ed6e9-daf8-43d7-97c8-404cba56c16f
 
 	measure 'QA Total Count' = COUNTROWS ( qa_expected )
 		formatString: 0
 		displayFolder: QA
+		lineageTag: b160d5d8-abd2-4722-9af5-820d4451f78c
+
+	column _
+		dataType: string
+		lineageTag: 02debf0e-c284-45a1-8471-e9fbca0846db
+		summarizeBy: none
+		sourceColumn: _
+
+		annotation SummarizationSetBy = Automatic
+
+	partition _Measures = m
+		mode: import
+		source =
+				let
+					Source = Table.FromRows({}, type table [#"_" = text])
+				in
+					Source
+

@@ -20,24 +20,88 @@
   "center": "#1B1B1F",
   "minimum": "#EF5350",
   "textClasses": {
-    "callout": { "color": "#E8E8EC", "fontFace": "Segoe UI" },
-    "title": { "color": "#E8E8EC", "fontFace": "Segoe UI Semibold" },
-    "header": { "color": "#B8B8C0", "fontFace": "Segoe UI" },
-    "label": { "color": "#B8B8C0", "fontFace": "Segoe UI" }
+    "callout": {
+      "color": "#E8E8EC",
+      "fontFace": "Segoe UI"
+    },
+    "title": {
+      "color": "#E8E8EC",
+      "fontFace": "Segoe UI Semibold"
+    },
+    "header": {
+      "color": "#B8B8C0",
+      "fontFace": "Segoe UI"
+    },
+    "label": {
+      "color": "#B8B8C0",
+      "fontFace": "Segoe UI"
+    }
   },
   "visualStyles": {
     "*": {
       "*": {
-        "background": [{ "color": { "solid": { "color": "#1B1B1F" } }, "transparency": 0 }],
-        "border": [{ "show": false }],
-        "title": [{ "fontColor": { "solid": { "color": "#E8E8EC" } }, "background": { "solid": { "color": "#1B1B1F" } } }],
-        "labels": [{ "color": { "solid": { "color": "#B8B8C0" } } }]
+        "background": [
+          {
+            "color": {
+              "solid": {
+                "color": "#1B1B1F"
+              }
+            },
+            "transparency": 0
+          }
+        ],
+        "border": [
+          {
+            "show": false
+          }
+        ],
+        "title": [
+          {
+            "fontColor": {
+              "solid": {
+                "color": "#E8E8EC"
+              }
+            },
+            "background": {
+              "solid": {
+                "color": "#1B1B1F"
+              }
+            }
+          }
+        ],
+        "labels": [
+          {
+            "color": {
+              "solid": {
+                "color": "#B8B8C0"
+              }
+            }
+          }
+        ]
       }
     },
     "page": {
       "*": {
-        "background": [{ "color": { "solid": { "color": "#1B1B1F" } }, "transparency": 0 }],
-        "outspace": [{ "color": { "solid": { "color": "#141417" } }, "transparency": 0 }]
+        "background": [
+          {
+            "color": {
+              "solid": {
+                "color": "#1B1B1F"
+              }
+            },
+            "transparency": 0
+          }
+        ],
+        "outspace": [
+          {
+            "color": {
+              "solid": {
+                "color": "#141417"
+              }
+            },
+            "transparency": 0
+          }
+        ]
       }
     }
   }

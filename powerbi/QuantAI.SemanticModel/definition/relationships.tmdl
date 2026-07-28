@@ -1,4 +1,20 @@
-relationship date_to_prices
+relationship AutoDetected_89167724-f533-4275-82a2-7c7bb4c1f2c1
+	fromColumn: fact_prices.symbol
+	toColumn: dim_symbol.symbol
+
+relationship AutoDetected_6cd90557-565c-4147-9b8a-a50f037c05c4
+	fromColumn: fact_signals.symbol
+	toColumn: dim_symbol.symbol
+
+relationship AutoDetected_c18e0c70-624b-4d5d-96b5-993c52184f5f
+	fromColumn: fact_positions.symbol
+	toColumn: dim_symbol.symbol
+
+relationship AutoDetected_0597545b-8acd-41a5-b7d1-164655f45d99
+	fromColumn: fact_backtest_equity.run_id
+	toColumn: fact_backtest_results.run_id
+
+relationship 97236d94-16df-b5aa-7d22-c91a7ed85599
 	fromColumn: fact_prices.date
 	toColumn: dim_date.date
 
@@ -22,22 +38,7 @@ relationship date_to_event_odds
 	fromColumn: fact_event_odds.as_of
 	toColumn: dim_date.date
 
-relationship symbol_to_prices
-	fromColumn: fact_prices.symbol
-	toColumn: dim_symbol.symbol
-
-relationship symbol_to_signals
-	fromColumn: fact_signals.symbol
-	toColumn: dim_symbol.symbol
-
-relationship symbol_to_positions
-	fromColumn: fact_positions.symbol
-	toColumn: dim_symbol.symbol
-
 relationship symbol_to_news
 	fromColumn: fact_news.symbol
 	toColumn: dim_symbol.symbol
 
-relationship run_to_equity
-	fromColumn: fact_backtest_equity.run_id
-	toColumn: fact_backtest_results.run_id

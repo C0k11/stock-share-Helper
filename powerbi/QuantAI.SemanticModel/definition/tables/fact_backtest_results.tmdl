@@ -1,70 +1,132 @@
 table fact_backtest_results
+	lineageTag: fd528a76-46cc-4ab4-80a0-ec0ff2d18033
 
 	column run_id
 		dataType: string
+		lineageTag: d3de8d71-26ff-4059-b971-e8da0af0c837
 		summarizeBy: none
-		isKey
+		sourceColumn: run_id
+
+		annotation SummarizationSetBy = Automatic
 
 	column strategy
 		dataType: string
+		lineageTag: 8f229bda-3cea-4005-b777-5cf5da53e412
 		summarizeBy: none
+		sourceColumn: strategy
+
+		annotation SummarizationSetBy = Automatic
 
 	column symbol
 		dataType: string
+		lineageTag: 95aa5e75-eff5-4340-902a-882a371df00c
 		summarizeBy: none
+		sourceColumn: symbol
+
+		annotation SummarizationSetBy = Automatic
 
 	column fill_timing
 		dataType: string
+		lineageTag: a8c0938e-810a-4e64-b0a9-861130c49096
 		summarizeBy: none
+		sourceColumn: fill_timing
+
+		annotation SummarizationSetBy = Automatic
 
 	column total_return
 		dataType: double
-		formatString: 0.00%;-0.00%;0.00%
+		lineageTag: 5ad251f9-18ca-4460-8614-12f2eed1808b
 		summarizeBy: none
+		sourceColumn: total_return
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	column cagr
 		dataType: double
-		formatString: 0.00%;-0.00%;0.00%
+		lineageTag: 8bdf0102-5f94-4e1e-9a58-f77d79b1f284
 		summarizeBy: none
+		sourceColumn: cagr
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	column annual_volatility
 		dataType: double
-		formatString: 0.00%;-0.00%;0.00%
+		lineageTag: f1b7dc95-58f1-48e0-b621-044616b192e8
 		summarizeBy: none
+		sourceColumn: annual_volatility
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	column sharpe
 		dataType: double
-		formatString: 0.00
+		lineageTag: 809ead5e-16e8-4afb-a131-fbdd1d2b34e8
 		summarizeBy: none
+		sourceColumn: sharpe
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	column max_drawdown
 		dataType: double
-		formatString: 0.00%;-0.00%;0.00%
+		lineageTag: 1e726527-3b99-4b5d-aa33-9bc975b0d4d3
 		summarizeBy: none
+		sourceColumn: max_drawdown
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	column win_rate
 		dataType: double
-		formatString: 0.00%;-0.00%;0.00%
+		lineageTag: 32d58e69-e6ce-414e-867c-5b03afc09908
 		summarizeBy: none
+		sourceColumn: win_rate
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	column total_turnover
 		dataType: double
-		formatString: 0.00
+		lineageTag: 12c16838-7c88-4135-801a-b30f59f9ccae
 		summarizeBy: none
+		sourceColumn: total_turnover
 
-	/// 带 -04:00 时区偏移，纯展示——Text 保真，绝不静默转 Date/Time 丢偏移。
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
+
 	column start_date
 		dataType: string
+		lineageTag: 839df407-5829-4c55-ae01-0ba1ade5fdab
 		summarizeBy: none
+		sourceColumn: start_date
+
+		annotation SummarizationSetBy = Automatic
 
 	column end_date
 		dataType: string
+		lineageTag: 0b3eddc8-34ef-4045-ba6a-84e77b85b7b8
 		summarizeBy: none
+		sourceColumn: end_date
+
+		annotation SummarizationSetBy = Automatic
 
 	column trading_days
 		dataType: int64
 		formatString: 0
+		lineageTag: c2f08944-4078-4668-b218-49dfedb2597c
 		summarizeBy: none
+		sourceColumn: trading_days
+
+		annotation SummarizationSetBy = Automatic
 
 	partition fact_backtest_results = m
 		mode: import
@@ -75,3 +137,4 @@ table fact_backtest_results
 					Typed = Table.TransformColumnTypes(Headers, {{"run_id", type text}, {"strategy", type text}, {"symbol", type text}, {"fill_timing", type text}, {"total_return", type number}, {"cagr", type number}, {"annual_volatility", type number}, {"sharpe", type number}, {"max_drawdown", type number}, {"win_rate", type number}, {"total_turnover", type number}, {"start_date", type text}, {"end_date", type text}, {"trading_days", Int64.Type}})
 				in
 					Typed
+

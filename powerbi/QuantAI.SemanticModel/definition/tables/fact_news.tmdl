@@ -1,49 +1,91 @@
 table fact_news
+	lineageTag: 3acfb27a-4992-4f03-bc39-e2b89f970066
 
 	column link
 		dataType: string
+		lineageTag: 6060e7c0-73c7-4a86-bae6-26c4ebfd2dc7
 		summarizeBy: none
+		sourceColumn: link
+
+		annotation SummarizationSetBy = Automatic
 
 	column symbol
 		dataType: string
+		lineageTag: 5173af07-1ded-46b3-a912-dbc96e5fcef5
 		summarizeBy: none
+		sourceColumn: symbol
+
+		annotation SummarizationSetBy = Automatic
 
 	column title
 		dataType: string
+		lineageTag: 15ea57ca-c345-4aba-ada6-49ff408c8406
 		summarizeBy: none
+		sourceColumn: title
+
+		annotation SummarizationSetBy = Automatic
 
 	column summary
 		dataType: string
+		lineageTag: 0611954e-025a-461b-a12e-9c4c080cd325
 		summarizeBy: none
+		sourceColumn: summary
+
+		annotation SummarizationSetBy = Automatic
 
 	column date
 		dataType: dateTime
-		formatString: yyyy-mm-dd
+		formatString: Long Date
+		lineageTag: 639a84d4-623f-493c-a126-fabf0f783088
 		summarizeBy: none
+		sourceColumn: date
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation UnderlyingDateTimeDataType = Date
 
 	column published
 		dataType: dateTime
-		formatString: yyyy-mm-dd hh:nn:ss
+		formatString: General Date
+		lineageTag: 146e87bb-2cf4-4eae-a490-7686f898c642
 		summarizeBy: none
+		sourceColumn: published
+
+		annotation SummarizationSetBy = Automatic
 
 	column source
 		dataType: string
+		lineageTag: 8645a5d4-090a-46ea-b22d-8cc7c8a4dac6
 		summarizeBy: none
+		sourceColumn: source
 
-	/// 5,581 行里只有 122 行有值——覆盖率必须上卡片，均值绝不冒充全体结论。
+		annotation SummarizationSetBy = Automatic
+
 	column sentiment
 		dataType: double
-		formatString: 0.00
-		summarizeBy: none
+		lineageTag: c2b570ab-6e4f-4b0a-b927-dc71aee8301a
+		summarizeBy: sum
+		sourceColumn: sentiment
+
+		annotation SummarizationSetBy = Automatic
+
+		annotation PBI_FormatHint = {"isGeneralNumber":true}
 
 	column sentiment_label
 		dataType: string
+		lineageTag: 793c6fda-4f62-4c8a-8376-ded4baa85477
 		summarizeBy: none
+		sourceColumn: sentiment_label
 
-	/// 带微秒，纯展示——Text 保真。
+		annotation SummarizationSetBy = Automatic
+
 	column scored_at
 		dataType: string
+		lineageTag: 30c28105-0c53-40ee-8654-13883a456178
 		summarizeBy: none
+		sourceColumn: scored_at
+
+		annotation SummarizationSetBy = Automatic
 
 	partition fact_news = m
 		mode: import
@@ -54,3 +96,4 @@ table fact_news
 					Typed = Table.TransformColumnTypes(Headers, {{"link", type text}, {"symbol", type text}, {"title", type text}, {"summary", type text}, {"date", type date}, {"published", type datetime}, {"source", type text}, {"sentiment", type number}, {"sentiment_label", type text}, {"scored_at", type text}})
 				in
 					Typed
+

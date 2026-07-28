@@ -1,19 +1,30 @@
 table qa_expected
 	isHidden
+	lineageTag: 1b25cc24-d6b6-4512-a508-7ce9a5dd4c05
 
 	column check_id
 		dataType: string
+		lineageTag: bc8f7799-ce0a-4f38-aff1-64d08a3cc501
 		summarizeBy: none
-		isKey
+		sourceColumn: check_id
+
+		annotation SummarizationSetBy = Automatic
 
 	column description
 		dataType: string
+		lineageTag: 0870a18e-9925-4b97-980d-9787b0c63eb0
 		summarizeBy: none
+		sourceColumn: description
 
-	/// 期望值保持文本原样（数值/日期混合），比较在 QA 度量里做。
+		annotation SummarizationSetBy = Automatic
+
 	column expected
 		dataType: string
+		lineageTag: b5b5110f-496a-43a7-ad73-235164e45183
 		summarizeBy: none
+		sourceColumn: expected
+
+		annotation SummarizationSetBy = Automatic
 
 	partition qa_expected = m
 		mode: import
@@ -24,3 +35,4 @@ table qa_expected
 					Typed = Table.TransformColumnTypes(Headers, {{"check_id", type text}, {"description", type text}, {"expected", type text}})
 				in
 					Typed
+

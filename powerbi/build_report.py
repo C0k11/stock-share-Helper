@@ -64,6 +64,62 @@ def agg(entity_alias: str, prop: str, entity: str, fn: int = 1) -> dict:
     return {"kind": "agg", "alias": entity_alias, "prop": prop, "entity": entity, "fn": fn}
 
 
+def in_filter(entity: str, prop: str, values: list[str]) -> dict:
+    """视觉级 In 过滤（默认标的选择）。"""
+    return {
+        "expression": {"Column": {"Expression": {"SourceRef": {"Entity": entity}}, "Property": prop}},
+        "filter": {
+            "Version": 2,
+            "From": [{"Name": "s", "Entity": entity, "Type": 0}],
+            "Where": [{"Condition": {"In": {
+                "Expressions": [{"Column": {"Expression": {"SourceRef": {"Source": "s"}}, "Property": prop}}],
+                "Values": [[{"Literal": {"Value": f"'{v}'"}}] for v in values],
+            }}}],
+        },
+        "type": "Categorical",
+        "howCreated": 1,
+    }
+
+
+def diverging_fill(measure_prop: str, negative: str = "#EF5350", center: str = "#1B1B1F",
+                   positive: str = "#26A69A", three_stop: bool = True) -> dict:
+    """dataPoint 填色的发散色阶（以 0 居中）。"""
+    rule: dict = {
+        "linearGradient3": {
+            "min": {"color": negative},
+            "mid": {"color": center},
+            "max": {"color": positive},
+            "midValue": 0,
+        }
+    } if three_stop else {
+        "linearGradient2": {
+            "min": {"color": negative},
+            "max": {"color": center},
+        }
+    }
+    return {
+        "dataPoint": [{"properties": {"fill": {"solid": {"color": {"expr": {"FillRule": {
+            "Input": {"Measure": {"Expression": {"SourceRef": {"Entity": M}}, "Property": measure_prop}},
+            "FillRule": rule,
+        }}}}}}}]
+    }
+
+
+def diverging_back(measure_prop: str) -> dict:
+    """矩阵值单元格背景的发散色阶（0 居中：负红/正绿）。"""
+    return {
+        "values": [{"properties": {"backColor": {"solid": {"color": {"expr": {"FillRule": {
+            "Input": {"Measure": {"Expression": {"SourceRef": {"Entity": M}}, "Property": measure_prop}},
+            "FillRule": {"linearGradient3": {
+                "min": {"color": "#EF5350"},
+                "mid": {"color": "#1B1B1F"},
+                "max": {"color": "#26A69A"},
+                "midValue": 0,
+            }},
+        }}}}}}}]
+    }
+
+
 def bool_filter(entity: str, prop: str, value: str = "true") -> dict:
     """视觉级布尔过滤（如 dim_date.is_trading_day = true）。"""
     return {
@@ -144,10 +200,15 @@ def section(name: str, display: str, ordinal: int, visuals: list[dict], hidden: 
 
 
 # --------------------------------------------------------------------------- #
-# 字段速记
+# 字段速记 / 通用样式
 # --------------------------------------------------------------------------- #
 def d_date() -> dict: return col("d", "date", "dim_date")
 def s_sym() -> dict: return col("s", "symbol", "dim_symbol")
+
+
+# 卡片数值防裁切：显式压字号（callout 默认 45pt 在窄卡上被标题挤出裁切）。
+CARD_LABEL = {"labels": [{"properties": {"fontSize": {"expr": {"Literal": {"Value": "22D"}}}}}]}
+CARD_LABEL_SM = {"labels": [{"properties": {"fontSize": {"expr": {"Literal": {"Value": "18D"}}}}}]}
 
 
 # --------------------------------------------------------------------------- #
@@ -161,25 +222,32 @@ def market_page() -> dict:
                {"Values": [s_sym()]}),
         visual("mo_slicer_trading", "slicer", 580, 20, 200, 70,
                {"Values": [col("d", "is_trading_day", "dim_date")]}),
-        visual("mo_card_symbols", "card", 800, 20, 150, 70,
-               {"Values": [mea("Symbols Tracked")]}, title="Symbols"),
-        visual("mo_card_tdays", "card", 960, 20, 150, 70,
-               {"Values": [mea("Trading Days")]}, title="Trading days"),
-        visual("mo_card_mv", "card", 20, 100, 240, 90,
-               {"Values": [mea("Market Value")]}, title="Position market value (latest)"),
-        visual("mo_card_cost", "card", 270, 100, 240, 90,
-               {"Values": [mea("Cost Value")]}, title="Position cost (latest)"),
-        visual("mo_card_pnl", "card", 520, 100, 240, 90,
-               {"Values": [mea("Unrealized PnL")]}, title="Unrealized PnL (latest)"),
-        visual("mo_card_pnlpct", "card", 770, 100, 240, 90,
-               {"Values": [mea("Unrealized PnL %")]}, title="Unrealized PnL %"),
-        visual("mo_close_line", "lineChart", 20, 200, 740, 300,
+        visual("mo_card_symbols", "card", 800, 20, 220, 74,
+               {"Values": [mea("Symbols Tracked")]}, title="Symbols",
+               extra_objects=CARD_LABEL_SM),
+        visual("mo_card_tdays", "card", 1030, 20, 220, 74,
+               {"Values": [mea("Trading Days")]}, title="Trading days",
+               extra_objects=CARD_LABEL_SM),
+        visual("mo_card_mv", "card", 20, 100, 240, 110,
+               {"Values": [mea("Market Value")]}, title="Position market value (latest)",
+               extra_objects=CARD_LABEL),
+        visual("mo_card_cost", "card", 270, 100, 240, 110,
+               {"Values": [mea("Cost Value")]}, title="Position cost (latest)",
+               extra_objects=CARD_LABEL),
+        visual("mo_card_pnl", "card", 520, 100, 240, 110,
+               {"Values": [mea("Unrealized PnL")]}, title="Unrealized PnL (latest)",
+               extra_objects=CARD_LABEL),
+        visual("mo_card_pnlpct", "card", 770, 100, 240, 110,
+               {"Values": [mea("Unrealized PnL %")]}, title="Unrealized PnL %",
+               extra_objects=CARD_LABEL),
+        visual("mo_close_line", "lineChart", 20, 220, 740, 290,
                {"Category": [d_date()], "Series": [s_sym()], "Y": [mea("Close")]},
-               title="Close over time by symbol"),
-        visual("mo_52w_bar", "barChart", 780, 200, 480, 300,
+               title="Close over time by symbol (default SPY/QQQ/DIA - use slicer for more)",
+               filters=[in_filter("dim_symbol", "symbol", ["SPY", "QQQ", "DIA"])]),
+        visual("mo_52w_bar", "barChart", 780, 220, 480, 290,
                {"Category": [s_sym()], "Y": [mea("Pct From 52W High (Latest)")]},
                title="% from 52-week high (latest)"),
-        visual("mo_table", "tableEx", 20, 510, 1240, 190,
+        visual("mo_table", "tableEx", 20, 520, 1240, 180,
                {"Values": [
                    s_sym(),
                    mea("Last Close"),
@@ -199,14 +267,17 @@ def market_page() -> dict:
 # --------------------------------------------------------------------------- #
 def signals_page() -> dict:
     visuals = [
-        visual("sig_card_long", "card", 20, 20, 220, 90,
-               {"Values": [mea("Strong Long %")]}, title="strong_long share"),
-        visual("sig_card_short", "card", 260, 20, 220, 90,
-               {"Values": [mea("Strong Short %")]}, title="strong_short share"),
+        visual("sig_card_long", "card", 20, 20, 220, 100,
+               {"Values": [mea("Strong Long %")]}, title="strong_long share",
+               extra_objects=CARD_LABEL),
+        visual("sig_card_short", "card", 260, 20, 220, 100,
+               {"Values": [mea("Strong Short %")]}, title="strong_short share",
+               extra_objects=CARD_LABEL),
         visual("sig_matrix", "pivotTable", 20, 130, 620, 420,
                {"Rows": [s_sym()], "Columns": [col("d", "year_month", "dim_date")],
                 "Values": [mea("Composite Signal")]},
-               title="Avg composite signal - symbol x month", no_totals=True),
+               title="Avg composite signal - symbol x month (red short / green long)",
+               no_totals=True),
         visual("sig_strength_bar", "barChart", 660, 130, 600, 240,
                {"Category": [s_sym()], "Series": [col("f", "signal_strength", "fact_signals")],
                 "Y": [mea("Signal Days")]},
@@ -231,8 +302,8 @@ def backtest_page() -> dict:
     kpis = [("Sharpe", "Sharpe"), ("CAGR", "CAGR"), ("Annual Volatility", "Annual vol"),
             ("Max Drawdown", "Max drawdown"), ("Win Rate", "Win rate"), ("Total Return", "Total return")]
     visuals = [
-        visual(f"bt_card_{i}", "card", 20 + i * 210, 20, 190, 90,
-               {"Values": [mea(m_)]}, title=t)
+        visual(f"bt_card_{i}", "card", 20 + i * 210, 20, 195, 100,
+               {"Values": [mea(m_)]}, title=t, extra_objects=CARD_LABEL)
         for i, (m_, t) in enumerate(kpis)
     ]
     visuals += [
@@ -265,12 +336,13 @@ def backtest_page() -> dict:
 # --------------------------------------------------------------------------- #
 def risk_page() -> dict:
     visuals = [
-        visual("rk_card_best", "card", 20, 20, 220, 90,
-               {"Values": [mea("Best Day")]}, title="Best day"),
-        visual("rk_card_worst", "card", 260, 20, 220, 90,
-               {"Values": [mea("Worst Day")]}, title="Worst day"),
-        visual("rk_card_p05", "card", 500, 20, 220, 90,
-               {"Values": [mea("Return P05")]}, title="5th percentile daily return"),
+        visual("rk_card_best", "card", 20, 20, 220, 100,
+               {"Values": [mea("Best Day")]}, title="Best day", extra_objects=CARD_LABEL),
+        visual("rk_card_worst", "card", 260, 20, 220, 100,
+               {"Values": [mea("Worst Day")]}, title="Worst day", extra_objects=CARD_LABEL),
+        visual("rk_card_p05", "card", 500, 20, 220, 100,
+               {"Values": [mea("Return P05")]}, title="5th percentile daily return",
+               extra_objects=CARD_LABEL),
         visual("rk_vol_line", "lineChart", 20, 130, 1240, 280,
                {"Category": [d_date()], "Series": [s_sym()],
                 "Y": [mea("Rolling Vol 20D (Ann)")]},
@@ -291,16 +363,17 @@ def risk_page() -> dict:
 # --------------------------------------------------------------------------- #
 def news_page() -> dict:
     visuals = [
-        visual("nw_card_total", "card", 20, 20, 220, 90,
-               {"Values": [mea("News Count")]}, title="News rows"),
-        visual("nw_card_scored", "card", 260, 20, 220, 90,
-               {"Values": [mea("Scored News")]}, title="Scored (of 5,581)"),
-        visual("nw_card_cov", "card", 500, 20, 220, 90,
-               {"Values": [mea("Scored Coverage %")]}, title="Sentiment coverage - most news is unscored"),
-        visual("nw_card_syms", "card", 740, 20, 180, 90,
-               {"Values": [mea("News Symbols")]}, title="Symbols with news"),
-        visual("nw_card_markets", "card", 940, 20, 180, 90,
-               {"Values": [mea("Odds Markets")]}, title="Polymarket markets"),
+        visual("nw_card_total", "card", 20, 20, 220, 100,
+               {"Values": [mea("News Count")]}, title="News rows", extra_objects=CARD_LABEL),
+        visual("nw_card_scored", "card", 260, 20, 220, 100,
+               {"Values": [mea("Scored News")]}, title="Scored (of 5,581)", extra_objects=CARD_LABEL),
+        visual("nw_card_cov", "card", 500, 20, 220, 100,
+               {"Values": [mea("Scored Coverage %")]}, title="Sentiment coverage - most news is unscored",
+               extra_objects=CARD_LABEL),
+        visual("nw_card_syms", "card", 740, 20, 180, 100,
+               {"Values": [mea("News Symbols")]}, title="Symbols with news", extra_objects=CARD_LABEL_SM),
+        visual("nw_card_markets", "card", 940, 20, 180, 100,
+               {"Values": [mea("Odds Markets")]}, title="Polymarket markets", extra_objects=CARD_LABEL_SM),
         visual("nw_by_date", "columnChart", 20, 130, 740, 260,
                {"Category": [d_date()], "Series": [col("n", "source", "fact_news")],
                 "Y": [mea("News Count")]},

@@ -99,7 +99,34 @@ def main() -> int:
     add("news_scored", "fact_news rows with sentiment", scored)
     add("news_coverage", "scored / total", float(scored / len(news)))
 
-    # ---- 8. 编码金丝雀：event_title 必须含弯引号（U+2019），乱码则 Power Query 读错 ----
+    # ---- 8. 关系传播测点（走 dim→fact 关系过滤，DAX 侧禁止 REMOVEFILTERS 维度表）----
+    # 判据：删掉任何一条日期/符号关系，这组必须 FAIL——它们验证模型接线，不是度量算术。
+    px = dfs["fact_prices"]
+    add("rel_prices_20260727", "fact_prices rows via dim_date=2026-07-27",
+        int((pd.to_datetime(px["date"]) == "2026-07-27").sum()))
+    sg2 = dfs["fact_signals"].copy()
+    sg2["ym"] = pd.to_datetime(sg2["date"]).dt.strftime("%Y-%m")
+    for sym in ("AAPL", "CRM"):
+        sub = sg2[(sg2["symbol"] == sym) & (sg2["ym"] == "2024-11")]
+        add(f"rel_composite_{sym}_202411",
+            f"Composite Signal via dim_date.year_month=2024-11 + dim_symbol={sym}",
+            float(sub["composite_signal"].mean()))
+    add("rel_composite_DRAM_202411",
+        "Composite Signal DRAM 2024-11 - no rows, must be BLANK", "BLANK")
+    nw2 = dfs["fact_news"]
+    for d in ("2026-07-24", "2026-07-25", "2026-07-26"):
+        add(f"rel_news_{d}", f"fact_news rows via dim_date={d}",
+            int((pd.to_datetime(nw2["date"]) == d).sum()))
+    add("rel_odds_20260715", "fact_event_odds rows via dim_date=2026-07-15",
+        int((pd.to_datetime(dfs["fact_event_odds"]["as_of"]) == "2026-07-15").sum()))
+    add("rel_positions_20260727", "fact_positions rows via dim_date=2026-07-27",
+        int((pd.to_datetime(dfs["fact_positions"]["as_of"]) == "2026-07-27").sum()))
+    add("rel_equity_20260727", "fact_backtest_equity rows via dim_date=2026-07-27",
+        int((pd.to_datetime(dfs["fact_backtest_equity"]["date"]) == "2026-07-27").sum()))
+    add("rel_news_SPY", "fact_news rows via dim_symbol=SPY",
+        int((nw2["symbol"] == "SPY").sum()))
+
+    # ---- 9. 编码金丝雀：event_title 必须含弯引号（U+2019），乱码则 Power Query 读错 ----
     ev = dfs["fact_event_odds"]
     curly = ev["event_title"].astype(str).str.contains("’").sum()
     add("encoding_curly_quote_rows", "event_title rows containing U+2019", int(curly))
