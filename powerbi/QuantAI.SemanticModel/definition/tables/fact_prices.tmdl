@@ -42,6 +42,13 @@ table fact_prices
 		formatString: 0.00%;-0.00%;0.00%
 		summarizeBy: none
 
+	/// 直方图分箱（bin 0.005）：Power BI 原生 Group/Bin 是 GUI 态构件，
+	/// 计算列版本可入库可 diff，语义等价。
+	column ret_bin = ROUND ( fact_prices[daily_return] / 0.005, 0 ) * 0.005
+		dataType: double
+		formatString: 0.0%;-0.0%;0.0%
+		summarizeBy: none
+
 	partition fact_prices = m
 		mode: import
 		source =

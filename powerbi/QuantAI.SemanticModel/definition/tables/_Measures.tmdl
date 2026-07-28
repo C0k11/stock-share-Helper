@@ -73,25 +73,29 @@ table _Measures
 		displayFolder: Windowed
 
 	measure 'SPY Indexed 100' =
+			VAR CurDate = MAX ( fact_backtest_equity[date] )
 			VAR StartDate =
-			    CALCULATE ( MIN ( fact_prices[date] ), ALLSELECTED ( dim_date ),
-			                REMOVEFILTERS ( dim_symbol ), fact_prices[symbol] = "SPY" )
+			    CALCULATE ( MIN ( fact_backtest_equity[date] ), ALLSELECTED () )
 			VAR Base =
-			    CALCULATE ( AVERAGE ( fact_prices[close] ), REMOVEFILTERS ( dim_symbol, dim_date ),
+			    CALCULATE ( AVERAGE ( fact_prices[close] ), REMOVEFILTERS (),
 			                fact_prices[symbol] = "SPY", fact_prices[date] = StartDate )
 			VAR Cur =
-			    CALCULATE ( AVERAGE ( fact_prices[close] ), REMOVEFILTERS ( dim_symbol ),
-			                fact_prices[symbol] = "SPY" )
+			    CALCULATE ( AVERAGE ( fact_prices[close] ), REMOVEFILTERS (),
+			                fact_prices[symbol] = "SPY", fact_prices[date] = CurDate )
 			RETURN DIVIDE ( Cur, Base ) * 100
 		formatString: 0.0
 		displayFolder: Windowed
 
 	measure 'Equity Indexed 100' =
-			VAR StartDate = CALCULATE ( MIN ( fact_backtest_equity[date] ), ALLSELECTED ( dim_date ) )
+			VAR CurDate = MAX ( fact_backtest_equity[date] )
+			VAR StartDate = CALCULATE ( MIN ( fact_backtest_equity[date] ), ALLSELECTED () )
 			VAR Base =
-			    CALCULATE ( AVERAGE ( fact_backtest_equity[equity] ), REMOVEFILTERS ( dim_date ),
+			    CALCULATE ( AVERAGE ( fact_backtest_equity[equity] ), REMOVEFILTERS (),
 			                fact_backtest_equity[date] = StartDate )
-			RETURN DIVIDE ( AVERAGE ( fact_backtest_equity[equity] ), Base ) * 100
+			VAR Cur =
+			    CALCULATE ( AVERAGE ( fact_backtest_equity[equity] ), REMOVEFILTERS (),
+			                fact_backtest_equity[date] = CurDate )
+			RETURN DIVIDE ( Cur, Base ) * 100
 		formatString: 0.0
 		displayFolder: Windowed
 
@@ -226,6 +230,22 @@ table _Measures
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Backtest
 
+
+	measure 'Price Rows' = COUNTROWS ( fact_prices )
+		formatString: #,0
+		displayFolder: Risk
+
+	measure 'News Symbols' = DISTINCTCOUNT ( fact_news[symbol] )
+		formatString: 0
+		displayFolder: News & Events
+
+	measure 'Avg Yes Price' = AVERAGE ( fact_event_odds[yes_price] )
+		formatString: 0.00%;-0.00%;0.00%
+		displayFolder: News & Events
+
+	measure 'Odds Markets' = DISTINCTCOUNT ( fact_event_odds[market_id] )
+		formatString: 0
+		displayFolder: News & Events
 
 	measure 'News Count' = COUNTROWS ( fact_news )
 		formatString: #,0
