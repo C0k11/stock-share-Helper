@@ -192,7 +192,9 @@ model, while four others worked. Diagnosis and mechanism:
   project locally.
 - The latest positions snapshot holds **one symbol (SPCX)** — the portfolio
   section is KPI cards, not weight charts; that is the data, not a rendering
-  gap.
+  gap. Position figures are the author's real (small) holding, kept as-is so
+  every reconciliation number traces to source data. No account identifiers
+  are included.
 - `fact_news.sentiment` covers **122 of 5,581 rows (2.19%)** — the coverage is
   printed on the News page as a card, and no average is presented as a
   population statement.

@@ -10,6 +10,8 @@ US equities (NYSE calendar), typed and tested (748 tests), honest by design.
 | ![Workstation: real-position banner, 1-minute bars, indicator toggles](docs/img/frontend_workstation.png) | ![Power BI market overview page](powerbi/img/page1_market_overview.png) |
 | ![Portfolio page: KPI row, holdings, PnL, net-worth curve](docs/img/frontend_portfolio.png) | ![Power BI signals heatmap page](powerbi/img/page2_signals.png) |
 
+*Frontend screenshots use the bundled `portfolio.example.yaml` — no real holdings shown.*
+
 → [Quick start](#quick-start) · [Two surfaces, one warehouse](#two-surfaces-one-warehouse) · [Architecture](#architecture)
 
 The codebase was rebuilt bottom-up into the typed, tested `quantai/` package;
