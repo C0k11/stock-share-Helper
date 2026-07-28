@@ -1,13 +1,19 @@
 # QuantAI — Personal Portfolio Analysis & Decision-Support System
 
-> Analyze real holdings, individual tickers, and strategy backtests with a clean,
-> tested Python stack: technical-indicator + financial-statistics engine, a local
-> data warehouse (DuckDB + dbt star schema) feeding Tableau, an LLM multi-agent
-> layer with an offline teacher-student distillation pipeline, and a professional
-> dark-theme dashboard. US equities (NYSE calendar), honest by design.
+**A personal quant workbench in two surfaces: a real-time trading console with a
+local-LLM analyst (Streamlit — the product anyone can clone and run), backed by a
+reconciled offline BI artifact (Power BI over a DuckDB/dbt star schema).**
+US equities (NYSE calendar), typed and tested (748 tests), honest by design.
 
-The codebase was rebuilt bottom-up into the typed, tested `quantai/` package
-(748 tests). Legacy code stays in `src/` untouched.
+| Frontend — live workstation (Streamlit) | Power BI — offline analysis artifact |
+|---|---|
+| ![Workstation: real-position banner, 1-minute bars, indicator toggles](docs/img/frontend_workstation.png) | ![Power BI market overview page](powerbi/img/page1_market_overview.png) |
+| ![Portfolio page: KPI row, holdings, PnL, net-worth curve](docs/img/frontend_portfolio.png) | ![Power BI signals heatmap page](powerbi/img/page2_signals.png) |
+
+→ [Quick start](#quick-start) · [Two surfaces, one warehouse](#two-surfaces-one-warehouse) · [Architecture](#architecture)
+
+The codebase was rebuilt bottom-up into the typed, tested `quantai/` package;
+the pre-rebuild tree is kept out of the repository entirely.
 
 ---
 
@@ -63,7 +69,45 @@ Four jobs, nothing decorative:
    DPO rejected samples) → realized 5/20-day forward returns are backfilled once
    the market plays out (ground truth for outcome-ranked DPO, never in prompts).
 
+## Two surfaces, one warehouse
+
+The two UIs are **not substitutes** — they answer different questions off the
+same tested computation layer:
+
+- **Streamlit frontend = the product surface.** Real-time and interactive:
+  intraday workstation (1-minute bars, tactics board, hedging desk), resident
+  AI analyst reports, paper-trading session console, portfolio & watchlist,
+  parameterized YTD replay. **This is what runs when a stranger clones the
+  repo** — quickstart below, only the example YAMLs needed.
+- **Power BI = the offline analysis artifact.** Six reconciled pages (signals
+  heatmap, rolling volatility, backtest deep-dive, return distribution, news &
+  event odds, hidden QA) built on the exported star schema with a 67-check
+  DAX-vs-pandas reconciliation. **It is a batch snapshot by design** — all
+  partitions import local CSVs produced by `python scripts/warehouse.py
+  --export`; it does not and cannot sync live quotes (DirectQuery doesn't
+  support CSV; scheduled Service refresh needs a paid license). Free Desktop
+  also means **no shareable online link**: the deliverable is the `.pbip`
+  project in [`powerbi/`](powerbi/README.md) plus committed screenshots; to
+  interact you open it locally in Power BI Desktop (Windows).
+
+Data flow: live quotes/news → frontend directly; the same fetchers → DuckDB →
+dbt star schema → CSV exports → Power BI. Unique to the frontend: real-time
+anything, LLM interaction, order/paper-trading control. Unique to Power BI:
+cross-filtered exploration of the full history at once, conditional-format
+heatmaps, and a reconciliation page that proves the numbers.
+
 ## Quick start
+
+Requires Python 3.11+ on Windows/macOS/Linux (Power BI artifact is
+Windows-only to *view interactively*; everything else is cross-platform).
+
+```powershell
+git clone https://github.com/C0k11/stock-share-Helper.git && cd stock-share-Helper
+python -m venv venv && venv\Scripts\activate          # or source venv/bin/activate
+pip install -e .[ui,warehouse,dev]                     # add [llm,serve] for local-GPU analyst + API
+copy portfolio.example.yaml portfolio.local.yaml       # fill in your holdings (never committed)
+copy watchlist.example.yaml watchlist.local.yaml
+```
 
 ```powershell
 # 0) All tests (fastest proof everything runs)
@@ -234,8 +278,9 @@ flowchart TB
   positions) — all passing on real market data.
 - **Reconciliation**: pytest runs a real `dbt build` and asserts SQL and pandas
   compute identical numbers (PnL to 1e-6, returns/drawdown to 1e-12).
-- **Tableau**: connect via exported CSVs or DuckDB JDBC; build per
-  [tableau/DASHBOARD_SPEC.md](tableau/DASHBOARD_SPEC.md).
+- **Tableau**: the written spec [tableau/DASHBOARD_SPEC.md](tableau/DASHBOARD_SPEC.md)
+  defines the dashboard semantics; the Power BI module below is its implementation
+  (no Tableau workbook was ever committed — exports remain Tableau-compatible).
 - **Power BI (BI as code)**: [powerbi/](powerbi/README.md) implements that same
   dashboard spec as a PBIP project — semantic model in plain-text TMDL
   (10 tables, 11 single-direction relationships, parameterized UTF-8 CSV
