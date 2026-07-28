@@ -8,9 +8,6 @@ from __future__ import annotations
 
 
 def main() -> None:  # pragma: no cover - 需 streamlit 运行时
-    import os
-    from pathlib import Path
-
     import streamlit as st
 
     from quantai.ui.common import inject_chrome
@@ -25,13 +22,6 @@ def main() -> None:  # pragma: no cover - 需 streamlit 运行时
     )
     lang = LANGS[lang_label]
     st.session_state["ui_lang"] = lang
-
-    # Tableau 一键打开（找 tableau/ 下的 .twb/.twbx；没有就开导出目录）
-    tb_files = list(Path("tableau").glob("*.twb*"))
-    label = (tr(lang, "nav.tableau_open", name=tb_files[0].name) if tb_files
-             else tr(lang, "nav.tableau_dir"))
-    if st.sidebar.button(label):
-        os.startfile(str(tb_files[0]) if tb_files else str(Path("tableau/exports").resolve()))
 
     pages = [
         st.Page(workstation.render, title=tr(lang, "nav.workstation"), url_path="workstation", default=True),

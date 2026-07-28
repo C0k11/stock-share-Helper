@@ -21,8 +21,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "nav.analyst": "AI 分析",
         "nav.sim": "模拟盘",
         "nav.lang": "语言 / Language",
-        "nav.tableau_open": "打开 Tableau（{name}）",
-        "nav.tableau_dir": "打开 Tableau 数据源目录",
         # 工作台
         "ws.symbol": "标的",
         "ws.cash_tfsa": "可用现金 · TFSA",
@@ -144,8 +142,6 @@ STRINGS: dict[str, dict[str, str]] = {
         "nav.analyst": "AI Analyst",
         "nav.sim": "Paper Trading",
         "nav.lang": "语言 / Language",
-        "nav.tableau_open": "Open Tableau ({name})",
-        "nav.tableau_dir": "Open Tableau data folder",
         "ws.symbol": "Symbol",
         "ws.cash_tfsa": "Cash available · TFSA",
         "ws.held_pos": "{sym} × {shares} [HELD]",
