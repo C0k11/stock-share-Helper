@@ -1,0 +1,53 @@
+table fact_prices
+
+	column symbol
+		dataType: string
+		summarizeBy: none
+
+	column date
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		summarizeBy: none
+
+	column open
+		dataType: double
+		summarizeBy: none
+
+	column high
+		dataType: double
+		summarizeBy: none
+
+	column low
+		dataType: double
+		summarizeBy: none
+
+	column close
+		dataType: double
+		summarizeBy: none
+
+	column volume
+		dataType: int64
+		formatString: #,0
+		summarizeBy: none
+
+	/// 每标的第一根 bar 为空（无前收可差分）——保持 blank，绝不替 0。
+	column daily_return
+		dataType: double
+		formatString: 0.00%;-0.00%;0.00%
+		summarizeBy: none
+
+	/// 每标的前 52 周为空（窗口不足）——保持 blank。
+	column pct_from_52w_high
+		dataType: double
+		formatString: 0.00%;-0.00%;0.00%
+		summarizeBy: none
+
+	partition fact_prices = m
+		mode: import
+		source =
+				let
+					Source = Csv.Document(File.Contents(ExportFolder & "\fact_prices.csv"), [Delimiter = ",", Columns = 9, Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+					Headers = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
+					Typed = Table.TransformColumnTypes(Headers, {{"symbol", type text}, {"date", type date}, {"open", type number}, {"high", type number}, {"low", type number}, {"close", type number}, {"volume", Int64.Type}, {"daily_return", type number}, {"pct_from_52w_high", type number}})
+				in
+					Typed

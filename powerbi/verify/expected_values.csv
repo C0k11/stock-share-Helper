@@ -1,0 +1,54 @@
+check_id,description,expected
+rowcount_dim_date,dim_date.csv row count,731
+rowcount_dim_symbol,dim_symbol.csv row count,34
+rowcount_fact_prices,fact_prices.csv row count,15920
+rowcount_fact_signals,fact_signals.csv row count,15920
+rowcount_fact_news,fact_news.csv row count,5581
+rowcount_fact_event_odds,fact_event_odds.csv row count,3390
+rowcount_fact_backtest_equity,fact_backtest_equity.csv row count,500
+rowcount_fact_backtest_results,fact_backtest_results.csv row count,1
+rowcount_fact_positions,fact_positions.csv row count,19
+rowcount_fact_trades,fact_trades.csv row count,0
+spy_vol20_2026-07-21,SPY Rolling Vol 20D (Ann) @ 2026-07-21,0.11992758
+spy_vol20_2026-07-22,SPY Rolling Vol 20D (Ann) @ 2026-07-22,0.1066921263
+spy_vol20_2026-07-23,SPY Rolling Vol 20D (Ann) @ 2026-07-23,0.1166648511
+spy_vol20_2026-07-24,SPY Rolling Vol 20D (Ann) @ 2026-07-24,0.1166218543
+spy_vol20_2026-07-27,SPY Rolling Vol 20D (Ann) @ 2026-07-27,0.1131537353
+spy_ma20_2026-07-21,SPY MA20 @ 2026-07-21,744.9830078
+spy_ma20_2026-07-22,SPY MA20 @ 2026-07-22,745.6745056
+spy_ma20_2026-07-23,SPY MA20 @ 2026-07-23,745.9215057
+spy_ma20_2026-07-24,SPY MA20 @ 2026-07-24,746.153006
+spy_ma20_2026-07-27,SPY MA20 @ 2026-07-27,746.6580078
+spy_ma50_2026-07-21,SPY MA50 @ 2026-07-21,743.8079102
+spy_ma50_2026-07-22,SPY MA50 @ 2026-07-22,744.0416174
+spy_ma50_2026-07-23,SPY MA50 @ 2026-07-23,744.0572119
+spy_ma50_2026-07-24,SPY MA50 @ 2026-07-24,744.1101489
+spy_ma50_2026-07-27,SPY MA50 @ 2026-07-27,744.0838989
+spy_ma200_2026-07-21,SPY MA200 @ 2026-07-21,694.2735651
+spy_ma200_2026-07-22,SPY MA200 @ 2026-07-22,694.6920096
+spy_ma200_2026-07-23,SPY MA200 @ 2026-07-23,695.064353
+spy_ma200_2026-07-24,SPY MA200 @ 2026-07-24,695.4285455
+spy_ma200_2026-07-27,SPY MA200 @ 2026-07-27,695.8058859
+spy_indexed_end,SPY Indexed 100 at last date,138.8844242
+equity_indexed_end,Equity Indexed 100 at last date,123.0821384
+bt_total_return,fact_backtest_results.total_return,0.2308213845
+bt_cagr,fact_backtest_results.cagr,0.1103459088
+bt_annual_volatility,fact_backtest_results.annual_volatility,0.1016386922
+bt_sharpe,fact_backtest_results.sharpe,0.8858340247
+bt_max_drawdown,fact_backtest_results.max_drawdown,-0.1157079851
+bt_win_rate,fact_backtest_results.win_rate,0.5651302605
+bt_total_turnover,fact_backtest_results.total_turnover,0.6
+pos_latest_as_of,latest positions as_of,2026-07-27
+pos_market_value,latest market_value,1589
+pos_cost_value,latest cost_value,2244.06
+pos_unrealized_pnl,latest unrealized_pnl,-655.06
+pos_unrealized_pnl_pct,latest pnl / |cost|,-0.291908416
+sig_strong_short,signal_strength == strong_short,6315
+sig_strong_long,signal_strength == strong_long,5685
+sig_weak_short,signal_strength == weak_short,2948
+sig_weak_long,signal_strength == weak_long,962
+sig_neutral,signal_strength == neutral,10
+news_total,fact_news rows,5581
+news_scored,fact_news rows with sentiment,122
+news_coverage,scored / total,0.02185988174
+encoding_curly_quote_rows,event_title rows containing U+2019,55

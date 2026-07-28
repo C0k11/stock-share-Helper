@@ -1,0 +1,52 @@
+table fact_event_odds
+
+	column as_of
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		summarizeBy: none
+
+	column market_id
+		dataType: string
+		summarizeBy: none
+
+	column event_title
+		dataType: string
+		summarizeBy: none
+
+	column question
+		dataType: string
+		summarizeBy: none
+
+	column category
+		dataType: string
+		summarizeBy: none
+
+	column yes_price
+		dataType: double
+		formatString: 0.00%;-0.00%;0.00%
+		summarizeBy: none
+
+	column prob_change_1d
+		dataType: double
+		formatString: 0.00%;-0.00%;0.00%
+		summarizeBy: none
+
+	column volume_24h
+		dataType: double
+		formatString: #,0.00
+		summarizeBy: none
+
+	column end_date
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		summarizeBy: none
+
+	partition fact_event_odds = m
+		mode: import
+		source =
+				let
+					Source = Csv.Document(File.Contents(ExportFolder & "\fact_event_odds.csv"), [Delimiter = ",", Columns = 9, Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+					Headers = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
+					Typed = Table.TransformColumnTypes(Headers, {{"as_of", type date}, {"market_id", type text}, {"event_title", type text}, {"question", type text}, {"category", type text}, {"yes_price", type number}, {"prob_change_1d", type number}, {"volume_24h", type number}, {"end_date", type date}})
+				in
+					Typed

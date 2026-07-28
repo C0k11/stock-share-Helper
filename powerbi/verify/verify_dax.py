@@ -1,0 +1,115 @@
+"""DAX vs pandas 对账：从同一批 CSV 算期望值，锚定 Power BI 语义模型的正确性。
+
+与仓库里 T-SQL → Spark 迁移同一套路：规格不变、引擎换掉、结果对账。
+这里的"规格"是 tableau/DASHBOARD_SPEC.md 的表计算语义，三条硬约定：
+1. 窗口 = 20 个**交易行**（该标的实际有 bar 的行），不是 20 个日历天；
+2. WINDOW_STDEV 是样本标准差 → pandas ddof=1 / DAX STDEVX.S；
+3. 窗口不足 20 行 → 空值（pandas rolling 默认 NaN / DAX 返回 BLANK）。
+
+产出 powerbi/verify/expected_values.csv（check_id, description, expected）。
+Power BI 侧的 QA 页把对应 DAX 度量与这些值并排；浮点相对误差 > 1e-6 即 DAX 有错，
+禁止反向修改期望值迁就 DAX。
+
+运行：venv311\\Scripts\\python.exe powerbi\\verify\\verify_dax.py
+（数据量 1.6 万行级，pandas 向量化单进程毫秒级完成——这一步不是 CPU 瓶颈，
+不需要多进程；诚实说明以免"吃满核心"变成表演。）
+"""
+from __future__ import annotations
+
+import math
+from pathlib import Path
+
+import pandas as pd
+
+EXPORTS = Path(__file__).resolve().parents[2] / "tableau" / "exports"
+OUT = Path(__file__).resolve().parent / "expected_values.csv"
+
+TABLES = [
+    "dim_date", "dim_symbol", "fact_prices", "fact_signals", "fact_news",
+    "fact_event_odds", "fact_backtest_equity", "fact_backtest_results",
+    "fact_positions", "fact_trades",
+]
+
+
+def main() -> int:
+    checks: list[tuple[str, str, str]] = []
+
+    def add(check_id: str, desc: str, value) -> None:
+        if isinstance(value, float):
+            checks.append((check_id, desc, f"{value:.10g}"))
+        else:
+            checks.append((check_id, desc, str(value)))
+
+    dfs = {t: pd.read_csv(EXPORTS / f"{t}.csv", encoding="utf-8") for t in TABLES}
+
+    # ---- 1. 每张表行数 ----
+    for t in TABLES:
+        add(f"rowcount_{t}", f"{t}.csv row count", len(dfs[t]))
+
+    # ---- 2. SPY 最后 5 个交易行的 Rolling Vol 20D (Ann) / MA20 / MA50 / MA200 ----
+    px = dfs["fact_prices"].copy()
+    px["date"] = pd.to_datetime(px["date"])
+    spy = px[px["symbol"] == "SPY"].sort_values("date").reset_index(drop=True)
+    spy["vol20"] = spy["daily_return"].rolling(20).std(ddof=1) * math.sqrt(252)
+    for w in (20, 50, 200):
+        spy[f"ma{w}"] = spy["close"].rolling(w).mean()
+    tail = spy.tail(5)
+    for _, r in tail.iterrows():
+        d = r["date"].date()
+        add(f"spy_vol20_{d}", f"SPY Rolling Vol 20D (Ann) @ {d}", float(r["vol20"]))
+    for w in (20, 50, 200):
+        for _, r in tail.iterrows():
+            d = r["date"].date()
+            add(f"spy_ma{w}_{d}", f"SPY MA{w} @ {d}", float(r[f"ma{w}"]))
+
+    # ---- 3. 区间末归一化（起点=100，起点=各自序列首行） ----
+    spy_indexed_end = spy["close"].iloc[-1] / spy["close"].iloc[0] * 100
+    add("spy_indexed_end", "SPY Indexed 100 at last date", float(spy_indexed_end))
+    eq = dfs["fact_backtest_equity"].copy()
+    eq["date"] = pd.to_datetime(eq["date"])
+    eq = eq.sort_values("date")
+    add("equity_indexed_end", "Equity Indexed 100 at last date",
+        float(eq["equity"].iloc[-1] / eq["equity"].iloc[0] * 100))
+
+    # ---- 4. 回测 7 指标（单行直读——验证的是 Power BI 格式化没算错） ----
+    bt = dfs["fact_backtest_results"].iloc[0]
+    for col in ("total_return", "cagr", "annual_volatility", "sharpe",
+                "max_drawdown", "win_rate", "total_turnover"):
+        add(f"bt_{col}", f"fact_backtest_results.{col}", float(bt[col]))
+
+    # ---- 5. 最新持仓快照 4 数 ----
+    pos = dfs["fact_positions"].copy()
+    latest = pos[pos["as_of"] == pos["as_of"].max()]
+    add("pos_latest_as_of", "latest positions as_of", pos["as_of"].max())
+    add("pos_market_value", "latest market_value", float(latest["market_value"].sum()))
+    add("pos_cost_value", "latest cost_value", float(latest["cost_value"].sum()))
+    add("pos_unrealized_pnl", "latest unrealized_pnl", float(latest["unrealized_pnl"].sum()))
+    add("pos_unrealized_pnl_pct", "latest pnl / |cost|",
+        float(latest["unrealized_pnl"].sum() / abs(latest["cost_value"].sum())))
+
+    # ---- 6. signal_strength 五桶 ----
+    sig = dfs["fact_signals"]["signal_strength"].value_counts()
+    for bucket in ("strong_short", "strong_long", "weak_short", "weak_long", "neutral"):
+        add(f"sig_{bucket}", f"signal_strength == {bucket}", int(sig.get(bucket, 0)))
+
+    # ---- 7. 新闻打标覆盖率 ----
+    news = dfs["fact_news"]
+    scored = int(news["sentiment"].notna().sum())
+    add("news_total", "fact_news rows", len(news))
+    add("news_scored", "fact_news rows with sentiment", scored)
+    add("news_coverage", "scored / total", float(scored / len(news)))
+
+    # ---- 8. 编码金丝雀：event_title 必须含弯引号（U+2019），乱码则 Power Query 读错 ----
+    ev = dfs["fact_event_odds"]
+    curly = ev["event_title"].astype(str).str.contains("’").sum()
+    add("encoding_curly_quote_rows", "event_title rows containing U+2019", int(curly))
+
+    out = pd.DataFrame(checks, columns=["check_id", "description", "expected"])
+    out.to_csv(OUT, index=False, encoding="utf-8")
+    print(f"[verify] {len(out)} expected values -> {OUT}")
+    print(out.to_string(index=False, max_colwidth=48))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

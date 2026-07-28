@@ -1,0 +1,50 @@
+table dim_date
+	dataCategory: Time
+
+	column date
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		summarizeBy: none
+		isKey
+
+	column year
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+
+	column quarter
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+
+	column month
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+
+	column year_month
+		dataType: string
+		summarizeBy: none
+
+	column day_of_week
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+
+	column is_trading_day
+		dataType: boolean
+		summarizeBy: none
+
+	column is_early_close
+		dataType: boolean
+		summarizeBy: none
+
+	partition dim_date = m
+		mode: import
+		source =
+				let
+					Source = Csv.Document(File.Contents(ExportFolder & "\dim_date.csv"), [Delimiter = ",", Columns = 8, Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+					Headers = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
+					Typed = Table.TransformColumnTypes(Headers, {{"date", type date}, {"year", Int64.Type}, {"quarter", Int64.Type}, {"month", Int64.Type}, {"year_month", type text}, {"day_of_week", Int64.Type}, {"is_trading_day", type logical}, {"is_early_close", type logical}})
+				in
+					Typed

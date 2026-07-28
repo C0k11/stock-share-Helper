@@ -1,0 +1,77 @@
+table fact_backtest_results
+
+	column run_id
+		dataType: string
+		summarizeBy: none
+		isKey
+
+	column strategy
+		dataType: string
+		summarizeBy: none
+
+	column symbol
+		dataType: string
+		summarizeBy: none
+
+	column fill_timing
+		dataType: string
+		summarizeBy: none
+
+	column total_return
+		dataType: double
+		formatString: 0.00%;-0.00%;0.00%
+		summarizeBy: none
+
+	column cagr
+		dataType: double
+		formatString: 0.00%;-0.00%;0.00%
+		summarizeBy: none
+
+	column annual_volatility
+		dataType: double
+		formatString: 0.00%;-0.00%;0.00%
+		summarizeBy: none
+
+	column sharpe
+		dataType: double
+		formatString: 0.00
+		summarizeBy: none
+
+	column max_drawdown
+		dataType: double
+		formatString: 0.00%;-0.00%;0.00%
+		summarizeBy: none
+
+	column win_rate
+		dataType: double
+		formatString: 0.00%;-0.00%;0.00%
+		summarizeBy: none
+
+	column total_turnover
+		dataType: double
+		formatString: 0.00
+		summarizeBy: none
+
+	/// 带 -04:00 时区偏移，纯展示——Text 保真，绝不静默转 Date/Time 丢偏移。
+	column start_date
+		dataType: string
+		summarizeBy: none
+
+	column end_date
+		dataType: string
+		summarizeBy: none
+
+	column trading_days
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+
+	partition fact_backtest_results = m
+		mode: import
+		source =
+				let
+					Source = Csv.Document(File.Contents(ExportFolder & "\fact_backtest_results.csv"), [Delimiter = ",", Columns = 14, Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+					Headers = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
+					Typed = Table.TransformColumnTypes(Headers, {{"run_id", type text}, {"strategy", type text}, {"symbol", type text}, {"fill_timing", type text}, {"total_return", type number}, {"cagr", type number}, {"annual_volatility", type number}, {"sharpe", type number}, {"max_drawdown", type number}, {"win_rate", type number}, {"total_turnover", type number}, {"start_date", type text}, {"end_date", type text}, {"trading_days", Int64.Type}})
+				in
+					Typed

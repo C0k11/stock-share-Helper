@@ -1,0 +1,26 @@
+table qa_expected
+	isHidden
+
+	column check_id
+		dataType: string
+		summarizeBy: none
+		isKey
+
+	column description
+		dataType: string
+		summarizeBy: none
+
+	/// 期望值保持文本原样（数值/日期混合），比较在 QA 度量里做。
+	column expected
+		dataType: string
+		summarizeBy: none
+
+	partition qa_expected = m
+		mode: import
+		source =
+				let
+					Source = Csv.Document(File.Contents(VerifyFolder & "\expected_values.csv"), [Delimiter = ",", Columns = 3, Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+					Headers = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
+					Typed = Table.TransformColumnTypes(Headers, {{"check_id", type text}, {"description", type text}, {"expected", type text}})
+				in
+					Typed

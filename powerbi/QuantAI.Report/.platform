@@ -1,0 +1,11 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/fabric/gitIntegration/platformProperties/2.0.0/schema.json",
+  "metadata": {
+    "type": "Report",
+    "displayName": "QuantAI"
+  },
+  "config": {
+    "version": "2.0",
+    "logicalId": "3e9d7b2f-1c5a-4e8d-b6f0-7a4c9e2d5b8a"
+  }
+}

@@ -1,0 +1,102 @@
+{
+  "config": "{\"version\":\"5.43\",\"themeCollection\":{\"baseTheme\":{\"name\":\"CY24SU10\",\"version\":\"5.43\",\"type\":2},\"customTheme\":{\"name\":\"quantai-dark.json\",\"version\":\"5.43\",\"type\":1}},\"activeSectionIndex\":0,\"defaultDrillFilterOtherVisuals\":true,\"settings\":{\"useNewFilterPaneExperience\":true,\"exportDataMode\":1}}",
+  "layoutOptimization": 0,
+  "resourcePackages": [
+    {
+      "resourcePackage": {
+        "disabled": false,
+        "items": [
+          {
+            "name": "quantai-dark.json",
+            "path": "quantai-dark.json",
+            "type": 202
+          }
+        ],
+        "name": "RegisteredResources",
+        "type": 1
+      }
+    },
+    {
+      "resourcePackage": {
+        "disabled": false,
+        "items": [
+          {
+            "name": "CY24SU10",
+            "path": "BaseThemes/CY24SU10.json",
+            "type": 202
+          }
+        ],
+        "name": "SharedResources",
+        "type": 2
+      }
+    }
+  ],
+  "sections": [
+    {
+      "config": "{}",
+      "displayName": "Market Overview",
+      "displayOption": 1,
+      "filters": "[]",
+      "height": 720.00,
+      "name": "sec_market_overview",
+      "ordinal": 0,
+      "visualContainers": [],
+      "width": 1280.00
+    },
+    {
+      "config": "{}",
+      "displayName": "Signals",
+      "displayOption": 1,
+      "filters": "[]",
+      "height": 720.00,
+      "name": "sec_signals",
+      "ordinal": 1,
+      "visualContainers": [],
+      "width": 1280.00
+    },
+    {
+      "config": "{}",
+      "displayName": "Backtest vs Benchmark",
+      "displayOption": 1,
+      "filters": "[]",
+      "height": 720.00,
+      "name": "sec_backtest",
+      "ordinal": 2,
+      "visualContainers": [],
+      "width": 1280.00
+    },
+    {
+      "config": "{}",
+      "displayName": "Risk & Volatility",
+      "displayOption": 1,
+      "filters": "[]",
+      "height": 720.00,
+      "name": "sec_risk",
+      "ordinal": 3,
+      "visualContainers": [],
+      "width": 1280.00
+    },
+    {
+      "config": "{}",
+      "displayName": "News & Event Odds",
+      "displayOption": 1,
+      "filters": "[]",
+      "height": 720.00,
+      "name": "sec_news_events",
+      "ordinal": 4,
+      "visualContainers": [],
+      "width": 1280.00
+    },
+    {
+      "config": "{\"visibility\":1}",
+      "displayName": "QA",
+      "displayOption": 1,
+      "filters": "[]",
+      "height": 720.00,
+      "name": "sec_qa",
+      "ordinal": 5,
+      "visualContainers": [],
+      "width": 1280.00
+    }
+  ]
+}

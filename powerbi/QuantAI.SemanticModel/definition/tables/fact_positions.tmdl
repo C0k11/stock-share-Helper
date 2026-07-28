@@ -1,0 +1,64 @@
+table fact_positions
+
+	column as_of
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		summarizeBy: none
+
+	column symbol
+		dataType: string
+		summarizeBy: none
+
+	column shares
+		dataType: double
+		summarizeBy: none
+
+	column avg_cost
+		dataType: double
+		formatString: #,0.00
+		summarizeBy: none
+
+	column first_open_date
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		summarizeBy: none
+
+	column last_close
+		dataType: double
+		formatString: #,0.00
+		summarizeBy: none
+
+	column price_date
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		summarizeBy: none
+
+	column cost_value
+		dataType: double
+		formatString: #,0.00
+		summarizeBy: none
+
+	column market_value
+		dataType: double
+		formatString: #,0.00
+		summarizeBy: none
+
+	column unrealized_pnl
+		dataType: double
+		formatString: #,0.00
+		summarizeBy: none
+
+	column unrealized_pnl_pct
+		dataType: double
+		formatString: 0.00%;-0.00%;0.00%
+		summarizeBy: none
+
+	partition fact_positions = m
+		mode: import
+		source =
+				let
+					Source = Csv.Document(File.Contents(ExportFolder & "\fact_positions.csv"), [Delimiter = ",", Columns = 11, Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+					Headers = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
+					Typed = Table.TransformColumnTypes(Headers, {{"as_of", type date}, {"symbol", type text}, {"shares", type number}, {"avg_cost", type number}, {"first_open_date", type date}, {"last_close", type number}, {"price_date", type date}, {"cost_value", type number}, {"market_value", type number}, {"unrealized_pnl", type number}, {"unrealized_pnl_pct", type number}})
+				in
+					Typed

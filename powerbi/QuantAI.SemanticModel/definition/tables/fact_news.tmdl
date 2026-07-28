@@ -1,0 +1,56 @@
+table fact_news
+
+	column link
+		dataType: string
+		summarizeBy: none
+
+	column symbol
+		dataType: string
+		summarizeBy: none
+
+	column title
+		dataType: string
+		summarizeBy: none
+
+	column summary
+		dataType: string
+		summarizeBy: none
+
+	column date
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		summarizeBy: none
+
+	column published
+		dataType: dateTime
+		formatString: yyyy-mm-dd hh:nn:ss
+		summarizeBy: none
+
+	column source
+		dataType: string
+		summarizeBy: none
+
+	/// 5,581 行里只有 122 行有值——覆盖率必须上卡片，均值绝不冒充全体结论。
+	column sentiment
+		dataType: double
+		formatString: 0.00
+		summarizeBy: none
+
+	column sentiment_label
+		dataType: string
+		summarizeBy: none
+
+	/// 带微秒，纯展示——Text 保真。
+	column scored_at
+		dataType: string
+		summarizeBy: none
+
+	partition fact_news = m
+		mode: import
+		source =
+				let
+					Source = Csv.Document(File.Contents(ExportFolder & "\fact_news.csv"), [Delimiter = ",", Columns = 10, Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+					Headers = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
+					Typed = Table.TransformColumnTypes(Headers, {{"link", type text}, {"symbol", type text}, {"title", type text}, {"summary", type text}, {"date", type date}, {"published", type datetime}, {"source", type text}, {"sentiment", type number}, {"sentiment_label", type text}, {"scored_at", type text}})
+				in
+					Typed

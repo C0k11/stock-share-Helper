@@ -1,0 +1,22 @@
+model Model
+	culture: en-US
+	defaultPowerBIDataSourceVersion: powerBI_V3
+	sourceQueryCulture: en-US
+
+	annotation PBI_QueryOrder = ["ExportFolder","dim_date","dim_symbol","fact_prices","fact_signals","fact_positions","fact_backtest_equity","fact_backtest_results","fact_news","fact_event_odds","qa_expected","_Measures"]
+
+	annotation __PBI_TimeIntelligenceEnabled = 0
+
+ref table dim_date
+ref table dim_symbol
+ref table fact_prices
+ref table fact_signals
+ref table fact_positions
+ref table fact_backtest_equity
+ref table fact_backtest_results
+ref table fact_news
+ref table fact_event_odds
+ref table qa_expected
+ref table _Measures
+
+ref cultureInfo en-US

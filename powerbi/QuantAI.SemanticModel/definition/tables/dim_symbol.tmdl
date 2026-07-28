@@ -1,0 +1,35 @@
+table dim_symbol
+
+	column symbol
+		dataType: string
+		summarizeBy: none
+		isKey
+
+	column first_price_date
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		summarizeBy: none
+
+	column last_price_date
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		summarizeBy: none
+
+	column price_bars
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+
+	column is_currently_held
+		dataType: boolean
+		summarizeBy: none
+
+	partition dim_symbol = m
+		mode: import
+		source =
+				let
+					Source = Csv.Document(File.Contents(ExportFolder & "\dim_symbol.csv"), [Delimiter = ",", Columns = 5, Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+					Headers = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
+					Typed = Table.TransformColumnTypes(Headers, {{"symbol", type text}, {"first_price_date", type date}, {"last_price_date", type date}, {"price_bars", Int64.Type}, {"is_currently_held", type logical}})
+				in
+					Typed

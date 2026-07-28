@@ -1,0 +1,49 @@
+table fact_signals
+
+	column symbol
+		dataType: string
+		summarizeBy: none
+
+	column date
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		summarizeBy: none
+
+	column trend_signal
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+
+	column momentum_signal
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+
+	column ma_cross_signal
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+
+	column breakout_signal
+		dataType: int64
+		formatString: 0
+		summarizeBy: none
+
+	column composite_signal
+		dataType: double
+		formatString: 0.00
+		summarizeBy: none
+
+	column signal_strength
+		dataType: string
+		summarizeBy: none
+
+	partition fact_signals = m
+		mode: import
+		source =
+				let
+					Source = Csv.Document(File.Contents(ExportFolder & "\fact_signals.csv"), [Delimiter = ",", Columns = 8, Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+					Headers = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
+					Typed = Table.TransformColumnTypes(Headers, {{"symbol", type text}, {"date", type date}, {"trend_signal", Int64.Type}, {"momentum_signal", Int64.Type}, {"ma_cross_signal", Int64.Type}, {"breakout_signal", Int64.Type}, {"composite_signal", type number}, {"signal_strength", type text}})
+				in
+					Typed

@@ -1,0 +1,45 @@
+/// 全部单向（dim → fact 过滤），一对多。不用双向：同粒度双 fact 的双向过滤
+/// 会制造 Power BI 自行仲裁的歧义。fact_event_odds 无 symbol 列——不硬造关系。
+relationship date_to_prices
+	fromColumn: fact_prices.date
+	toColumn: dim_date.date
+
+relationship date_to_signals
+	fromColumn: fact_signals.date
+	toColumn: dim_date.date
+
+relationship date_to_backtest_equity
+	fromColumn: fact_backtest_equity.date
+	toColumn: dim_date.date
+
+relationship date_to_positions
+	fromColumn: fact_positions.as_of
+	toColumn: dim_date.date
+
+relationship date_to_news
+	fromColumn: fact_news.date
+	toColumn: dim_date.date
+
+relationship date_to_event_odds
+	fromColumn: fact_event_odds.as_of
+	toColumn: dim_date.date
+
+relationship symbol_to_prices
+	fromColumn: fact_prices.symbol
+	toColumn: dim_symbol.symbol
+
+relationship symbol_to_signals
+	fromColumn: fact_signals.symbol
+	toColumn: dim_symbol.symbol
+
+relationship symbol_to_positions
+	fromColumn: fact_positions.symbol
+	toColumn: dim_symbol.symbol
+
+relationship symbol_to_news
+	fromColumn: fact_news.symbol
+	toColumn: dim_symbol.symbol
+
+relationship run_to_equity
+	fromColumn: fact_backtest_equity.run_id
+	toColumn: fact_backtest_results.run_id

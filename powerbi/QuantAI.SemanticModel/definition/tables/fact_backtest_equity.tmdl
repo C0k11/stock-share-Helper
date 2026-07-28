@@ -1,0 +1,35 @@
+table fact_backtest_equity
+
+	column run_id
+		dataType: string
+		summarizeBy: none
+
+	column date
+		dataType: dateTime
+		formatString: yyyy-mm-dd
+		summarizeBy: none
+
+	column equity
+		dataType: double
+		formatString: #,0.00
+		summarizeBy: none
+
+	column daily_return
+		dataType: double
+		formatString: 0.00%;-0.00%;0.00%
+		summarizeBy: none
+
+	column drawdown
+		dataType: double
+		formatString: 0.00%;-0.00%;0.00%
+		summarizeBy: none
+
+	partition fact_backtest_equity = m
+		mode: import
+		source =
+				let
+					Source = Csv.Document(File.Contents(ExportFolder & "\fact_backtest_equity.csv"), [Delimiter = ",", Columns = 5, Encoding = 65001, QuoteStyle = QuoteStyle.Csv]),
+					Headers = Table.PromoteHeaders(Source, [PromoteAllScalars = true]),
+					Typed = Table.TransformColumnTypes(Headers, {{"run_id", type text}, {"date", type date}, {"equity", type number}, {"daily_return", type number}, {"drawdown", type number}})
+				in
+					Typed

@@ -1,0 +1,198 @@
+// =============================================================================
+// QuantAI Portfolio Analytics — DAX measure set
+// =============================================================================
+// Paste each measure into Power BI Desktop via Modeling > New measure.
+// Home table suggestions are noted per section; the home table only affects
+// where the measure is listed in the Fields pane, never the result.
+//
+// The interesting ones are the windowed measures at the bottom. Tableau's table
+// calculations (WINDOW_AVG, WINDOW_STDEV) address rows by their position in the
+// rendered view; DAX has no such concept and must rebuild the window from the
+// data itself. Translating them as "last N days" instead of "last N rows" is
+// the single easiest way to get numbers that look plausible and are wrong.
+// =============================================================================
+
+
+// ---------------------------------------------------------------- Portfolio
+// Home table: fact_positions
+// The export holds one snapshot (as_of 2026-07-11, 18 rows). These stay as
+// simple aggregates rather than being wrapped in a latest-snapshot filter,
+// because adding history later should change the numbers, not the formulas.
+
+Total Market Value = SUM ( fact_positions[market_value] )
+
+Total Cost = SUM ( fact_positions[cost_value] )
+
+Unrealized PnL = SUM ( fact_positions[unrealized_pnl] )
+
+// ABS on the denominator: a short book can carry negative cost, and a signed
+// denominator would silently flip the sign of the return.
+Unrealized PnL % =
+DIVIDE ( [Unrealized PnL], ABS ( [Total Cost] ) )
+
+// Concentration: the share of the book a single symbol represents. ALLSELECTED
+// keeps slicer context (so filtering to a sector re-bases the weights) while
+// removing the symbol filter that the visual itself applies.
+Position Weight % =
+DIVIDE (
+    [Total Market Value],
+    CALCULATE ( [Total Market Value], ALLSELECTED ( fact_positions[symbol] ) )
+)
+
+Positions Held = DISTINCTCOUNT ( fact_positions[symbol] )
+
+// Positive/negative split, for the KPI card colour and the win-rate style stat.
+Winning Positions =
+CALCULATE ( [Positions Held], fact_positions[unrealized_pnl] > 0 )
+
+Position Win Rate =
+DIVIDE ( [Winning Positions], [Positions Held] )
+
+
+// ----------------------------------------------------------------- Backtest
+// Home table: fact_backtest_results
+// NOTE: the current export contains exactly ONE run (run_id = "const60_SPY",
+// strategy const_weight_0.6, fill_timing next_open, 500 trading days). The
+// spec's "colour the equity curve by run_id" therefore renders a single line
+// today. The measures are written to survive more runs being added.
+
+Final Equity = CALCULATE ( LASTNONBLANK ( fact_backtest_equity[equity], 1 ) )
+
+Max Drawdown = MIN ( fact_backtest_equity[drawdown] )
+
+// Selected-run scalars. SELECTEDVALUE returns blank on multi-select rather
+// than an arbitrary row, which is the honest behaviour for a KPI card.
+Sharpe = SELECTEDVALUE ( fact_backtest_results[sharpe] )
+CAGR = SELECTEDVALUE ( fact_backtest_results[cagr] )
+Annual Volatility = SELECTEDVALUE ( fact_backtest_results[annual_volatility] )
+Total Return = SELECTEDVALUE ( fact_backtest_results[total_return] )
+Backtest Win Rate = SELECTEDVALUE ( fact_backtest_results[win_rate] )
+
+// Benchmark rebased to the strategy's starting equity so both series share an
+// axis. The base close is pinned to the first date in the *current selection*,
+// so zooming the date slicer re-bases the benchmark instead of leaving it
+// anchored off-screen — matching what the Tableau spec does with FIXED.
+Benchmark Rebased =
+VAR StartEquity =
+    CALCULATE (
+        FIRSTNONBLANK ( fact_backtest_equity[equity], 1 ),
+        ALLSELECTED ( fact_backtest_equity )
+    )
+VAR FirstDate =
+    CALCULATE ( MIN ( fact_prices[date] ), ALLSELECTED ( fact_prices ) )
+VAR BaseClose =
+    CALCULATE ( AVERAGE ( fact_prices[close] ), fact_prices[date] = FirstDate )
+RETURN
+    DIVIDE ( AVERAGE ( fact_prices[close] ), BaseClose ) * StartEquity
+
+
+// ------------------------------------------------------------------- Prices
+// Home table: fact_prices
+
+Close Price = AVERAGE ( fact_prices[close] )
+
+Avg Daily Return = AVERAGE ( fact_prices[daily_return] )
+
+// pct_from_52w_high is precomputed in the warehouse. LASTNONBLANK, not MAX:
+// we want the most recent observation, not the largest one.
+Pct From 52w High =
+CALCULATE (
+    LASTNONBLANK ( fact_prices[pct_from_52w_high], 1 ),
+    LASTNONBLANK ( fact_prices[date], 1 )
+)
+
+
+// ------------------------------------------------------------------ Signals
+// Home table: fact_signals
+
+Composite Signal = AVERAGE ( fact_signals[composite_signal] )
+
+// A count of symbols currently flagged, for a headline number on the signals page.
+Symbols Long Signal =
+CALCULATE (
+    DISTINCTCOUNT ( fact_signals[symbol] ),
+    fact_signals[composite_signal] > 0
+)
+
+Symbols Short Signal =
+CALCULATE (
+    DISTINCTCOUNT ( fact_signals[symbol] ),
+    fact_signals[composite_signal] < 0
+)
+
+
+// =============================================================================
+// WINDOWED MEASURES — the Tableau table calculations, rebuilt
+// =============================================================================
+// Tableau spec:
+//     WINDOW_STDEV( SUM([daily_return]), -19, 0 ) * SQRT(252)
+//     WINDOW_AVG( SUM([close]), -19, 0 )      // and -49, -199
+//
+// "-19, 0" means the previous 19 rows plus the current one, where "row" is a
+// mark in the rendered view. With a date axis filtered to trading days, that is
+// 20 TRADING days.
+//
+// The tempting DAX translation is DATESINPERIOD( ..., -20, DAY ). Do not use it
+// here: 20 CALENDAR days spans roughly 14 trading days once weekends and
+// holidays are removed, so the sample shrinks by about 30%. Standard deviation
+// over a smaller sample is still a perfectly reasonable-looking number, which
+// is exactly why this error survives review.
+//
+// The pattern below takes the last N dates that actually carry data, which is
+// what the Tableau version does.
+// -----------------------------------------------------------------------------
+
+Rolling Volatility 20D =
+VAR CurrentDate = MAX ( fact_prices[date] )
+VAR Last20TradingDays =
+    TOPN (
+        20,
+        FILTER (
+            ALLSELECTED ( fact_prices[date] ),
+            fact_prices[date] <= CurrentDate
+        ),
+        fact_prices[date], DESC
+    )
+RETURN
+    CALCULATE (
+        STDEV.S ( fact_prices[daily_return] ),
+        Last20TradingDays
+    ) * SQRT ( 252 )
+
+MA 20 =
+VAR CurrentDate = MAX ( fact_prices[date] )
+VAR Window =
+    TOPN (
+        20,
+        FILTER ( ALLSELECTED ( fact_prices[date] ), fact_prices[date] <= CurrentDate ),
+        fact_prices[date], DESC
+    )
+RETURN
+    CALCULATE ( AVERAGE ( fact_prices[close] ), Window )
+
+MA 50 =
+VAR CurrentDate = MAX ( fact_prices[date] )
+VAR Window =
+    TOPN (
+        50,
+        FILTER ( ALLSELECTED ( fact_prices[date] ), fact_prices[date] <= CurrentDate ),
+        fact_prices[date], DESC
+    )
+RETURN
+    CALCULATE ( AVERAGE ( fact_prices[close] ), Window )
+
+// 200-day MA needs 200 trading days of history. dim_symbol.price_bars is 500
+// for the symbols in this export, so it is defined for roughly the last 300
+// days of the series and blank before that. Blank is the correct answer there —
+// do not coalesce it to zero, which would draw a line crashing to the axis.
+MA 200 =
+VAR CurrentDate = MAX ( fact_prices[date] )
+VAR Window =
+    TOPN (
+        200,
+        FILTER ( ALLSELECTED ( fact_prices[date] ), fact_prices[date] <= CurrentDate ),
+        fact_prices[date], DESC
+    )
+VAR DaysAvailable = COUNTROWS ( Window )
+RETURN
+    IF ( DaysAvailable = 200, CALCULATE ( AVERAGE ( fact_prices[close] ), Window ) )

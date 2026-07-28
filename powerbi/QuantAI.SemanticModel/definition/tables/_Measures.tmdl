@@ -1,0 +1,366 @@
+/// 度量宿主表（空表，只挂度量）。窗口度量是本工程的技术核心：
+/// Tableau WINDOW_STDEV/WINDOW_AVG 的"窗口"是渲染视图里的行位置，DAX 没有这个概念，
+/// 必须从数据自身重建——三条语义约定（README 有完整论证）：
+/// 1) 窗口 = 20 个交易行（该标的实际有 bar 的日期 TOPN 20），不是 DATESINPERIOD 的 20 日历天；
+/// 2) WINDOW_STDEV 是样本标准差 → STDEVX.S（ddof=1），不是 STDEVX.P；
+/// 3) 窗口不足 20 行返回 BLANK，绝不拿半截窗口算个像样的数。
+table _Measures
+
+	column '_'
+		dataType: string
+		isHidden
+		summarizeBy: none
+
+	partition _Measures = m
+		mode: import
+		source =
+				let
+					Source = Table.FromRows({}, type table [#"_" = text])
+				in
+					Source
+
+	// ------------------------------------------------------------- Windowed (Spec §3.4/§3.5)
+
+	measure 'Rolling Vol 20D (Ann)' =
+			VAR CurrentDate = MAX ( dim_date[date] )
+			VAR Window20 =
+			    TOPN (
+			        20,
+			        CALCULATETABLE (
+			            VALUES ( fact_prices[date] ),
+			            REMOVEFILTERS ( dim_date ),
+			            fact_prices[date] <= CurrentDate
+			        ),
+			        fact_prices[date], DESC
+			    )
+			VAR Rets =
+			    ADDCOLUMNS ( Window20, "@ret", CALCULATE ( AVERAGE ( fact_prices[daily_return] ) ) )
+			RETURN
+			    IF ( COUNTROWS ( Window20 ) = 20, STDEVX.S ( Rets, [@ret] ) * SQRT ( 252 ) )
+		formatString: 0.00%;-0.00%;0.00%
+		displayFolder: Windowed
+
+	measure 'MA 20' =
+			VAR CurrentDate = MAX ( dim_date[date] )
+			VAR W =
+			    TOPN ( 20,
+			        CALCULATETABLE ( VALUES ( fact_prices[date] ), REMOVEFILTERS ( dim_date ),
+			                         fact_prices[date] <= CurrentDate ),
+			        fact_prices[date], DESC )
+			RETURN IF ( COUNTROWS ( W ) = 20, AVERAGEX ( W, CALCULATE ( AVERAGE ( fact_prices[close] ) ) ) )
+		formatString: #,0.00
+		displayFolder: Windowed
+
+	measure 'MA 50' =
+			VAR CurrentDate = MAX ( dim_date[date] )
+			VAR W =
+			    TOPN ( 50,
+			        CALCULATETABLE ( VALUES ( fact_prices[date] ), REMOVEFILTERS ( dim_date ),
+			                         fact_prices[date] <= CurrentDate ),
+			        fact_prices[date], DESC )
+			RETURN IF ( COUNTROWS ( W ) = 50, AVERAGEX ( W, CALCULATE ( AVERAGE ( fact_prices[close] ) ) ) )
+		formatString: #,0.00
+		displayFolder: Windowed
+
+	measure 'MA 200' =
+			VAR CurrentDate = MAX ( dim_date[date] )
+			VAR W =
+			    TOPN ( 200,
+			        CALCULATETABLE ( VALUES ( fact_prices[date] ), REMOVEFILTERS ( dim_date ),
+			                         fact_prices[date] <= CurrentDate ),
+			        fact_prices[date], DESC )
+			RETURN IF ( COUNTROWS ( W ) = 200, AVERAGEX ( W, CALCULATE ( AVERAGE ( fact_prices[close] ) ) ) )
+		formatString: #,0.00
+		displayFolder: Windowed
+
+	measure 'SPY Indexed 100' =
+			VAR StartDate =
+			    CALCULATE ( MIN ( fact_prices[date] ), ALLSELECTED ( dim_date ),
+			                REMOVEFILTERS ( dim_symbol ), fact_prices[symbol] = "SPY" )
+			VAR Base =
+			    CALCULATE ( AVERAGE ( fact_prices[close] ), REMOVEFILTERS ( dim_symbol, dim_date ),
+			                fact_prices[symbol] = "SPY", fact_prices[date] = StartDate )
+			VAR Cur =
+			    CALCULATE ( AVERAGE ( fact_prices[close] ), REMOVEFILTERS ( dim_symbol ),
+			                fact_prices[symbol] = "SPY" )
+			RETURN DIVIDE ( Cur, Base ) * 100
+		formatString: 0.0
+		displayFolder: Windowed
+
+	measure 'Equity Indexed 100' =
+			VAR StartDate = CALCULATE ( MIN ( fact_backtest_equity[date] ), ALLSELECTED ( dim_date ) )
+			VAR Base =
+			    CALCULATE ( AVERAGE ( fact_backtest_equity[equity] ), REMOVEFILTERS ( dim_date ),
+			                fact_backtest_equity[date] = StartDate )
+			RETURN DIVIDE ( AVERAGE ( fact_backtest_equity[equity] ), Base ) * 100
+		formatString: 0.0
+		displayFolder: Windowed
+
+	// ------------------------------------------------------------- Prices
+
+	measure 'Close' = AVERAGE ( fact_prices[close] )
+		formatString: #,0.00
+		displayFolder: Prices
+
+	measure 'Volume' = SUM ( fact_prices[volume] )
+		formatString: #,0
+		displayFolder: Prices
+
+	measure 'Daily Return' = AVERAGE ( fact_prices[daily_return] )
+		formatString: 0.00%;-0.00%;0.00%
+		displayFolder: Prices
+
+	measure 'Last Close' =
+			VAR d = CALCULATE ( MAX ( fact_prices[date] ), ALLSELECTED ( dim_date ) )
+			RETURN CALCULATE ( AVERAGE ( fact_prices[close] ), REMOVEFILTERS ( dim_date ),
+			                   fact_prices[date] = d )
+		formatString: #,0.00
+		displayFolder: Prices
+
+	measure 'Pct From 52W High (Latest)' =
+			VAR d = CALCULATE ( MAX ( fact_prices[date] ), ALLSELECTED ( dim_date ) )
+			RETURN CALCULATE ( AVERAGE ( fact_prices[pct_from_52w_high] ),
+			                   REMOVEFILTERS ( dim_date ), fact_prices[date] = d )
+		formatString: 0.00%;-0.00%;0.00%
+		displayFolder: Prices
+
+	measure 'Symbols Tracked' = DISTINCTCOUNT ( fact_prices[symbol] )
+		formatString: 0
+		displayFolder: Prices
+
+	measure 'Trading Days' = CALCULATE ( COUNTROWS ( dim_date ), dim_date[is_trading_day] = TRUE () )
+		formatString: 0
+		displayFolder: Prices
+
+	// ------------------------------------------------------------- Risk
+
+	measure 'Worst Day' = MIN ( fact_prices[daily_return] )
+		formatString: 0.00%;-0.00%;0.00%
+		displayFolder: Risk
+
+	measure 'Best Day' = MAX ( fact_prices[daily_return] )
+		formatString: 0.00%;-0.00%;0.00%
+		displayFolder: Risk
+
+	measure 'Return P05' = PERCENTILEX.INC ( fact_prices, fact_prices[daily_return], 0.05 )
+		formatString: 0.00%;-0.00%;0.00%
+		displayFolder: Risk
+
+	// ------------------------------------------------------------- Positions
+	// 钉在最新快照：日期切片不该让组合数字消失。
+
+	measure 'Latest As Of' = CALCULATE ( MAX ( fact_positions[as_of] ), REMOVEFILTERS () )
+		formatString: yyyy-mm-dd
+		displayFolder: Positions
+
+	measure 'Market Value' =
+			CALCULATE ( SUM ( fact_positions[market_value] ), REMOVEFILTERS ( dim_date ),
+			            fact_positions[as_of] = [Latest As Of] )
+		formatString: #,0.00
+		displayFolder: Positions
+
+	measure 'Cost Value' =
+			CALCULATE ( SUM ( fact_positions[cost_value] ), REMOVEFILTERS ( dim_date ),
+			            fact_positions[as_of] = [Latest As Of] )
+		formatString: #,0.00
+		displayFolder: Positions
+
+	measure 'Unrealized PnL' =
+			CALCULATE ( SUM ( fact_positions[unrealized_pnl] ), REMOVEFILTERS ( dim_date ),
+			            fact_positions[as_of] = [Latest As Of] )
+		formatString: #,0.00
+		displayFolder: Positions
+
+	measure 'Unrealized PnL %' = DIVIDE ( [Unrealized PnL], ABS ( [Cost Value] ) )
+		formatString: 0.00%;-0.00%;0.00%
+		displayFolder: Positions
+
+	measure 'PnL Colour' = IF ( [Unrealized PnL] >= 0, "#26A69A", "#EF5350" )
+		displayFolder: Positions
+
+	// ------------------------------------------------------------- Signals
+
+	measure 'Composite Signal' = AVERAGE ( fact_signals[composite_signal] )
+		formatString: 0.00
+		displayFolder: Signals
+
+	measure 'Signal Days' = COUNTROWS ( fact_signals )
+		formatString: #,0
+		displayFolder: Signals
+
+	measure 'Strong Long %' =
+			DIVIDE ( CALCULATE ( COUNTROWS ( fact_signals ),
+			         fact_signals[signal_strength] = "strong_long" ), COUNTROWS ( fact_signals ) )
+		formatString: 0.00%;-0.00%;0.00%
+		displayFolder: Signals
+
+	measure 'Strong Short %' =
+			DIVIDE ( CALCULATE ( COUNTROWS ( fact_signals ),
+			         fact_signals[signal_strength] = "strong_short" ), COUNTROWS ( fact_signals ) )
+		formatString: 0.00%;-0.00%;0.00%
+		displayFolder: Signals
+
+	// ------------------------------------------------------------- Backtest（单行表，SELECTEDVALUE 取标量）
+
+	measure 'Sharpe' = SELECTEDVALUE ( fact_backtest_results[sharpe] )
+		formatString: 0.00
+		displayFolder: Backtest
+
+	measure 'CAGR' = SELECTEDVALUE ( fact_backtest_results[cagr] )
+		formatString: 0.00%;-0.00%;0.00%
+		displayFolder: Backtest
+
+	measure 'Annual Volatility' = SELECTEDVALUE ( fact_backtest_results[annual_volatility] )
+		formatString: 0.00%;-0.00%;0.00%
+		displayFolder: Backtest
+
+	measure 'Max Drawdown' = SELECTEDVALUE ( fact_backtest_results[max_drawdown] )
+		formatString: 0.00%;-0.00%;0.00%
+		displayFolder: Backtest
+
+	measure 'Win Rate' = SELECTEDVALUE ( fact_backtest_results[win_rate] )
+		formatString: 0.00%;-0.00%;0.00%
+		displayFolder: Backtest
+
+	measure 'Total Return' = SELECTEDVALUE ( fact_backtest_results[total_return] )
+		formatString: 0.00%;-0.00%;0.00%
+		displayFolder: Backtest
+
+	measure 'Drawdown' = MIN ( fact_backtest_equity[drawdown] )
+		formatString: 0.00%;-0.00%;0.00%
+		displayFolder: Backtest
+
+	// ------------------------------------------------------------- News & Events
+
+	measure 'News Count' = COUNTROWS ( fact_news )
+		formatString: #,0
+		displayFolder: News & Events
+
+	measure 'Scored News' = CALCULATE ( COUNTROWS ( fact_news ), NOT ISBLANK ( fact_news[sentiment] ) )
+		formatString: #,0
+		displayFolder: News & Events
+
+	measure 'Scored Coverage %' = DIVIDE ( [Scored News], [News Count] )
+		formatString: 0.00%;-0.00%;0.00%
+		displayFolder: News & Events
+
+	measure 'Avg Sentiment' = AVERAGE ( fact_news[sentiment] )
+		formatString: 0.00
+		displayFolder: News & Events
+
+	measure 'Odds Volume 24h' = SUM ( fact_event_odds[volume_24h] )
+		formatString: #,0.00
+		displayFolder: News & Events
+
+	measure 'Latest Yes Price' =
+			VAR d = CALCULATE ( MAX ( fact_event_odds[as_of] ), ALLSELECTED ( dim_date ) )
+			RETURN CALCULATE ( AVERAGE ( fact_event_odds[yes_price] ),
+			                   REMOVEFILTERS ( dim_date ), fact_event_odds[as_of] = d )
+		formatString: 0.00%;-0.00%;0.00%
+		displayFolder: News & Events
+
+	// ------------------------------------------------------------- QA（对账 pandas 期望值）
+	// QA 页表格：qa_expected 每行经 [QA Actual] 取到对应 DAX 实际值，[QA Status] 判 PASS/FAIL。
+	// 数值比较：相对误差 1e-6。对不上就是 DAX 错，期望值只能由 verify_dax.py 重新生成。
+	// 归一化两测点用独立钉日期表达式（生产度量的 ALLSELECTED 语义依赖视觉上下文，
+	// 无法在 QA 表格行上下文里如实复现——README 已注明该边界）。
+
+	measure 'QA Actual Value' =
+			VAR cid = SELECTEDVALUE ( qa_expected[check_id] )
+			RETURN
+			    SWITCH (
+			        cid,
+			        "rowcount_dim_date", CALCULATE ( COUNTROWS ( dim_date ), REMOVEFILTERS () ),
+			        "rowcount_dim_symbol", CALCULATE ( COUNTROWS ( dim_symbol ), REMOVEFILTERS () ),
+			        "rowcount_fact_prices", CALCULATE ( COUNTROWS ( fact_prices ), REMOVEFILTERS () ),
+			        "rowcount_fact_signals", CALCULATE ( COUNTROWS ( fact_signals ), REMOVEFILTERS () ),
+			        "rowcount_fact_news", CALCULATE ( COUNTROWS ( fact_news ), REMOVEFILTERS () ),
+			        "rowcount_fact_event_odds", CALCULATE ( COUNTROWS ( fact_event_odds ), REMOVEFILTERS () ),
+			        "rowcount_fact_backtest_equity", CALCULATE ( COUNTROWS ( fact_backtest_equity ), REMOVEFILTERS () ),
+			        "rowcount_fact_backtest_results", CALCULATE ( COUNTROWS ( fact_backtest_results ), REMOVEFILTERS () ),
+			        "rowcount_fact_positions", CALCULATE ( COUNTROWS ( fact_positions ), REMOVEFILTERS () ),
+			        "spy_vol20_2026-07-21", CALCULATE ( [Rolling Vol 20D (Ann)], REMOVEFILTERS (), dim_symbol[symbol] = "SPY", dim_date[date] = DATE ( 2026, 7, 21 ) ),
+			        "spy_vol20_2026-07-22", CALCULATE ( [Rolling Vol 20D (Ann)], REMOVEFILTERS (), dim_symbol[symbol] = "SPY", dim_date[date] = DATE ( 2026, 7, 22 ) ),
+			        "spy_vol20_2026-07-23", CALCULATE ( [Rolling Vol 20D (Ann)], REMOVEFILTERS (), dim_symbol[symbol] = "SPY", dim_date[date] = DATE ( 2026, 7, 23 ) ),
+			        "spy_vol20_2026-07-24", CALCULATE ( [Rolling Vol 20D (Ann)], REMOVEFILTERS (), dim_symbol[symbol] = "SPY", dim_date[date] = DATE ( 2026, 7, 24 ) ),
+			        "spy_vol20_2026-07-27", CALCULATE ( [Rolling Vol 20D (Ann)], REMOVEFILTERS (), dim_symbol[symbol] = "SPY", dim_date[date] = DATE ( 2026, 7, 27 ) ),
+			        "spy_ma20_2026-07-21", CALCULATE ( [MA 20], REMOVEFILTERS (), dim_symbol[symbol] = "SPY", dim_date[date] = DATE ( 2026, 7, 21 ) ),
+			        "spy_ma20_2026-07-22", CALCULATE ( [MA 20], REMOVEFILTERS (), dim_symbol[symbol] = "SPY", dim_date[date] = DATE ( 2026, 7, 22 ) ),
+			        "spy_ma20_2026-07-23", CALCULATE ( [MA 20], REMOVEFILTERS (), dim_symbol[symbol] = "SPY", dim_date[date] = DATE ( 2026, 7, 23 ) ),
+			        "spy_ma20_2026-07-24", CALCULATE ( [MA 20], REMOVEFILTERS (), dim_symbol[symbol] = "SPY", dim_date[date] = DATE ( 2026, 7, 24 ) ),
+			        "spy_ma20_2026-07-27", CALCULATE ( [MA 20], REMOVEFILTERS (), dim_symbol[symbol] = "SPY", dim_date[date] = DATE ( 2026, 7, 27 ) ),
+			        "spy_ma50_2026-07-21", CALCULATE ( [MA 50], REMOVEFILTERS (), dim_symbol[symbol] = "SPY", dim_date[date] = DATE ( 2026, 7, 21 ) ),
+			        "spy_ma50_2026-07-22", CALCULATE ( [MA 50], REMOVEFILTERS (), dim_symbol[symbol] = "SPY", dim_date[date] = DATE ( 2026, 7, 22 ) ),
+			        "spy_ma50_2026-07-23", CALCULATE ( [MA 50], REMOVEFILTERS (), dim_symbol[symbol] = "SPY", dim_date[date] = DATE ( 2026, 7, 23 ) ),
+			        "spy_ma50_2026-07-24", CALCULATE ( [MA 50], REMOVEFILTERS (), dim_symbol[symbol] = "SPY", dim_date[date] = DATE ( 2026, 7, 24 ) ),
+			        "spy_ma50_2026-07-27", CALCULATE ( [MA 50], REMOVEFILTERS (), dim_symbol[symbol] = "SPY", dim_date[date] = DATE ( 2026, 7, 27 ) ),
+			        "spy_ma200_2026-07-21", CALCULATE ( [MA 200], REMOVEFILTERS (), dim_symbol[symbol] = "SPY", dim_date[date] = DATE ( 2026, 7, 21 ) ),
+			        "spy_ma200_2026-07-22", CALCULATE ( [MA 200], REMOVEFILTERS (), dim_symbol[symbol] = "SPY", dim_date[date] = DATE ( 2026, 7, 22 ) ),
+			        "spy_ma200_2026-07-23", CALCULATE ( [MA 200], REMOVEFILTERS (), dim_symbol[symbol] = "SPY", dim_date[date] = DATE ( 2026, 7, 23 ) ),
+			        "spy_ma200_2026-07-24", CALCULATE ( [MA 200], REMOVEFILTERS (), dim_symbol[symbol] = "SPY", dim_date[date] = DATE ( 2026, 7, 24 ) ),
+			        "spy_ma200_2026-07-27", CALCULATE ( [MA 200], REMOVEFILTERS (), dim_symbol[symbol] = "SPY", dim_date[date] = DATE ( 2026, 7, 27 ) ),
+			        "spy_indexed_end",
+			            VAR b = CALCULATE ( AVERAGE ( fact_prices[close] ), REMOVEFILTERS (), fact_prices[symbol] = "SPY", fact_prices[date] = DATE ( 2024, 7, 29 ) )
+			            VAR c = CALCULATE ( AVERAGE ( fact_prices[close] ), REMOVEFILTERS (), fact_prices[symbol] = "SPY", fact_prices[date] = DATE ( 2026, 7, 27 ) )
+			            RETURN DIVIDE ( c, b ) * 100,
+			        "equity_indexed_end",
+			            VAR b2 = CALCULATE ( AVERAGE ( fact_backtest_equity[equity] ), REMOVEFILTERS (), fact_backtest_equity[date] = DATE ( 2024, 7, 29 ) )
+			            VAR c2 = CALCULATE ( AVERAGE ( fact_backtest_equity[equity] ), REMOVEFILTERS (), fact_backtest_equity[date] = DATE ( 2026, 7, 27 ) )
+			            RETURN DIVIDE ( c2, b2 ) * 100,
+			        "bt_total_return", [Total Return],
+			        "bt_cagr", [CAGR],
+			        "bt_annual_volatility", [Annual Volatility],
+			        "bt_sharpe", [Sharpe],
+			        "bt_max_drawdown", [Max Drawdown],
+			        "bt_win_rate", [Win Rate],
+			        "bt_total_turnover", SELECTEDVALUE ( fact_backtest_results[total_turnover] ),
+			        "pos_market_value", [Market Value],
+			        "pos_cost_value", [Cost Value],
+			        "pos_unrealized_pnl", [Unrealized PnL],
+			        "pos_unrealized_pnl_pct", [Unrealized PnL %],
+			        "sig_strong_short", CALCULATE ( COUNTROWS ( fact_signals ), REMOVEFILTERS (), fact_signals[signal_strength] = "strong_short" ),
+			        "sig_strong_long", CALCULATE ( COUNTROWS ( fact_signals ), REMOVEFILTERS (), fact_signals[signal_strength] = "strong_long" ),
+			        "sig_weak_short", CALCULATE ( COUNTROWS ( fact_signals ), REMOVEFILTERS (), fact_signals[signal_strength] = "weak_short" ),
+			        "sig_weak_long", CALCULATE ( COUNTROWS ( fact_signals ), REMOVEFILTERS (), fact_signals[signal_strength] = "weak_long" ),
+			        "sig_neutral", CALCULATE ( COUNTROWS ( fact_signals ), REMOVEFILTERS (), fact_signals[signal_strength] = "neutral" ),
+			        "news_total", CALCULATE ( [News Count], REMOVEFILTERS () ),
+			        "news_scored", CALCULATE ( [Scored News], REMOVEFILTERS () ),
+			        "news_coverage", CALCULATE ( [Scored Coverage %], REMOVEFILTERS () ),
+			        "encoding_curly_quote_rows",
+			            CALCULATE ( COUNTROWS ( FILTER ( fact_event_odds, CONTAINSSTRING ( fact_event_odds[event_title], UNICHAR ( 8217 ) ) ) ), REMOVEFILTERS () ),
+			        BLANK ()
+			    )
+		displayFolder: QA
+
+	measure 'QA Status' =
+			VAR cid = SELECTEDVALUE ( qa_expected[check_id] )
+			VAR expT = SELECTEDVALUE ( qa_expected[expected] )
+			RETURN
+			    SWITCH (
+			        TRUE (),
+			        cid = "rowcount_fact_trades", "SKIPPED — not loaded by design (source has 0 rows)",
+			        cid = "pos_latest_as_of",
+			            IF ( FORMAT ( [Latest As Of], "yyyy-MM-dd" ) = expT, "PASS", "FAIL" ),
+			        ISBLANK ( [QA Actual Value] ), "FAIL — actual is blank",
+			        ABS ( [QA Actual Value] - VALUE ( expT ) )
+			            <= 0.000001 * MAX ( ABS ( VALUE ( expT ) ), 0.000001 ), "PASS",
+			        "FAIL"
+			    )
+		displayFolder: QA
+
+	measure 'QA Actual (display)' =
+			VAR cid = SELECTEDVALUE ( qa_expected[check_id] )
+			RETURN
+			    IF ( cid = "pos_latest_as_of",
+			         FORMAT ( [Latest As Of], "yyyy-MM-dd" ),
+			         FORMAT ( [QA Actual Value], "0.##########" ) )
+		displayFolder: QA
+
+	measure 'QA Pass Count' =
+			COUNTROWS ( FILTER ( VALUES ( qa_expected[check_id] ), [QA Status] = "PASS" ) )
+		formatString: 0
+		displayFolder: QA
+
+	measure 'QA Total Count' = COUNTROWS ( qa_expected )
+		formatString: 0
+		displayFolder: QA
