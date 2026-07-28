@@ -372,17 +372,19 @@ def _render_workstation_page(st) -> None:  # pragma: no cover - 需 streamlit �
         o = float(df["open"].dropna().iloc[-1]) if "open" in df.columns else float("nan")
         h = float(df["high"].dropna().max()) if "high" in df.columns else float("nan")
         l = float(df["low"].dropna().min()) if "low" in df.columns else float("nan")
+        from quantai.ui import theme
+
         up = chg >= 0
-        color = "#26A69A" if up else "#EF5350"
+        color = theme.UP if up else theme.DOWN
         # 自定义头部（WS 式：大价格 + 内联涨跌；不用 st.metric——$ 会触发 LaTeX、涨跌不能内联）
         st.markdown(
             f"""<div style="line-height:1.15;margin:2px 0 6px 0">
-  <span style="color:#8A8A93;font-size:0.95rem">{sym}</span><br>
+  <span style="color:{theme.TEXT_MUTED};font-size:0.95rem">{sym}</span><br>
   <span style="font-size:2.3rem;font-weight:700">${last:,.2f}</span>
   <span style="color:{color};font-size:1.05rem;font-weight:600;margin-left:8px">
-    {chg:+,.2f} ({chg_pct:+.2f}%) <span style="color:#8A8A93;font-weight:400">{tf}</span>
+    {chg:+,.2f} ({chg_pct:+.2f}%) <span style="color:{theme.TEXT_MUTED};font-weight:400">{tf}</span>
   </span><br>
-  <span style="color:#8A8A93;font-size:0.85rem">
+  <span style="color:{theme.TEXT_MUTED};font-size:0.85rem">
     O&nbsp;${o:,.2f}&emsp;H&nbsp;${h:,.2f}&emsp;L&nbsp;${l:,.2f}&emsp;C&nbsp;${last:,.2f}
     &emsp;·&emsp;{interval} bars</span>
 </div>""",

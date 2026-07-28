@@ -1,10 +1,12 @@
-# QuantAI 仪表盘主题（Wealthsimple 式暗色）
+# QuantAI 仪表盘主题（暗色）
+# 色值取自设计令牌 quantai/ui/theme.py（与 powerbi/theme/quantai-dark.json 同源，
+# toml 不能 import——改任何一处必须三处同步：theme.py / 本文件 / PBI json）。
 [theme]
 base = "dark"
-primaryColor = "#26A69A"
-backgroundColor = "#0E0E10"
-secondaryBackgroundColor = "#1A1A1E"
-textColor = "#EAEAEA"
+primaryColor = "#26A69A"              # theme.UP
+backgroundColor = "#1B1B1F"           # theme.BG（= PBI background）
+secondaryBackgroundColor = "#141417"  # theme.BG_OUTER（= PBI page.outspace）
+textColor = "#E8E8EC"                 # theme.TEXT（= PBI foreground）
 font = "sans serif"
 
 [browser]

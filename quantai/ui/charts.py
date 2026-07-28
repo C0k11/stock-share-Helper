@@ -4,8 +4,9 @@
 故可离线单测（断言 trace 结构/主题），渲染层（streamlit_app）只管 `st.plotly_chart`。
 指标全部复用 `quantai.analysis`（与 CLI/仓库同一套数字）。
 
-主题：暗色专业风（moomoo 式配色）：涨 #26A69A（青绿）/ 跌 #EF5350（红），
-背景 #131722，网格低对比。美股惯例：绿涨红跌。
+主题：暗色专业风：涨 #26A69A（青绿）/ 跌 #EF5350（红），背景 #1B1B1F，
+网格低对比。美股惯例：绿涨红跌。色值统一取自 `quantai.ui.theme`（设计令牌，
+与 Power BI 主题同源），本文件不再散落硬编码。
 """
 
 from __future__ import annotations
@@ -18,11 +19,13 @@ from plotly.subplots import make_subplots
 
 from quantai.analysis import bollinger, macd, rsi, sma
 
-UP_COLOR = "#26A69A"
-DOWN_COLOR = "#EF5350"
-_BG = "#131722"
-_GRID = "#1F2A38"
-_TEXT = "#B2B5BE"
+from quantai.ui import theme
+
+UP_COLOR = theme.UP
+DOWN_COLOR = theme.DOWN
+_BG = theme.BG
+_GRID = theme.GRID
+_TEXT = theme.CHART_TEXT
 
 DARK_LAYOUT = dict(
     template="plotly_dark",
@@ -79,12 +82,12 @@ def candlestick_figure(
         bb = bollinger(close)
         fig.add_trace(
             go.Scatter(x=df.index, y=bb["bb_upper"], name="BB上轨", mode="lines",
-                       line=dict(width=1, dash="dot", color="#5C6BC0")),
+                       line=dict(width=1, dash="dot", color=theme.BAND)),
             row=1, col=1,
         )
         fig.add_trace(
             go.Scatter(x=df.index, y=bb["bb_lower"], name="BB下轨", mode="lines",
-                       line=dict(width=1, dash="dot", color="#5C6BC0"),
+                       line=dict(width=1, dash="dot", color=theme.BAND),
                        fill="tonexty", fillcolor="rgba(92,107,192,0.08)"),
             row=1, col=1,
         )
@@ -107,7 +110,7 @@ def rsi_macd_figure(df: pd.DataFrame) -> go.Figure:
     fig = make_subplots(rows=2, cols=1, shared_xaxes=True, vertical_spacing=0.06,
                         subplot_titles=("RSI(14)", "MACD(12,26,9)"))
     fig.add_trace(go.Scatter(x=df.index, y=rsi(close, 14), name="RSI", mode="lines",
-                             line=dict(color="#FFB74D", width=1.5)), row=1, col=1)
+                             line=dict(color=theme.MA, width=1.5)), row=1, col=1)
     fig.add_hline(y=70, line_dash="dash", line_color=DOWN_COLOR, opacity=0.5, row=1, col=1)
     fig.add_hline(y=30, line_dash="dash", line_color=UP_COLOR, opacity=0.5, row=1, col=1)
 
@@ -116,9 +119,9 @@ def rsi_macd_figure(df: pd.DataFrame) -> go.Figure:
     fig.add_trace(go.Bar(x=df.index, y=m["macd_histogram"], name="Hist",
                          marker_color=hist_colors, opacity=0.7), row=2, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=m["macd"], name="MACD", mode="lines",
-                             line=dict(color="#4FC3F7", width=1.2)), row=2, col=1)
+                             line=dict(color=theme.MACD_FAST, width=1.2)), row=2, col=1)
     fig.add_trace(go.Scatter(x=df.index, y=m["macd_signal"], name="Signal", mode="lines",
-                             line=dict(color="#F06292", width=1.2)), row=2, col=1)
+                             line=dict(color=theme.MACD_SLOW, width=1.2)), row=2, col=1)
     fig.update_layout(height=420, **DARK_LAYOUT)
     fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])])
     return fig
@@ -184,7 +187,7 @@ def workstation_figure(
         for col, dash in (("bb_upper", "dot"), ("bb_lower", "dot")):
             fig.add_trace(
                 go.Scatter(x=df.index, y=bb[col], name=col, mode="lines",
-                           line=dict(width=1, dash=dash, color="#5C6BC0"), showlegend=False),
+                           line=dict(width=1, dash=dash, color=theme.BAND), showlegend=False),
                 row=1, col=1,
             )
     if show_vwap and "volume" in df.columns and "high" in df.columns:
@@ -196,7 +199,7 @@ def workstation_figure(
         vwap = (cum_pv / cum_v.where(cum_v > 0)).rename("VWAP")
         fig.add_trace(
             go.Scatter(x=df.index, y=vwap, name="VWAP", mode="lines",
-                       line=dict(width=1.2, color="#F06292")),
+                       line=dict(width=1.2, color=theme.MACD_SLOW)),
             row=1, col=1,
         )
 
@@ -212,7 +215,7 @@ def workstation_figure(
         row += 1
     if "rsi" in panes:
         fig.add_trace(go.Scatter(x=df.index, y=rsi(close, 14), name="RSI", mode="lines",
-                                 line=dict(color="#FFB74D", width=1.2)), row=row, col=1)
+                                 line=dict(color=theme.MA, width=1.2)), row=row, col=1)
         fig.add_hline(y=70, line_dash="dash", line_color=DOWN_COLOR, opacity=0.4, row=row, col=1)
         fig.add_hline(y=30, line_dash="dash", line_color=UP_COLOR, opacity=0.4, row=row, col=1)
         row += 1
@@ -222,9 +225,9 @@ def workstation_figure(
         fig.add_trace(go.Bar(x=df.index, y=m["macd_histogram"], name="Hist",
                              marker_color=hist_colors, opacity=0.7, showlegend=False), row=row, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=m["macd"], name="MACD", mode="lines",
-                                 line=dict(color="#4FC3F7", width=1.1)), row=row, col=1)
+                                 line=dict(color=theme.MACD_FAST, width=1.1)), row=row, col=1)
         fig.add_trace(go.Scatter(x=df.index, y=m["macd_signal"], name="Signal", mode="lines",
-                                 line=dict(color="#F06292", width=1.1)), row=row, col=1)
+                                 line=dict(color=theme.MACD_SLOW, width=1.1)), row=row, col=1)
 
     fig.update_layout(height=340 + 120 * (len(panes) - 1), **DARK_LAYOUT)
     fig.update_xaxes(rangebreaks=[dict(bounds=["sat", "mon"])] if kind == "candle" else None)
@@ -233,7 +236,7 @@ def workstation_figure(
     fig.update_layout(hovermode="x unified", dragmode="pan")
     fig.update_xaxes(
         showspikes=True, spikemode="across", spikesnap="cursor",
-        spikethickness=1, spikedash="dot", spikecolor="#8A8A93",
+        spikethickness=1, spikedash="dot", spikecolor=theme.TEXT_MUTED,
     )
     return fig
 
