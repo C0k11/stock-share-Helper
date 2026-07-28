@@ -20,7 +20,7 @@ table _Measures
 			        fact_prices[date], DESC
 			    )
 			VAR Rets =
-			    ADDCOLUMNS ( Window20, "@ret", CALCULATE ( AVERAGE ( fact_prices[daily_return] ) ) )
+			    ADDCOLUMNS ( Window20, "@ret", CALCULATE ( AVERAGE ( fact_prices[daily_return] ), REMOVEFILTERS ( dim_date ) ) )
 			RETURN
 			    IF ( COUNTROWS ( Window20 ) = 20, STDEVX.S ( Rets, [@ret] ) * SQRT ( 252 ) )
 		formatString: 0.00%;-0.00%;0.00%
@@ -34,7 +34,7 @@ table _Measures
 			        CALCULATETABLE ( VALUES ( fact_prices[date] ), REMOVEFILTERS ( dim_date ),
 			                         fact_prices[date] <= CurrentDate ),
 			        fact_prices[date], DESC )
-			RETURN IF ( COUNTROWS ( W ) = 20, AVERAGEX ( W, CALCULATE ( AVERAGE ( fact_prices[close] ) ) ) )
+			RETURN IF ( COUNTROWS ( W ) = 20, AVERAGEX ( W, CALCULATE ( AVERAGE ( fact_prices[close] ), REMOVEFILTERS ( dim_date ) ) ) )
 		formatString: #,0.00
 		displayFolder: Windowed
 		lineageTag: ec9787ce-b9f7-4eb2-a983-241a5cc690e9
@@ -46,7 +46,7 @@ table _Measures
 			        CALCULATETABLE ( VALUES ( fact_prices[date] ), REMOVEFILTERS ( dim_date ),
 			                         fact_prices[date] <= CurrentDate ),
 			        fact_prices[date], DESC )
-			RETURN IF ( COUNTROWS ( W ) = 50, AVERAGEX ( W, CALCULATE ( AVERAGE ( fact_prices[close] ) ) ) )
+			RETURN IF ( COUNTROWS ( W ) = 50, AVERAGEX ( W, CALCULATE ( AVERAGE ( fact_prices[close] ), REMOVEFILTERS ( dim_date ) ) ) )
 		formatString: #,0.00
 		displayFolder: Windowed
 		lineageTag: fbc965a2-9ebe-4f4d-b22e-aaa188b5edb9
@@ -58,7 +58,7 @@ table _Measures
 			        CALCULATETABLE ( VALUES ( fact_prices[date] ), REMOVEFILTERS ( dim_date ),
 			                         fact_prices[date] <= CurrentDate ),
 			        fact_prices[date], DESC )
-			RETURN IF ( COUNTROWS ( W ) = 200, AVERAGEX ( W, CALCULATE ( AVERAGE ( fact_prices[close] ) ) ) )
+			RETURN IF ( COUNTROWS ( W ) = 200, AVERAGEX ( W, CALCULATE ( AVERAGE ( fact_prices[close] ), REMOVEFILTERS ( dim_date ) ) ) )
 		formatString: #,0.00
 		displayFolder: Windowed
 		lineageTag: 68e15960-4e1b-48cf-a017-3b36843b5b02
@@ -405,7 +405,7 @@ table _Measures
 		displayFolder: QA
 		lineageTag: ce30aa86-0b4f-4e30-90d8-75247340d0e3
 
-	measure 'QA Pass Count' = COUNTROWS ( FILTER ( VALUES ( qa_expected[check_id] ), [QA Status] = "PASS" ) )
+	measure 'QA Pass Count' = SUMX ( VALUES ( qa_expected[check_id] ), IF ( [QA Status] = "PASS", 1, 0 ) )
 		formatString: 0
 		displayFolder: QA
 		lineageTag: db2ed6e9-daf8-43d7-97c8-404cba56c16f

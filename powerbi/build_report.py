@@ -81,42 +81,59 @@ def in_filter(entity: str, prop: str, values: list[str]) -> dict:
     }
 
 
+def _lit_color(c: str) -> dict:
+    return {"color": {"Literal": {"Value": f"'{c}'"}}}
+
+
+def _fill_rule_expr(measure_prop: str, rule: dict) -> dict:
+    """官方 FillRule 结构（经 Desktop 往返序列化实测抄录，含 nullColoringStrategy）。"""
+    return {"expr": {"FillRule": {
+        "Input": {"Measure": {"Expression": {"SourceRef": {"Entity": M}}, "Property": measure_prop}},
+        "FillRule": rule,
+    }}}
+
+
+_WILDCARD_SELECTOR = {"data": [{"dataViewWildcard": {"matchingOption": 1}}]}
+
+
 def diverging_fill(measure_prop: str, negative: str = "#EF5350", center: str = "#1B1B1F",
                    positive: str = "#26A69A", three_stop: bool = True) -> dict:
-    """dataPoint 填色的发散色阶（以 0 居中）。"""
+    """dataPoint 填色的发散色阶。selector 必须带——没有它 Desktop 渲染直接报错（实锤）。"""
     rule: dict = {
         "linearGradient3": {
-            "min": {"color": negative},
-            "mid": {"color": center},
-            "max": {"color": positive},
-            "midValue": 0,
+            "min": _lit_color(negative),
+            "mid": _lit_color(center),
+            "max": _lit_color(positive),
+            "nullColoringStrategy": {"strategy": {"Literal": {"Value": "'asZero'"}}},
         }
     } if three_stop else {
         "linearGradient2": {
-            "min": {"color": negative},
-            "max": {"color": center},
+            "min": _lit_color(negative),
+            "max": _lit_color(center),
+            "nullColoringStrategy": {"strategy": {"Literal": {"Value": "'asZero'"}}},
         }
     }
     return {
-        "dataPoint": [{"properties": {"fill": {"solid": {"color": {"expr": {"FillRule": {
-            "Input": {"Measure": {"Expression": {"SourceRef": {"Entity": M}}, "Property": measure_prop}},
-            "FillRule": rule,
-        }}}}}}}]
+        "dataPoint": [{
+            "properties": {"fill": {"solid": {"color": _fill_rule_expr(measure_prop, rule)}}},
+            "selector": _WILDCARD_SELECTOR,
+        }]
     }
 
 
 def diverging_back(measure_prop: str) -> dict:
-    """矩阵值单元格背景的发散色阶（0 居中：负红/正绿）。"""
+    """矩阵值单元格背景的发散色阶（0 居中：负红/正绿），官方结构 + wildcard selector。"""
+    rule = {"linearGradient3": {
+        "min": _lit_color("#EF5350"),
+        "mid": _lit_color("#1B1B1F"),
+        "max": _lit_color("#26A69A"),
+        "nullColoringStrategy": {"strategy": {"Literal": {"Value": "'asNoColor'"}}},
+    }}
     return {
-        "values": [{"properties": {"backColor": {"solid": {"color": {"expr": {"FillRule": {
-            "Input": {"Measure": {"Expression": {"SourceRef": {"Entity": M}}, "Property": measure_prop}},
-            "FillRule": {"linearGradient3": {
-                "min": {"color": "#EF5350"},
-                "mid": {"color": "#1B1B1F"},
-                "max": {"color": "#26A69A"},
-                "midValue": 0,
-            }},
-        }}}}}}}]
+        "values": [{
+            "properties": {"backColor": {"solid": {"color": _fill_rule_expr(measure_prop, rule)}}},
+            "selector": _WILDCARD_SELECTOR,
+        }]
     }
 
 
@@ -246,7 +263,8 @@ def market_page() -> dict:
                filters=[in_filter("dim_symbol", "symbol", ["SPY", "QQQ", "DIA"])]),
         visual("mo_52w_bar", "barChart", 780, 220, 480, 290,
                {"Category": [s_sym()], "Y": [mea("Pct From 52W High (Latest)")]},
-               title="% from 52-week high (latest)"),
+               title="% from 52-week high (latest)",
+               extra_objects=diverging_fill("Pct From 52W High (Latest)", three_stop=False)),
         visual("mo_table", "tableEx", 20, 520, 1240, 180,
                {"Values": [
                    s_sym(),
@@ -277,7 +295,7 @@ def signals_page() -> dict:
                {"Rows": [s_sym()], "Columns": [col("d", "year_month", "dim_date")],
                 "Values": [mea("Composite Signal")]},
                title="Avg composite signal - symbol x month (red short / green long)",
-               no_totals=True),
+               no_totals=True, extra_objects=diverging_back("Composite Signal")),
         visual("sig_strength_bar", "barChart", 660, 130, 600, 240,
                {"Category": [s_sym()], "Series": [col("f", "signal_strength", "fact_signals")],
                 "Y": [mea("Signal Days")]},
@@ -353,7 +371,8 @@ def risk_page() -> dict:
                title="Daily return distribution (bin 0.5%)"),
         visual("rk_52w_bar", "barChart", 780, 420, 480, 280,
                {"Category": [s_sym()], "Y": [mea("Pct From 52W High (Latest)")]},
-               title="% from 52-week high (latest)"),
+               title="% from 52-week high (latest)",
+               extra_objects=diverging_fill("Pct From 52W High (Latest)", three_stop=False)),
     ]
     return section("sec_risk", "Risk & Volatility", 3, visuals)
 

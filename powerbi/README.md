@@ -60,21 +60,38 @@ lines are indexed to 100 anchored on the backtest calendar
 (`fact_backtest_equity[date]`), so both series share the same 500-trading-day
 axis.
 
-## Verification: DAX vs pandas, 53 checks
+## Verification: DAX vs pandas, 64 checks in two classes
 
-`verify/verify_dax.py` computes every expected value from the same CSVs
-(row counts ×10, SPY rolling vol and MA20/50/200 on the last five trading
-days, both indexed series at range end, all seven backtest metrics, the four
-latest-position numbers, the five signal-strength buckets, news sentiment
-coverage, and the UTF-8 canary). The hidden **QA page** joins them against the
-live DAX measures and verdicts each row at **relative tolerance 1e-6**.
+`verify/verify_dax.py` computes every expected value from the same CSVs. The
+hidden **QA page** joins them against the live DAX measures and verdicts each
+row at **relative tolerance 1e-6**.
 
-Result on 2026-07-28: **52 / 53 PASS, 1 SKIPPED by design**
-(`fact_trades.csv` has 0 rows and is deliberately not loaded). If a check
-fails, the DAX is wrong — expected values may only change by re-running the
-verify script against a fresh export.
+**Class 1 — measure arithmetic** (53 checks): row counts ×10, SPY rolling vol
+and MA20/50/200 on the last five trading days, both indexed series at range
+end, all seven backtest metrics, the four latest-position numbers, the five
+signal-strength buckets, news sentiment coverage, and the UTF-8 canary.
 
-Four DAX bugs were caught live by this loop (all in review-friendly history):
+**Class 2 — relationship propagation** (11 checks): these filter a *dimension*
+value and count/aggregate the *fact* through the model relationship — no
+`REMOVEFILTERS` on the dimension allowed. One check per relationship, plus
+`Composite Signal` for DRAM in 2024-11 which **must be BLANK** (the symbol has
+no rows that month — a filled cell means a dead join is broadcasting全期 values).
+This class exists because the first review proved Class 1 alone cannot detect
+a dead relationship: every Class-1 check is a row count, a single-row scalar,
+or a windowed measure that re-filters fact columns itself, so **all 53 passed
+while every date relationship was broken**.
+
+Result on 2026-07-28 (post-rework): **63 / 64 PASS, 1 SKIPPED by design**
+(`fact_trades.csv` has 0 rows and is deliberately not loaded).
+
+**Negative verification**: with the six date relationships and
+`fact_news.symbol` deleted from the TMDL, the 11 Class-2 checks were re-run —
+**11 / 11 FAIL** (counts return the full table, DRAM returns the whole-period
+mean instead of BLANK), and the price lines flatten to whole-period averages
+on the canvas. Relationships restored → 63/64 green again. The suite provably
+turns red when the wiring breaks.
+
+Six DAX/model bugs were caught live by this loop:
 
 - a measure reference inside a `CALCULATE` boolean filter (`PLACEHOLDER`
   error) → capture with `VAR` first;
@@ -84,7 +101,43 @@ Four DAX bugs were caught live by this loop (all in review-friendly history):
   split into two calls;
 - windowed measures going flat when the visual axis is a fact-table column
   that `ALLSELECTED(dim_date)` cannot see → anchor `CurDate`/`StartDate` on
-  the axis table itself.
+  the axis table itself;
+- windowed measures returning NaN/garbage once date relationships went live —
+  the inner per-window-row `CALCULATE` must also `REMOVEFILTERS(dim_date)`,
+  otherwise an axis/slicer date intersects the window rows away. **The old
+  form had passed QA only because the relationships were dead** — fixing the
+  wiring exposed the arithmetic bug, which is exactly why both check classes
+  must exist;
+- `[QA Pass Count]` erroring inside the card's `SUMMARIZECOLUMNS` query plan
+  (`FILTER` over a measure with context transition) → `SUMX ... IF` form.
+
+## The relationship failure, root-caused
+
+Symptom: matrices showed each symbol's whole-period average in every month,
+line charts drew flat means, cells that should be BLANK were filled. The six
+`dim_date →` relationships (and `fact_news.symbol`) did not exist in the
+model, while four others worked. Diagnosis and mechanism:
+
+1. Hand-written relationships loaded from TMDL enter a **"needs manual
+   refresh"** state — a dedicated banner with its own *Refresh now* button.
+   That button was never clicked during the original build (the data banner's
+   button was, repeatedly). The pending relationships were then silently
+   dropped across save/close cycles.
+2. On data refresh Desktop's **autodetect** re-created relationships between
+   same-named string columns (`symbol`, `run_id`) — masking the loss and
+   producing the "symbol works / date dead" asymmetry. The autodetected
+   `fact_backtest_results 1:1 dim_symbol` ghost (never in the TMDL) was the
+   giveaway, and was deleted.
+3. Repair, per review instructions, used **Desktop's own round-trip
+   serialization as the authority**: one relationship built by hand in the
+   GUI, saved, diffed, then the six missing ones re-added in exactly that
+   syntax and processed via the relationship banner. Model view now shows 11.
+4. A second trap found on the way: the ribbon *Refresh* control is a
+   **dropdown** — clicking it opens a menu and refreshes nothing until
+   *Schema and data* is chosen. One earlier "all green" reading is void
+   because `qa_expected` had silently stayed on the previous 53-row CSV;
+   verified now by asserting `COUNTROWS(qa_expected) = 64` before reading
+   any verdicts.
 
 ## Honest limitations
 
@@ -97,12 +150,12 @@ Four DAX bugs were caught live by this loop (all in review-friendly history):
 - `fact_news.sentiment` covers **122 of 5,581 rows (2.19%)** — the coverage is
   printed on the News page as a card, and no average is presented as a
   population statement.
-- The close-price line defaults to all symbols (BTC-USD dominates the scale)
-  — use the symbol slicer; per-visual default selections were left out of the
-  generated layout.
-- The signals matrix shows numbers without a diverging color scale, and the
-  combo chart needs a single symbol selected to be readable (conditional
-  formatting objects are not emitted by the generator yet).
+- The combo chart needs a single symbol selected to be readable (noted in its
+  title). The close-price line defaults to SPY/QQQ/DIA via a generated
+  visual-level filter; the 52-week bars and the signals matrix carry diverging
+  conditional-format scales (the FillRule JSON requires a
+  `dataViewWildcard` selector — schema recovered from Desktop's own
+  serialization after two failed hand-written attempts).
 - `is_trading_day` is a slicer, not a global filter — filtering it would drop
   BTC-USD's 231 weekend bars.
 - Report layout uses the classic `report.json` format (stable, text,

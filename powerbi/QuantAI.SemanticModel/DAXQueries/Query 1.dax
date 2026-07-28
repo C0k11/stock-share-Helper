@@ -1,1 +1,2 @@
-EVALUATE ADDCOLUMNS(TOPN(5, VALUES(dim_date[date]), dim_date[date], ASC), "prices_rows", CALCULATE(COUNTROWS(fact_prices)), "news_rows", CALCULATE(COUNTROWS(fact_news)), "signals_rows", CALCULATE(COUNTROWS(fact_signals)), "odds_rows", CALCULATE(COUNTROWS(fact_event_odds)))
+EVALUATE ROW("qa_rows", COUNTROWS(qa_expected))
+EVALUATE FILTER(ADDCOLUMNS(VALUES(qa_expected[check_id]), "status", [QA Status], "actual", [QA Actual (display)], "expected", CALCULATE(MAX(qa_expected[expected]))), [status] <> "PASS")
