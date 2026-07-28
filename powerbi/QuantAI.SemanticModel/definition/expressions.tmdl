@@ -1,7 +1,5 @@
-/// 导出目录参数：换机器只改这一处。
 expression ExportFolder = "D:\Project\Stock\tableau\exports" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
 	annotation PBI_ResultType = Text
 
-/// pandas 期望值目录（QA 页对账用）。
 expression VerifyFolder = "D:\Project\Stock\powerbi\verify" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
 	annotation PBI_ResultType = Text

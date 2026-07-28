@@ -1,5 +1,3 @@
-/// 全部单向（dim → fact 过滤），一对多。不用双向：同粒度双 fact 的双向过滤
-/// 会制造 Power BI 自行仲裁的歧义。fact_event_odds 无 symbol 列——不硬造关系。
 relationship date_to_prices
 	fromColumn: fact_prices.date
 	toColumn: dim_date.date

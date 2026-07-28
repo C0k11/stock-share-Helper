@@ -19,7 +19,6 @@ table _Measures
 				in
 					Source
 
-	// ------------------------------------------------------------- Windowed (Spec §3.4/§3.5)
 
 	measure 'Rolling Vol 20D (Ann)' =
 			VAR CurrentDate = MAX ( dim_date[date] )
@@ -96,7 +95,6 @@ table _Measures
 		formatString: 0.0
 		displayFolder: Windowed
 
-	// ------------------------------------------------------------- Prices
 
 	measure 'Close' = AVERAGE ( fact_prices[close] )
 		formatString: #,0.00
@@ -132,7 +130,6 @@ table _Measures
 		formatString: 0
 		displayFolder: Prices
 
-	// ------------------------------------------------------------- Risk
 
 	measure 'Worst Day' = MIN ( fact_prices[daily_return] )
 		formatString: 0.00%;-0.00%;0.00%
@@ -146,28 +143,29 @@ table _Measures
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Risk
 
-	// ------------------------------------------------------------- Positions
-	// 钉在最新快照：日期切片不该让组合数字消失。
 
 	measure 'Latest As Of' = CALCULATE ( MAX ( fact_positions[as_of] ), REMOVEFILTERS () )
 		formatString: yyyy-mm-dd
 		displayFolder: Positions
 
 	measure 'Market Value' =
-			CALCULATE ( SUM ( fact_positions[market_value] ), REMOVEFILTERS ( dim_date ),
-			            fact_positions[as_of] = [Latest As Of] )
+			VAR d = [Latest As Of]
+			RETURN CALCULATE ( SUM ( fact_positions[market_value] ), REMOVEFILTERS ( dim_date ),
+			            fact_positions[as_of] = d )
 		formatString: #,0.00
 		displayFolder: Positions
 
 	measure 'Cost Value' =
-			CALCULATE ( SUM ( fact_positions[cost_value] ), REMOVEFILTERS ( dim_date ),
-			            fact_positions[as_of] = [Latest As Of] )
+			VAR d = [Latest As Of]
+			RETURN CALCULATE ( SUM ( fact_positions[cost_value] ), REMOVEFILTERS ( dim_date ),
+			            fact_positions[as_of] = d )
 		formatString: #,0.00
 		displayFolder: Positions
 
 	measure 'Unrealized PnL' =
-			CALCULATE ( SUM ( fact_positions[unrealized_pnl] ), REMOVEFILTERS ( dim_date ),
-			            fact_positions[as_of] = [Latest As Of] )
+			VAR d = [Latest As Of]
+			RETURN CALCULATE ( SUM ( fact_positions[unrealized_pnl] ), REMOVEFILTERS ( dim_date ),
+			            fact_positions[as_of] = d )
 		formatString: #,0.00
 		displayFolder: Positions
 
@@ -178,7 +176,6 @@ table _Measures
 	measure 'PnL Colour' = IF ( [Unrealized PnL] >= 0, "#26A69A", "#EF5350" )
 		displayFolder: Positions
 
-	// ------------------------------------------------------------- Signals
 
 	measure 'Composite Signal' = AVERAGE ( fact_signals[composite_signal] )
 		formatString: 0.00
@@ -200,29 +197,28 @@ table _Measures
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Signals
 
-	// ------------------------------------------------------------- Backtest（单行表，SELECTEDVALUE 取标量）
 
-	measure 'Sharpe' = SELECTEDVALUE ( fact_backtest_results[sharpe] )
+	measure 'Sharpe' = MAX ( fact_backtest_results[sharpe] )
 		formatString: 0.00
 		displayFolder: Backtest
 
-	measure 'CAGR' = SELECTEDVALUE ( fact_backtest_results[cagr] )
+	measure 'CAGR' = MAX ( fact_backtest_results[cagr] )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Backtest
 
-	measure 'Annual Volatility' = SELECTEDVALUE ( fact_backtest_results[annual_volatility] )
+	measure 'Annual Volatility' = MAX ( fact_backtest_results[annual_volatility] )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Backtest
 
-	measure 'Max Drawdown' = SELECTEDVALUE ( fact_backtest_results[max_drawdown] )
+	measure 'Max Drawdown' = MAX ( fact_backtest_results[max_drawdown] )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Backtest
 
-	measure 'Win Rate' = SELECTEDVALUE ( fact_backtest_results[win_rate] )
+	measure 'Win Rate' = MAX ( fact_backtest_results[win_rate] )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Backtest
 
-	measure 'Total Return' = SELECTEDVALUE ( fact_backtest_results[total_return] )
+	measure 'Total Return' = MAX ( fact_backtest_results[total_return] )
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Backtest
 
@@ -230,7 +226,6 @@ table _Measures
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: Backtest
 
-	// ------------------------------------------------------------- News & Events
 
 	measure 'News Count' = COUNTROWS ( fact_news )
 		formatString: #,0
@@ -259,11 +254,6 @@ table _Measures
 		formatString: 0.00%;-0.00%;0.00%
 		displayFolder: News & Events
 
-	// ------------------------------------------------------------- QA（对账 pandas 期望值）
-	// QA 页表格：qa_expected 每行经 [QA Actual] 取到对应 DAX 实际值，[QA Status] 判 PASS/FAIL。
-	// 数值比较：相对误差 1e-6。对不上就是 DAX 错，期望值只能由 verify_dax.py 重新生成。
-	// 归一化两测点用独立钉日期表达式（生产度量的 ALLSELECTED 语义依赖视觉上下文，
-	// 无法在 QA 表格行上下文里如实复现——README 已注明该边界）。
 
 	measure 'QA Actual Value' =
 			VAR cid = SELECTEDVALUE ( qa_expected[check_id] )
@@ -313,7 +303,7 @@ table _Measures
 			        "bt_sharpe", [Sharpe],
 			        "bt_max_drawdown", [Max Drawdown],
 			        "bt_win_rate", [Win Rate],
-			        "bt_total_turnover", SELECTEDVALUE ( fact_backtest_results[total_turnover] ),
+			        "bt_total_turnover", MAX ( fact_backtest_results[total_turnover] ),
 			        "pos_market_value", [Market Value],
 			        "pos_cost_value", [Cost Value],
 			        "pos_unrealized_pnl", [Unrealized PnL],
