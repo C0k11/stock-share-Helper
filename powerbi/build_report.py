@@ -170,7 +170,7 @@ def visual(name: str, vtype: str, x: float, y: float, w: float, h: float,
            roles: dict[str, list[dict]], orderby: dict | None = None,
            title: str | None = None, extra_objects: dict | None = None,
            no_totals: bool = False, filters: list[dict] | None = None,
-           title_size: str | None = None) -> dict:
+           title_size: str | None = None, bg: str | None = None) -> dict:
     x, y, w, h = x * S, y * S, w * S, h * S
     all_fields = [f for fs in roles.values() for f in fs]
     projections = {}
@@ -193,6 +193,7 @@ def visual(name: str, vtype: str, x: float, y: float, w: float, h: float,
         },
     }
     objects: dict = dict(extra_objects or {})
+    vc_objects: dict = {}
     if no_totals:
         objects["total"] = [{"properties": {"totals": {"expr": {"Literal": {"Value": "false"}}}}}]
         objects["subTotals"] = [{"properties": {
@@ -206,7 +207,19 @@ def visual(name: str, vtype: str, x: float, y: float, w: float, h: float,
         }
         if title_size:
             title_props["fontSize"] = {"expr": {"Literal": {"Value": title_size}}}
-        cfg["singleVisual"]["vcObjects"] = {"title": [{"properties": title_props}]}
+        # card 的数值(callout)恒居中，标题默认左对齐 -> 标题与数字永远错位。卡片标题一律居中。
+        if vtype == "card":
+            title_props["alignment"] = {"expr": {"Literal": {"Value": "'center'"}}}
+        vc_objects["title"] = [{"properties": title_props}]
+    if bg:
+        # 下拉切片器的弹层用视觉自身背景色渲染；不显式设色就是系统默认白，暗色主题下白花花一片。
+        vc_objects["background"] = [{"properties": {
+            "show": {"expr": {"Literal": {"Value": "true"}}},
+            "color": {"solid": {"color": {"expr": {"Literal": {"Value": f"'{bg}'"}}}}},
+            "transparency": {"expr": {"Literal": {"Value": "0D"}}},
+        }}]
+    if vc_objects:
+        cfg["singleVisual"]["vcObjects"] = vc_objects
     if objects:
         cfg["singleVisual"]["objects"] = objects
     return {
@@ -251,7 +264,17 @@ CARD_LABEL_SM = _card_style("16D")  # 窄卡 / 六连卡
 CARD_TITLE = "12D"  # 卡片标题统一字号
 
 # 34 个标的用列表切片器本来就不合适 → 下拉模式。
-SLICER_DROPDOWN = {"data": [{"properties": {"mode": {"expr": {"Literal": {"Value": "'Dropdown'"}}}}}]}
+DARK_BG = "#1B1B1F"
+
+SLICER_DROPDOWN = {
+    "data": [{"properties": {"mode": {"expr": {"Literal": {"Value": "'Dropdown'"}}}}}],
+    "items": [{"properties": {
+        "background": {"solid": {"color": {"expr": {"Literal": {"Value": f"'{DARK_BG}'"}}}}},
+        "fontColor": {"solid": {"color": {"expr": {"Literal": {"Value": "'#E6E6E6'"}}}}},
+    }}],
+    # 35 个成员的下拉一次只露 7 项，靠滚动找标的太慢 -> 开搜索框，打字直接筛。
+    "general": [{"properties": {"selfFilterEnabled": {"expr": {"Literal": {"Value": "true"}}}}}],
+}
 
 
 # --------------------------------------------------------------------------- #
@@ -260,36 +283,36 @@ SLICER_DROPDOWN = {"data": [{"properties": {"mode": {"expr": {"Literal": {"Value
 def market_page() -> dict:
     # 12 视觉太密 -> 10：去掉底部 mo_table（其列在本页图表里全有），两张图吃满下半页。
     visuals = [
-        visual("mo_slicer_date", "slicer", 20, 20, 300, 80,
-               {"Values": [d_date()]}),
-        visual("mo_slicer_symbol", "slicer", 340, 20, 200, 80,
-               {"Values": [s_sym()]}, extra_objects=SLICER_DROPDOWN),
-        visual("mo_slicer_trading", "slicer", 560, 20, 180, 80,
+        visual("mo_slicer_date", "slicer", 20, 20, 300, 100,
+               {"Values": [d_date()]}, bg=DARK_BG),
+        visual("mo_slicer_symbol", "slicer", 340, 20, 200, 100,
+               {"Values": [s_sym()]}, extra_objects=SLICER_DROPDOWN, bg=DARK_BG),
+        visual("mo_slicer_trading", "slicer", 560, 20, 180, 100,
                {"Values": [col("d", "is_trading_day", "dim_date")]},
-               extra_objects=SLICER_DROPDOWN),
-        visual("mo_card_symbols", "card", 760, 20, 240, 80,
+               extra_objects=SLICER_DROPDOWN, bg=DARK_BG),
+        visual("mo_card_symbols", "card", 760, 20, 240, 100,
                {"Values": [mea("Symbols Tracked")]}, title="Symbols",
                extra_objects=CARD_LABEL_SM, title_size=CARD_TITLE),
-        visual("mo_card_tdays", "card", 1020, 20, 240, 80,
+        visual("mo_card_tdays", "card", 1020, 20, 240, 100,
                {"Values": [mea("Trading Days")]}, title="Trading days",
                extra_objects=CARD_LABEL_SM, title_size=CARD_TITLE),
-        visual("mo_card_mv", "card", 20, 115, 300, 110,
+        visual("mo_card_mv", "card", 20, 135, 300, 110,
                {"Values": [mea("Market Value")]}, title="Position market value (latest)",
                extra_objects=CARD_LABEL, title_size=CARD_TITLE),
-        visual("mo_card_cost", "card", 330, 115, 300, 110,
+        visual("mo_card_cost", "card", 330, 135, 300, 110,
                {"Values": [mea("Cost Value")]}, title="Position cost (latest)",
                extra_objects=CARD_LABEL, title_size=CARD_TITLE),
-        visual("mo_card_pnl", "card", 640, 115, 300, 110,
+        visual("mo_card_pnl", "card", 640, 135, 300, 110,
                {"Values": [mea("Unrealized PnL")]}, title="Unrealized PnL (latest)",
                extra_objects=CARD_LABEL, title_size=CARD_TITLE),
-        visual("mo_card_pnlpct", "card", 950, 115, 310, 110,
+        visual("mo_card_pnlpct", "card", 950, 135, 310, 110,
                {"Values": [mea("Unrealized PnL %")]}, title="Unrealized PnL %",
                extra_objects=CARD_LABEL, title_size=CARD_TITLE),
-        visual("mo_close_line", "lineChart", 20, 240, 740, 460,
+        visual("mo_close_line", "lineChart", 20, 260, 740, 440,
                {"Category": [d_date()], "Series": [s_sym()], "Y": [mea("Close")]},
                title="Close over time by symbol (default SPY/QQQ/DIA - use slicer for more)",
                filters=[in_filter("dim_symbol", "symbol", ["SPY", "QQQ", "DIA"])]),
-        visual("mo_52w_bar", "barChart", 780, 240, 480, 460,
+        visual("mo_52w_bar", "barChart", 780, 260, 480, 440,
                {"Category": [s_sym()], "Y": [mea("Pct From 52W High (Latest)")]},
                title="% from 52-week high (latest)",
                extra_objects=diverging_fill("Pct From 52W High (Latest)", three_stop=False)),
@@ -339,7 +362,7 @@ def backtest_page() -> dict:
     kpis = [("Sharpe", "Sharpe"), ("CAGR", "CAGR"), ("Annual Volatility", "Annual vol"),
             ("Max Drawdown", "Max drawdown"), ("Win Rate", "Win rate"), ("Total Return", "Total return")]
     visuals = [
-        visual(f"bt_card_{i}", "card", 20 + i * 210, 20, 195, 100,
+        visual(f"bt_card_{i}", "card", 20 + i * 209, 20, 195, 100,
                {"Values": [mea(m_)]}, title=t, extra_objects=CARD_LABEL_SM,
                title_size=CARD_TITLE)
         for i, (m_, t) in enumerate(kpis)
@@ -447,11 +470,11 @@ def news_page() -> dict:
 # --------------------------------------------------------------------------- #
 def qa_page() -> dict:
     visuals = [
-        visual("qa_pass_card", "card", 40, 40, 280, 120,
+        visual("qa_pass_card", "card", 20, 20, 300, 110,
                {"Values": [mea("QA Pass Count")]}, title="Checks PASS"),
-        visual("qa_total_card", "card", 360, 40, 280, 120,
+        visual("qa_total_card", "card", 330, 20, 300, 110,
                {"Values": [mea("QA Total Count")]}, title="Checks total (1 skipped by design)"),
-        visual("qa_table", "tableEx", 40, 200, 1200, 480,
+        visual("qa_table", "tableEx", 20, 150, 1240, 550,
                {"Values": [
                    col("q", "check_id", "qa_expected"),
                    col("q", "description", "qa_expected"),
