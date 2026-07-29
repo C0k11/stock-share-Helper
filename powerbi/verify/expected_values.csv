@@ -1,57 +1,57 @@
 check_id,description,expected
 rowcount_dim_date,dim_date.csv row count,731
 rowcount_dim_symbol,dim_symbol.csv rows + 1 M-appended (untagged),35
-rowcount_fact_prices,fact_prices.csv row count,15920
-rowcount_fact_signals,fact_signals.csv row count,15920
-rowcount_fact_news,fact_news.csv row count,5581
-rowcount_fact_event_odds,fact_event_odds.csv row count,3390
-rowcount_fact_backtest_equity,fact_backtest_equity.csv row count,500
+rowcount_fact_prices,fact_prices.csv row count,15953
+rowcount_fact_signals,fact_signals.csv row count,15953
+rowcount_fact_news,fact_news.csv row count,5870
+rowcount_fact_event_odds,fact_event_odds.csv row count,3554
+rowcount_fact_backtest_equity,fact_backtest_equity.csv row count,501
 rowcount_fact_backtest_results,fact_backtest_results.csv row count,1
-rowcount_fact_positions,fact_positions.csv row count,19
+rowcount_fact_positions,fact_positions.csv row count,20
 rowcount_fact_trades,fact_trades.csv row count,0
-spy_vol20_2026-07-21,SPY Rolling Vol 20D (Ann) @ 2026-07-21,0.11992758
 spy_vol20_2026-07-22,SPY Rolling Vol 20D (Ann) @ 2026-07-22,0.1066921263
 spy_vol20_2026-07-23,SPY Rolling Vol 20D (Ann) @ 2026-07-23,0.1166648511
 spy_vol20_2026-07-24,SPY Rolling Vol 20D (Ann) @ 2026-07-24,0.1166218543
 spy_vol20_2026-07-27,SPY Rolling Vol 20D (Ann) @ 2026-07-27,0.1131537353
-spy_ma20_2026-07-21,SPY MA20 @ 2026-07-21,744.9830078
+spy_vol20_2026-07-28,SPY Rolling Vol 20D (Ann) @ 2026-07-28,0.09702838246
 spy_ma20_2026-07-22,SPY MA20 @ 2026-07-22,745.6745056
 spy_ma20_2026-07-23,SPY MA20 @ 2026-07-23,745.9215057
 spy_ma20_2026-07-24,SPY MA20 @ 2026-07-24,746.153006
 spy_ma20_2026-07-27,SPY MA20 @ 2026-07-27,746.6580078
-spy_ma50_2026-07-21,SPY MA50 @ 2026-07-21,743.8079102
+spy_ma20_2026-07-28,SPY MA20 @ 2026-07-28,746.6510071
 spy_ma50_2026-07-22,SPY MA50 @ 2026-07-22,744.0416174
 spy_ma50_2026-07-23,SPY MA50 @ 2026-07-23,744.0572119
 spy_ma50_2026-07-24,SPY MA50 @ 2026-07-24,744.1101489
 spy_ma50_2026-07-27,SPY MA50 @ 2026-07-27,744.0838989
-spy_ma200_2026-07-21,SPY MA200 @ 2026-07-21,694.2735651
-spy_ma200_2026-07-22,SPY MA200 @ 2026-07-22,694.6920096
-spy_ma200_2026-07-23,SPY MA200 @ 2026-07-23,695.064353
-spy_ma200_2026-07-24,SPY MA200 @ 2026-07-24,695.4285455
-spy_ma200_2026-07-27,SPY MA200 @ 2026-07-27,695.8058859
-spy_indexed_end,SPY Indexed 100 at last date,138.8844242
-equity_indexed_end,Equity Indexed 100 at last date,123.0821384
-bt_total_return,fact_backtest_results.total_return,0.2308213845
-bt_cagr,fact_backtest_results.cagr,0.1103459088
-bt_annual_volatility,fact_backtest_results.annual_volatility,0.1016386922
-bt_sharpe,fact_backtest_results.sharpe,0.8858340247
-bt_max_drawdown,fact_backtest_results.max_drawdown,-0.1157079851
-bt_win_rate,fact_backtest_results.win_rate,0.5651302605
+spy_ma50_2026-07-28,SPY MA50 @ 2026-07-28,743.9761487
+spy_ma200_2026-07-22,SPY MA200 @ 2026-07-22,694.6920074
+spy_ma200_2026-07-23,SPY MA200 @ 2026-07-23,695.0643512
+spy_ma200_2026-07-24,SPY MA200 @ 2026-07-24,695.4285437
+spy_ma200_2026-07-27,SPY MA200 @ 2026-07-27,695.8058841
+spy_ma200_2026-07-28,SPY MA200 @ 2026-07-28,696.1722882
+spy_indexed_end,SPY Indexed 100 at last date,139.2170379
+equity_indexed_end,Equity Indexed 100 at last date,123.2589736
+bt_total_return,fact_backtest_results.total_return,0.2325897361
+bt_cagr,fact_backtest_results.cagr,0.1109159068
+bt_annual_volatility,fact_backtest_results.annual_volatility,0.1015392307
+bt_sharpe,fact_backtest_results.sharpe,0.8916656691
+bt_max_drawdown,fact_backtest_results.max_drawdown,-0.1157079865
+bt_win_rate,fact_backtest_results.win_rate,0.566
 bt_total_turnover,fact_backtest_results.total_turnover,0.6
-pos_latest_as_of,latest positions as_of,2026-07-27
-pos_market_value,latest market_value,1589
+pos_latest_as_of,latest positions as_of,2026-07-28
+pos_market_value,latest market_value,1629.740051
 pos_cost_value,latest cost_value,2244.06
-pos_unrealized_pnl,latest unrealized_pnl,-655.06
-pos_unrealized_pnl_pct,latest pnl / |cost|,-0.291908416
-sig_strong_short,signal_strength == strong_short,6315
-sig_strong_long,signal_strength == strong_long,5685
-sig_weak_short,signal_strength == weak_short,2948
-sig_weak_long,signal_strength == weak_long,962
+pos_unrealized_pnl,latest unrealized_pnl,-614.3199487
+pos_unrealized_pnl_pct,latest pnl / |cost|,-0.2737537984
+sig_strong_short,signal_strength == strong_short,6323
+sig_strong_long,signal_strength == strong_long,5701
+sig_weak_short,signal_strength == weak_short,2952
+sig_weak_long,signal_strength == weak_long,967
 sig_neutral,signal_strength == neutral,10
-news_total,fact_news rows,5581
+news_total,fact_news rows,5870
 news_scored,fact_news rows with sentiment,122
-news_coverage,scored / total,0.02185988174
-rel_prices_20260727,fact_prices rows via dim_date=2026-07-27,33
+news_coverage,scored / total,0.02078364566
+rel_prices_20260727,fact_prices rows via dim_date=2026-07-27,34
 rel_composite_AAPL_202411,Composite Signal via dim_date.year_month=2024-11 + dim_symbol=AAPL,-0.23
 rel_composite_CRM_202411,Composite Signal via dim_date.year_month=2024-11 + dim_symbol=CRM,-0.2
 rel_composite_DRAM_202411,"Composite Signal DRAM 2024-11 - no rows, must be BLANK",BLANK
@@ -61,8 +61,8 @@ rel_news_2026-07-26,fact_news rows via dim_date=2026-07-26,102
 rel_odds_20260715,fact_event_odds rows via dim_date=2026-07-15,165
 rel_positions_20260727,fact_positions rows via dim_date=2026-07-27,1
 rel_equity_20260727,fact_backtest_equity rows via dim_date=2026-07-27,1
-rel_news_SPY,fact_news rows via dim_symbol=SPY,120
-rel_news_untagged,fact_news rows via dim_symbol=(untagged) - null symbols remapped in M,500
+rel_news_SPY,fact_news rows via dim_symbol=SPY,125
+rel_news_untagged,fact_news rows via dim_symbol=(untagged) - null symbols remapped in M,527
 dim_symbol_noblank,DISTINCTCOUNTNOBLANK(dim_symbol.symbol) - 34 real symbols + (untagged),35
 blank_member_canary,fact_news rows on RI-violation blank member - must be BLANK,BLANK
 encoding_curly_quote_rows,event_title rows containing U+2019,55
