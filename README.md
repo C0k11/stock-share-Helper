@@ -104,7 +104,7 @@ Requires Python 3.11+ on Windows/macOS/Linux (Power BI artifact is
 Windows-only to *view interactively*; everything else is cross-platform).
 
 ```powershell
-git clone https://github.com/C0k11/stock-share-Helper.git && cd stock-share-Helper
+git clone https://github.com/C0k11/quantai.git && cd quantai
 python -m venv venv && venv\Scripts\activate          # or source venv/bin/activate
 pip install -e .[ui,warehouse,dev]                     # add [llm,serve] for local-GPU analyst + API
 copy portfolio.example.yaml portfolio.local.yaml       # fill in your holdings (never committed)
