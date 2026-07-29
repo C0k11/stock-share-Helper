@@ -428,7 +428,7 @@ def news_page() -> dict:
                {"Values": [mea("News Count")]}, title="News rows", extra_objects=CARD_LABEL,
                title_size=CARD_TITLE),
         visual("nw_card_scored", "card", 260, 20, 220, 100,
-               {"Values": [mea("Scored News")]}, title="Scored (of 5,581)", extra_objects=CARD_LABEL,
+               {"Values": [mea("Scored News")]}, title="Scored news rows", extra_objects=CARD_LABEL,
                title_size=CARD_TITLE),
         visual("nw_card_cov", "card", 500, 20, 220, 100,
                {"Values": [mea("Scored Coverage %")]}, title="Sentiment coverage - most news is unscored",
