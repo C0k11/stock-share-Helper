@@ -122,7 +122,7 @@ python scripts/analyze.py                      # text report; --json for machine
 python scripts/warehouse.py --full --portfolio portfolio.local.yaml
 
 # 3) Dashboard (portfolio page works standalone)
-python -m streamlit run quantai/ui/streamlit_app.py
+quantai-dashboard                              # or: python -m streamlit run quantai/ui/streamlit_app.py
 
 # 4) AI analyst reports (data brief is seconds; --llm adds local-GPU commentary + news scoring)
 python scripts/report.py --llm              # daily

@@ -72,6 +72,9 @@ dev = [
     "ipywidgets>=8.1.0",
 ]
 
+[project.scripts]
+quantai-dashboard = "quantai.ui.launch:main"
+
 [tool.setuptools.packages.find]
 include = ["quantai*"]
 
