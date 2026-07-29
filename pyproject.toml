@@ -5,10 +5,10 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "quantai"
 version = "0.2.0"
-description = "QuantAI - 多 Agent LLM 量化交易与自进化系统（refactor/v2 干净重构）"
+description = "Personal quant workbench: DuckDB/dbt star-schema warehouse, indicator and backtest engine, local-LLM analyst, Streamlit console, Power BI artifact"
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Proprietary" }
+license = { text = "MIT" }
 
 # ----------------------------------------------------------------------
 # 核心依赖：业务代码直接 import、且无 GPU/重型负担的库。
