@@ -2,9 +2,8 @@
 
 只做展示/控制，**无业务逻辑**（业务在 agents/live/evolution，HTTP 在 api/）。
 - `client.QuantAIClient`：对 `quantai.api` 的薄客户端（可单测，可注入 ASGI transport）。
-- `streamlit_app`：薄 Streamlit 仪表盘（`streamlit run`），只展示 API 的真实状态。
-
-桌面 PySide6 + Live2D 为旧版表现壳（无业务逻辑），留 legacy `src/ui/`，可日后重指向 v2 API。
+- `app` + `views/`：st.navigation 五页仪表盘（入口 `quantai-dashboard` 或
+  `streamlit run quantai/ui/streamlit_app.py`，后者为兼容薄壳）。
 """
 from __future__ import annotations
 
