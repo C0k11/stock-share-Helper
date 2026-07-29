@@ -24,7 +24,10 @@ from quantai.agents.analyst import (
 from quantai.agents.news_scorer import aggregate_symbol_sentiment, score_news
 from quantai.config import load_config
 
-_WAREHOUSE_DB = Path("data/warehouse/quantai.duckdb")
+# 仓库根锚定（与 ui/app.py 的 icon 同套写法）：从任意 CWD 启动都指向同一份数据
+_ROOT = Path(__file__).resolve().parents[2]
+_WAREHOUSE_DB = _ROOT / "data" / "warehouse" / "quantai.duckdb"
+_REPORTS_DIR = str(_ROOT / "data" / "reports")
 
 
 def load_report_llm():
@@ -76,7 +79,7 @@ def _persist_scores(scored: list[dict], model: str) -> int:
 
 
 def make_daily_report(
-    llm=None, out_dir: str = "data/reports", log: Callable[[str], None] = print
+    llm=None, out_dir: str = _REPORTS_DIR, log: Callable[[str], None] = print
 ) -> tuple[str, Path]:
     """日报（收盘口径）：持仓+自选股+新闻+仓库摘要 →（可选 LLM）→ 落盘。"""
     from quantai.analysis import realized_volatility, rsi
@@ -172,7 +175,7 @@ def make_daily_report(
 def make_intraday_report(
     llm=None,
     symbols_cap: int = 8,
-    out_dir: str = "data/reports",
+    out_dir: str = _REPORTS_DIR,
     log: Callable[[str], None] = print,
 ) -> tuple[str, Path]:
     """盘中快报：当日 1 分钟会话统计 + 卖压代理 →（可选 LLM 打分+快评）→ 落盘。"""

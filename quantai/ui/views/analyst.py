@@ -25,10 +25,12 @@ def render() -> None:  # pragma: no cover - 需 streamlit 运行时
             make_daily_report(llm, log=lambda m: None)
         st.rerun()
 
+    # 仓库根锚定（与 app.py 的 icon 同套写法）：根外启动 streamlit 也能列出报告
+    reports_dir = Path(__file__).resolve().parents[3] / "data" / "reports"
     # 按修改时间倒序：新报告永远排第一个（旧版按文件名排，刚生成的盘中报告会被埋进列表）
-    reports = sorted(Path("data/reports").glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
+    reports = sorted(reports_dir.glob("*.md"), key=lambda p: p.stat().st_mtime, reverse=True)
     if reports:
         pick = st.selectbox(tr(lang, "ai.history"), [p.name for p in reports])
-        st.markdown((Path("data/reports") / pick).read_text(encoding="utf-8"))
+        st.markdown((reports_dir / pick).read_text(encoding="utf-8"))
     else:
         st.caption(tr(lang, "ai.none"))
