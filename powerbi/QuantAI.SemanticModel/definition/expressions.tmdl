@@ -1,4 +1,4 @@
-expression ExportFolder = "D:\Project\Stock\tableau\exports" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
+expression ExportFolder = "D:\Project\Stock\data\exports" meta [IsParameterQuery=true, Type="Text", IsParameterQueryRequired=true]
 	lineageTag: ed213d34-2939-4002-824a-7c6ff11d7b35
 
 	annotation PBI_ResultType = Text

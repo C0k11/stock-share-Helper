@@ -21,7 +21,7 @@ from pathlib import Path
 
 import pandas as pd
 
-EXPORTS = Path(__file__).resolve().parents[2] / "tableau" / "exports"
+EXPORTS = Path(__file__).resolve().parents[2] / "data" / "exports"
 OUT = Path(__file__).resolve().parent / "expected_values.csv"
 
 TABLES = [

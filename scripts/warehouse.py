@@ -11,7 +11,7 @@
     python scripts/warehouse.py --export
 
 计算路径：yfinance/持仓/信号/回测 →(pandas ETL)→ raw →(dbt SQL)→ staging → marts
-→(export)→ tableau/exports/*.csv 或 BI 直连 DuckDB。
+→(export)→ data/exports/*.csv 或 BI 直连 DuckDB。
 """
 from __future__ import annotations
 
@@ -27,7 +27,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 _REPO = Path(__file__).resolve().parent.parent
 _DBT_DIR = _REPO / "warehouse"
 _DEFAULT_DB = _REPO / "data" / "warehouse" / "quantai.duckdb"
-_EXPORT_DIR = _REPO / "tableau" / "exports"
+_EXPORT_DIR = _REPO / "data" / "exports"
 
 _MARTS = (
     "dim_date", "dim_symbol", "fact_prices", "fact_positions",
@@ -170,7 +170,7 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--years", type=int, default=cfg.history_years)
     p.add_argument("--load", action="store_true", help="pandas ETL 装载 raw 层")
     p.add_argument("--dbt", action="store_true", help="跑 dbt build（staging+marts+tests）")
-    p.add_argument("--export", action="store_true", help="导出 marts -> tableau/exports/*.csv")
+    p.add_argument("--export", action="store_true", help="导出 marts -> data/exports/*.csv")
     p.add_argument("--full", action="store_true", help="load + dbt + export 一条龙")
     args = p.parse_args(argv)
 

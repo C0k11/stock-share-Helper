@@ -257,7 +257,7 @@ flowchart TB
     RAW --> STG["staging — dbt views, cleaning only"]
     STG --> MRT["marts — dbt tables, Kimball star schema + LLM sentiment"]
     MRT --> TST["dbt tests — 68 tests, all green"]
-    MRT --> CSV["CSV exports — tableau/exports/"]
+    MRT --> CSV["CSV exports — data/exports/"]
     MRT --> JDBC["DuckDB — direct SQL/JDBC, any BI tool"]
     CSV --> PBI["Power BI — 5 pages + hidden QA"]
 ```
