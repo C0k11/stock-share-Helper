@@ -184,10 +184,8 @@ def render() -> None:  # pragma: no cover - 需 streamlit 运行时
     except Exception as exc:
         st.sidebar.error(f"API 不可达：{exc}")
         st.info(
-            "实盘会话页需要 QuantAI API（纸面交易，零真实资金）。启动方式任选：\n\n"
-            "1. 双击 `启动仪表盘.bat`（新版会自动拉起 API）；\n"
-            "2. 或另开终端执行 `venv311\\Scripts\\python.exe scripts\\serve.py --host 127.0.0.1`，"
-            "然后回来点侧栏任意控件重试。"
+            "实盘会话页需要 QuantAI API（纸面交易，零真实资金）：另开终端执行 "
+            "`python scripts/serve.py --host 127.0.0.1`，然后回来点侧栏任意控件重试。"
         )
         st.stop()
 

@@ -147,3 +147,9 @@ tableau/exports/
 powerbi/**/.pbi/cache.abf
 powerbi/**/.pbi/localSettings.json
 runs/
+# 本地过程文档与本机便利启动器（保留本地，不进交付面）
+docs/engineering_log_phase2_cn_infusion.md
+启动仪表盘.bat
+每日刷新.bat
+每日决策日志.bat
+盘中快评.bat
