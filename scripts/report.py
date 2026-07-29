@@ -7,7 +7,7 @@
     python scripts/report.py --intraday --llm   # 盘中快报 + 新闻情绪量化 + LLM 快评
 
 产物：data/reports/report_<date>.md / intraday_<date>_<time>.md；
-LLM 打出的新闻情绪分自动入仓库 raw.news_scores（Tableau 情绪时间线数据源）。
+LLM 打出的新闻情绪分自动入仓库 raw.news_scores（BI 情绪时间线数据源）。
 streamlit「AI 分析」页可用驻留模型跑同一流程（免每次冷加载）。
 """
 from __future__ import annotations

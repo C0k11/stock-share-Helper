@@ -1,17 +1,17 @@
-"""薄 CLI：数据仓库编排（ETL 装载 → dbt build → Tableau 导出）。
+"""薄 CLI：数据仓库编排（ETL 装载 → dbt build → BI 导出）。
 
 示例：
-    # 端到端：抓真实行情 + 加载持仓/信号/回测 + dbt build + 导出 Tableau 数据源
+    # 端到端：抓真实行情 + 加载持仓/信号/回测 + dbt build + 导出 BI 数据源
     python scripts/warehouse.py --full --portfolio portfolio.example.yaml
 
     # 只重跑 SQL 转换层（raw 不动）
     python scripts/warehouse.py --dbt
 
-    # 只导出 marts 层给 Tableau（CSV，见 tableau/DASHBOARD_SPEC.md）
+    # 只导出 marts 层给 BI（CSV，见 powerbi/SPEC.md）
     python scripts/warehouse.py --export
 
 计算路径：yfinance/持仓/信号/回测 →(pandas ETL)→ raw →(dbt SQL)→ staging → marts
-→(export)→ tableau/exports/*.csv 或 Tableau 直连 DuckDB（连接方式见 SPEC）。
+→(export)→ tableau/exports/*.csv 或 BI 直连 DuckDB。
 """
 from __future__ import annotations
 
@@ -40,7 +40,7 @@ def _drop_partial_today(prices: dict) -> int:
     """收盘口径守卫：剔掉"今天还没走完"的日线尾巴再入库。
 
     盘中跑 --load 时 yfinance 会把当日**进行中**的 bar 当日线返回（close=最新价、
-    volume=半日量），全量替换进 raw.prices 后无任何临时标记，dbt/Tableau 全按
+    volume=半日量），全量替换进 raw.prices 后无任何临时标记，dbt/BI 全按
     收盘价消费（审查实锤：75 秒内两次抓取同一"日线"volume 在涨）。规则：
     美股尾根 bar 日期=纽约今天且未到收盘（16:10 缓冲）→ 剔；加密（-USD，UTC
     0 点切日）尾根 bar 日期=UTC 今天 → 剔。宁可少一根完整 bar（下次跑补回），
@@ -154,7 +154,7 @@ def _export(db_path: Path) -> None:
             print(f"[export] {out.name:<28} {n:>8} rows")
     finally:
         con.close()
-    print(f"[export] done -> {_EXPORT_DIR}（Tableau: Connect > Text file，或直连 DuckDB，见 tableau/DASHBOARD_SPEC.md）")
+    print(f"[export] done -> {_EXPORT_DIR}")
 
 
 def main(argv: list[str] | None = None) -> int:

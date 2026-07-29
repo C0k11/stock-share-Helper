@@ -1,7 +1,7 @@
 """DuckDB 仓库连接（config 驱动路径）。
 
 为什么 DuckDB：嵌入式（零服务）、列存 + 向量化 SQL（分析型查询快）、与 pandas/parquet
-零摩擦（`con.sql(...).df()` / 直接 `read_parquet`）、Tableau 可经 ODBC/JDBC 直连。
+零摩擦（`con.sql(...).df()` / 直接 `read_parquet`）、BI 工具可经 ODBC/JDBC 直连。
 本地单机分析仓库的工业默认选择（Postgres 是多人/服务场景的可选升级，见 modules/warehouse.md）。
 
 分层约定（ELT）：

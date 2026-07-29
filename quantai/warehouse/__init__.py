@@ -4,7 +4,7 @@
 - `etl`：pandas Extract-Load（原样落 raw + 审计列，幂等重跑）；
   变换（清洗/星型建模）在 dbt SQL：`warehouse/`（staging → marts）。
 
-Tableau/BI 只查 `marts.*`（dim_symbol / dim_date + fact_*）。
+BI 只查 `marts.*`（dim_symbol / dim_date + fact_*）。
 """
 
 from quantai.warehouse.db import SCHEMAS, connect

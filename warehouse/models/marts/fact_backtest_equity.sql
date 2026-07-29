@@ -1,4 +1,4 @@
--- fact_backtest_equity：回测净值曲线（粒度 = run_id × date；Tableau 画净值/回撤曲线）。
+-- fact_backtest_equity：回测净值曲线（粒度 = run_id × date；BI 画净值/回撤曲线）。
 -- 回撤在 SQL 层用累计最大值窗口算——与 pandas drawdown_curve 同口径。
 select
     run_id,

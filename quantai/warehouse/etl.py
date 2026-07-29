@@ -415,7 +415,7 @@ def load_news_scores(
 
 def load_event_odds(con: DuckDBPyConnection, odds: Iterable, as_of: str) -> int:
     """Polymarket 事件概率快照 → `raw.event_odds`。幂等键 = as_of（同日重跑全量替换，
-    跨日累积 → 概率时间序列，Tableau 可画事件概率演变线）。"""
+    跨日累积 → 概率时间序列，BI 可画事件概率演变线）。"""
     _ensure(con, _DDL["event_odds"])
     rows = [o.as_dict() for o in odds if getattr(o, "market_id", "")]
     with _tx(con):

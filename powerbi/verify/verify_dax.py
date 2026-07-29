@@ -1,7 +1,7 @@
 """DAX vs pandas 对账：从同一批 CSV 算期望值，锚定 Power BI 语义模型的正确性。
 
 套路：规格不变、引擎换掉、结果对账。
-这里的"规格"是 tableau/DASHBOARD_SPEC.md 的表计算语义，三条硬约定：
+这里的"规格"是 powerbi/SPEC.md 的表计算语义，三条硬约定：
 1. 窗口 = 20 个**交易行**（该标的实际有 bar 的行），不是 20 个日历天；
 2. WINDOW_STDEV 是样本标准差 → pandas ddof=1 / DAX STDEVX.S；
 3. 窗口不足 20 行 → 空值（pandas rolling 默认 NaN / DAX 返回 BLANK）。

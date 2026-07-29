@@ -1,5 +1,5 @@
 -- fact_event_odds：事件概率事实表（粒度 = as_of × market_id）。
--- prob_change_1d 用窗口函数派生——Tableau 直接画"事件概率演变线 + 单日突变"。
+-- prob_change_1d 用窗口函数派生——BI 直接画"事件概率演变线 + 单日突变"。
 select
     as_of,
     market_id,
