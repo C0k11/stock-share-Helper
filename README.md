@@ -1,4 +1,4 @@
-# QuantAI — Personal Portfolio Analysis & Decision-Support System
+# <img src="docs/img/icon.png" width="32" alt=""> QuantAI — Personal Portfolio Analysis & Decision-Support System
 
 **A personal quant workbench in two surfaces: a real-time trading console with a
 local-LLM analyst (Streamlit — the product anyone can clone and run), backed by a

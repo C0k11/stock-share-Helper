@@ -8,13 +8,20 @@ from __future__ import annotations
 
 
 def main() -> None:  # pragma: no cover - 需 streamlit 运行时
+    from pathlib import Path
+
     import streamlit as st
 
     from quantai.ui.common import inject_chrome
     from quantai.ui.i18n import LANGS, tr
     from quantai.ui.views import analyst, portfolio, sim, watchlist, workstation
 
-    st.set_page_config(page_title="QuantAI Dashboard", layout="wide")
+    # 仓库 icon 与 README 同一张；非源码树安装时静默退回默认图标
+    _icon = Path(__file__).resolve().parents[2] / "docs" / "img" / "icon.png"
+    st.set_page_config(
+        page_title="QuantAI Dashboard", layout="wide",
+        page_icon=str(_icon) if _icon.exists() else None,
+    )
     inject_chrome(st)
 
     lang_label = st.sidebar.radio(
