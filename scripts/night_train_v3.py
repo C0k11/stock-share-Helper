@@ -27,7 +27,7 @@ from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).parent.parent
-PY = str(ROOT / "venv311" / "Scripts" / "python.exe")
+PY = sys.executable
 SEQ_LADDER = (3072, 2560, 2048)
 
 TRAIN_JSONL = ROOT / "data" / "distill" / "sft_v3_train.jsonl"
