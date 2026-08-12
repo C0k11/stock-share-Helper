@@ -1,4 +1,4 @@
-"""事件概率通道：Polymarket Gamma API（公开、免 key）→ 预测市场隐含概率。
+"""事件概率通道：Polymarket Gamma API（公开、免 key）-> 预测市场隐含概率。
 
 价值：RSS 头条告诉系统"发生了什么"，Polymarket 赔率给出"市场用真金白银定价的
 **事件概率**"（Fed 决议/宏观数据区间/公司事件），是结构化的前瞻信号。
@@ -33,7 +33,7 @@ class EventOdd:
     condition_id: str
     event_title: str
     question: str
-    yes_price: float  # 市场隐含 P(Yes) ∈ [0,1]
+    yes_price: float  # 市场隐含 P(Yes)  in  [0,1]
     volume_24h: float
     end_date: Optional[str]
     category: str  # 抓取时所用的 tag
@@ -64,7 +64,7 @@ def _as_list(v) -> list:
 def events_to_odds(
     events_json: Iterable[dict], category: str, top_markets_per_event: int = 5
 ) -> list[EventOdd]:
-    """Gamma /events 响应 → EventOdd 列表（纯逻辑，可测）。
+    """Gamma /events 响应 -> EventOdd 列表（纯逻辑，可测）。
 
     每个 event 只取按 24h 成交量排序的前 N 个 market（World Cup 类事件有 60 个
     子市场，全要会淹没信号）；无 "Yes" 结果 / 价格解析失败的市场跳过。

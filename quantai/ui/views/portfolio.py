@@ -17,7 +17,7 @@ def render() -> None:  # pragma: no cover - 需 streamlit 运行时
     from quantai.ui.i18n import tr
 
     lang = st.session_state.get("ui_lang", "zh")
-    st.title("QuantAI · 真实组合分析" if lang == "zh" else "QuantAI · Portfolio")
+    st.title("QuantAI · 真实组合分析" if lang == "zh" else "QuantAI - Portfolio")
     cfg = load_config().portfolio
     st.sidebar.header(tr(lang, "pf.sidebar"))
     pf_path = st.sidebar.text_input(tr(lang, "pf.file"), value=cfg.file)
@@ -77,8 +77,8 @@ def render() -> None:  # pragma: no cover - 需 streamlit 运行时
                 tr(lang, "pf.h_pnlpct"): _fmt_pct(s.unrealized_pnl_pct),
                 tr(lang, "pf.h_weight"): round(s.weight * 100, 1) if s.weight == s.weight else None,
                 "RSI": round(s.rsi_14, 1) if s.rsi_14 == s.rsi_14 else None,
-                tr(lang, "pf.h_trend"): "↑" if s.in_uptrend else "—",
-                tr(lang, "pf.h_pb"): "●" if s.is_pullback else "",
+                tr(lang, "pf.h_trend"): "^" if s.in_uptrend else "-",
+                tr(lang, "pf.h_pb"): "*" if s.is_pullback else "",
             }
             for s in sorted(snap.positions, key=lambda x: -abs(x.market_value))
         ],

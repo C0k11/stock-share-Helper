@@ -1,6 +1,6 @@
-"""薄 CLI：每日决策日志飞轮（行情 → 规则学生 → 教师作答+打分 → journal JSONL）。
+"""薄 CLI：每日决策日志飞轮（行情 -> 规则学生 -> 教师作答+打分 -> journal JSONL）。
 
-⛔ 成本闸（与 distill.py 同约定）：
+成本闸（与 distill.py 同约定）：
 - 默认与 `--dry-run` **零真实调用**（mock 教师走全管线）。
 - 真实生成 = `--run --confirm-spend` 两个开关都给 + DEEPSEEK_API_KEY 已配。
 - 定时任务的命令行里显式写这两个开关 = 用户的常设授权；额度保险丝 =
@@ -132,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
 
         symbols = args.symbols or _default_symbols(cfg)
         if not symbols:
-            print("⛔ 没有标的（持仓/自选股文件缺失且未给 --symbols）", file=sys.stderr)
+            print("没有标的（持仓/自选股文件缺失且未给 --symbols）", file=sys.stderr)
             return 1
         start = (datetime.now() - timedelta(days=dcfg.history_years * 365)).strftime("%Y-%m-%d")
         print(f"[journal] fetching {len(symbols)} symbols ...")
@@ -140,7 +140,7 @@ def main(argv: list[str] | None = None) -> int:
 
         if args.run:
             if not args.confirm_spend:
-                print("⛔ --run 需要同时给 --confirm-spend（消耗 DeepSeek 额度）。", file=sys.stderr)
+                print("--run 需要同时给 --confirm-spend（消耗 DeepSeek 额度）。", file=sys.stderr)
                 return 2
             load_dotenv(".env")
             load_dotenv(".local/.env")
@@ -156,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
                     thinking=dcfg.thinking,
                 )
             except MissingApiKeyError as exc:
-                print(f"⛔ {exc}", file=sys.stderr)
+                print(f"{exc}", file=sys.stderr)
                 return 3
             workers = args.workers
             print(f"[journal] REAL run: model={dcfg.model} cap={args.cap}（~{args.cap * 2} 次调用上限）")

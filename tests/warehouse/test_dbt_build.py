@@ -1,4 +1,4 @@
-"""dbt 集成测试：ETL 种子 → `dbt build`（模型 + 全部断言测试）→ SQL vs pandas 对账。
+"""dbt 集成测试：ETL 种子 -> `dbt build`（模型 + 全部断言测试）-> SQL vs pandas 对账。
 
 这是数据层的核心 integrity 测试：同一份合成数据，pandas（PortfolioAnalyzer /
 pct_change / drawdown_curve）与 SQL（marts 星型模型）两条**独立实现路径**必须

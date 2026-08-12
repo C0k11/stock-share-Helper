@@ -65,8 +65,8 @@ def _pp(x: float) -> str:
 
 
 _SHARPE_NOTE = (
-    "> Sharpe 口径：无风险利率 rf=2.0%/年，(日均收益×252 − rf) ÷ (日收益标准差×√252)，算术均值年化。\n"
-    "> Buy&Hold = 首日满仓 SPY 持有到底（同一引擎/成本，next_open 成交）；「新版 − B&H」为策略相对大盘的诚实差距"
+    "> Sharpe 口径：无风险利率 rf=2.0%/年，(日均收益×252 - rf) ÷ (日收益标准差×sqrt(252))，算术均值年化。\n"
+    "> Buy&Hold = 首日满仓 SPY 持有到底（同一引擎/成本，next_open 成交）；「新版 - B&H」为策略相对大盘的诚实差距"
     "(pp；最大回撤为负数，差值正值=策略回撤更浅、风险更低)。\n"
 )
 
@@ -80,7 +80,7 @@ def format_comparison_markdown(
     """把对比结果排成 Markdown 表。
 
     benchmark 为 None：旧 vs 新 + 变化列（3 列对比）。
-    benchmark 给定：再并入「Buy&Hold SPY」列与「新版 − B&H」诚实差距列（市场对标）。
+    benchmark 给定：再并入「Buy&Hold SPY」列与「新版 - B&H」诚实差距列（市场对标）。
     """
     old = results["close"].metrics
     new = results["next_open"].metrics
@@ -105,7 +105,7 @@ def format_comparison_markdown(
     bh = benchmark.metrics
     lines = [
         header + period,
-        "| 指标 | 旧版(close,虚高) | 新版(next_open,诚实) | Buy&Hold SPY | 新版 − B&H |",
+        "| 指标 | 旧版(close,虚高) | 新版(next_open,诚实) | Buy&Hold SPY | 新版 - B&H |",
         "| :-- | --: | --: | --: | --: |",
         f"| 总收益 | {_pct(old.total_return)} | {_pct(new.total_return)} | {_pct(bh.total_return)} | {_pp(new.total_return - bh.total_return)} |",
         f"| 年化(CAGR) | {_pct(old.cagr)} | {_pct(new.cagr)} | {_pct(bh.cagr)} | {_pp(new.cagr - bh.cagr)} |",

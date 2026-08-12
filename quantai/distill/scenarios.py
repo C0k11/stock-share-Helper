@@ -1,4 +1,4 @@
-"""蒸馏场景构造：真实市场数据 + analysis/ 指标 → 教师模型的分析任务 prompt。
+"""蒸馏场景构造：真实市场数据 + analysis/ 指标 -> 教师模型的分析任务 prompt。
 
 纯逻辑（不碰网络）：输入价格 DataFrame，输出 `Scenario`（消息列表 + 元数据）。
 指标全部复用 `quantai.analysis`（与仪表盘/仓库同一套数字，教师看到的就是系统算的）。
@@ -64,7 +64,7 @@ def _fmt(x: float, nd: int = 2) -> str:
 
 
 def build_indicator_brief(df: pd.DataFrame, symbol: str) -> tuple[str, dict]:
-    """价格 df → 指标简报文本 +（数值 dict 供 meta/审计）。
+    """价格 df -> 指标简报文本 +（数值 dict 供 meta/审计）。
 
     df 需含 close（high/low 缺失用 close 兜底，仅影响 ATR/pullback 口径）。
     指标不足热身时诚实显示 n/a（教师被要求不编造）。
@@ -111,7 +111,7 @@ def build_indicator_brief(df: pd.DataFrame, symbol: str) -> tuple[str, dict]:
 
 
 class ScenarioBuilder:
-    """{symbol: 价格 df} → 蒸馏场景流。
+    """{symbol: 价格 df} -> 蒸馏场景流。
 
     Args:
         min_bars: 低于该根数的标的直接跳过（指标基本全 n/a，教师没料可分析）。
@@ -217,7 +217,7 @@ def build_historical_scenarios(
             if len(trunc) < min_bars:
                 continue
             snapshot[sym] = trunc
-            # 结局元数据（meta-only）：截止日收盘 → +5/+20 根后的实现收益
+            # 结局元数据（meta-only）：截止日收盘 -> +5/+20 根后的实现收益
             future = df.loc[d:]["close"].dropna()
             base = float(future.iloc[0]) if len(future) else float("nan")
             outcomes[sym] = {
@@ -244,7 +244,7 @@ def build_historical_scenarios(
 def build_news_scoring_scenarios(
     news_items: list, as_of: str, batch_size: int = 8
 ) -> Iterator[Scenario]:
-    """真实头条 → 新闻打分任务场景（system/user 与 `news_scorer` 生产路径同源）。
+    """真实头条 -> 新闻打分任务场景（system/user 与 `news_scorer` 生产路径同源）。
 
     每 batch_size 条一个场景（与生产的"一次调用打一批"一致）。
     """
@@ -269,7 +269,7 @@ def build_news_scoring_scenarios(
 def build_market_report_scenario(
     prices: dict, as_of: str, min_bars: int = 60, max_symbols: int = 8
 ) -> Optional[Scenario]:
-    """多标的指标简报 → 四段式综合报告任务（system 与 `analyst` 生产报告同源）。
+    """多标的指标简报 -> 四段式综合报告任务（system 与 `analyst` 生产报告同源）。
 
     诚实边界：这是生产日报简报的**近似**（多标的指标节）——真实持仓/现金等隐私
     数据**不进训练集**；教师学的是"给定一篮子指标出四段分析"的通用能力。

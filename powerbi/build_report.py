@@ -2,7 +2,7 @@
 
 Power BI 旧版报表格式（report.json，非 PBIR preview）：
 - section.visualContainers[].config 是字符串化 JSON；
-- 每个视觉 = visualType + projections（角色→字段）+ prototypeQuery（实体/列/度量引用）。
+- 每个视觉 = visualType + projections（角色->字段）+ prototypeQuery（实体/列/度量引用）。
 
 用法：venv311\\Scripts\\python.exe powerbi\\build_report.py
 产物：powerbi/QuantAI.Report/report.json（覆盖写，Desktop 重开生效）。
@@ -263,7 +263,7 @@ CARD_LABEL_SM = _card_style("16D")  # 窄卡 / 六连卡
 
 CARD_TITLE = "12D"  # 卡片标题统一字号
 
-# 34 个标的用列表切片器本来就不合适 → 下拉模式。
+# 34 个标的用列表切片器本来就不合适 -> 下拉模式。
 DARK_BG = "#1B1B1F"
 
 SLICER_DROPDOWN = {
@@ -278,7 +278,7 @@ SLICER_DROPDOWN = {
 
 
 # --------------------------------------------------------------------------- #
-# Page 1 · Market Overview
+# Page 1 - Market Overview
 # --------------------------------------------------------------------------- #
 def market_page() -> dict:
     # 12 视觉太密 -> 10：去掉底部 mo_table（其列在本页图表里全有），两张图吃满下半页。
@@ -321,7 +321,7 @@ def market_page() -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# Page 2 · Signals
+# Page 2 - Signals
 # --------------------------------------------------------------------------- #
 def signals_page() -> dict:
     # 三条带布局，消掉原 x=500~1260 的整条空白：卡片左侧竖排 / 强度图横满右侧；
@@ -356,7 +356,7 @@ def signals_page() -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# Page 3 · Backtest vs Benchmark
+# Page 3 - Backtest vs Benchmark
 # --------------------------------------------------------------------------- #
 def backtest_page() -> dict:
     kpis = [("Sharpe", "Sharpe"), ("CAGR", "CAGR"), ("Annual Volatility", "Annual vol"),
@@ -390,7 +390,7 @@ def backtest_page() -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# Page 4 · Risk & Volatility
+# Page 4 - Risk & Volatility
 # --------------------------------------------------------------------------- #
 def risk_page() -> dict:
     visuals = [
@@ -420,7 +420,7 @@ def risk_page() -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# Page 5 · News & Event Odds
+# Page 5 - News & Event Odds
 # --------------------------------------------------------------------------- #
 def news_page() -> dict:
     visuals = [
@@ -466,7 +466,7 @@ def news_page() -> dict:
 
 
 # --------------------------------------------------------------------------- #
-# Page 6 · QA（验收页）
+# Page 6 - QA（验收页）
 # --------------------------------------------------------------------------- #
 def qa_page() -> dict:
     visuals = [

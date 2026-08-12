@@ -39,7 +39,7 @@ backtest:
     frequency: "weekly"
     threshold: 0.05
   initial_capital: 100000.0
-  fill_timing: "next_open"    # 修 lookahead —— d 日决策、open[d+1] 成交
+  fill_timing: "next_open"    # 修 lookahead -- d 日决策、open[d+1] 成交
 
 strategy:
   trend:

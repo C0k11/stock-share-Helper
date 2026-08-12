@@ -1,4 +1,4 @@
-﻿"""趋势 / 动量指标：MACD（金叉/死叉）、均线体系、ROC/动量、RSI（超卖）、随机指标、回踩检测。
+"""趋势 / 动量指标：MACD（金叉/死叉）、均线体系、ROC/动量、RSI（超卖）、随机指标、回踩检测。
 
 设计约定（全模块一致）：
 - **纯函数**：输入 `pd.Series`/`pd.DataFrame`，输出新对象，不修改输入、无 IO、无全局状态。
@@ -44,7 +44,7 @@ def sma(close: pd.Series, window: int) -> pd.Series:
 def ema(close: pd.Series, span: int) -> pd.Series:
     """指数移动平均（递推口径，`adjust=False`）。
 
-    EMA_t = α·close_t + (1-α)·EMA_{t-1}，α = 2/(span+1)，EMA_0 = close_0。
+    EMA_t = alpha*close_t + (1-alpha)*EMA_{t-1}，alpha = 2/(span+1)，EMA_0 = close_0。
     与 TradingView/常见图表软件的 EMA 一致；只依赖 <= t 的数据（因果）。
     NaN 洞：洞上输出 NaN（不穿透旧值），洞后从上一有效状态恢复递推。
     """
@@ -58,7 +58,7 @@ def moving_average_system(
     """均线体系：各周期 SMA + 多头排列度。
 
     - `sma_{w}`：各周期简单均线。
-    - `ma_alignment` ∈ [0, 1]：相邻均线对中「短均线 > 长均线」的占比
+    - `ma_alignment`  in  [0, 1]：相邻均线对中「短均线 > 长均线」的占比
       （windows 升序两两比较）。1.0 = 完美多头排列，0.0 = 完美空头排列。
       任一参与比较的均线为 NaN 时该行为 NaN（不足以判断，不装懂）。
       去重后不足 2 个窗口时无均线对可比 -> 该列**全 NaN**（列本身恒存在）。
@@ -94,9 +94,9 @@ def macd(
 ) -> pd.DataFrame:
     """MACD（Moving Average Convergence Divergence）。
 
-    - macd_line = EMA(close, fast) − EMA(close, slow)
+    - macd_line = EMA(close, fast) - EMA(close, slow)
     - signal_line = EMA(macd_line, signal)
-    - histogram = macd_line − signal_line
+    - histogram = macd_line - signal_line
 
     经典参数 (12, 26, 9)。EMA 为 `adjust=False` 递推口径（见 :func:`ema`），
     自 bar 0 起即有值（TradingView 同口径）——warmup 期数值受种子主导，产**信号**
@@ -125,7 +125,7 @@ def macd_cross(
     - golden_cross_t：macd 在 t 上穿 signal，即 macd_{t-1} <= signal_{t-1} 且 macd_t > signal_t。
     - death_cross_t ：macd 在 t 下穿 signal，即 macd_{t-1} >= signal_{t-1} 且 macd_t < signal_t。
 
-    warmup 抑制：前 `slow` 根恒 False——EMA 种子期 macd≈signal≈0，bar 1 的任何
+    warmup 抑制：前 `slow` 根恒 False--EMA 种子期 macd~signal~0，bar 1 的任何
     价格变动都会造出一次"穿越"假信号（审计实锤：200/200 个随机序列
     在 bar 1-2 出信号），故整段种子期不产信号。任一参与比较的值为 NaN 时判 False
     （数据洞及洞后首根不产信号）。
@@ -145,7 +145,7 @@ def macd_cross(
 # 动量
 # --------------------------------------------------------------------------- #
 def roc(close: pd.Series, window: int = 10) -> pd.Series:
-    """变动率（Rate of Change，百分比）。ROC_t = (close_t / close_{t-w} − 1) × 100。
+    """变动率（Rate of Change，百分比）。ROC_t = (close_t / close_{t-w} - 1) × 100。
 
     window 必须 >= 1：负窗口等价 `shift(-n)` 即 lookahead，直接拒绝。
     """
@@ -154,7 +154,7 @@ def roc(close: pd.Series, window: int = 10) -> pd.Series:
 
 
 def momentum(close: pd.Series, window: int = 10) -> pd.Series:
-    """价差动量。MOM_t = close_t − close_{t-w}（与 ROC 的比值口径相对，保留量纲）。
+    """价差动量。MOM_t = close_t - close_{t-w}（与 ROC 的比值口径相对，保留量纲）。
 
     window 必须 >= 1（同 :func:`roc`，负窗口 = lookahead，拒绝）。
     """
@@ -168,13 +168,13 @@ def momentum(close: pd.Series, window: int = 10) -> pd.Series:
 def rsi(close: pd.Series, window: int = 14) -> pd.Series:
     """相对强弱指标（Wilder 口径）。
 
-    delta_t = close_t − close_{t-1}；gain = max(delta, 0)，loss = max(−delta, 0)。
-    Wilder 平滑：avg_t = (avg_{t-1}·(w−1) + x_t)/w，等价 `ewm(alpha=1/w, adjust=False)`。
-    RS = avg_gain / avg_loss；RSI = 100 − 100/(1+RS) ∈ [0, 100]。
+    delta_t = close_t - close_{t-1}；gain = max(delta, 0)，loss = max(-delta, 0)。
+    Wilder 平滑：avg_t = (avg_{t-1}*(w-1) + x_t)/w，等价 `ewm(alpha=1/w, adjust=False)`。
+    RS = avg_gain / avg_loss；RSI = 100 - 100/(1+RS)  in  [0, 100]。
 
     边界口径：
-    - avg_loss = 0 且 avg_gain > 0（一路涨）→ RSI = 100；对称地一路跌 → 0。
-    - avg_gain = avg_loss = 0（价格纹丝不动）→ RS 为 0/0 数学未定义，按**中性 50** 处理
+    - avg_loss = 0 且 avg_gain > 0（一路涨）-> RSI = 100；对称地一路跌 -> 0。
+    - avg_gain = avg_loss = 0（价格纹丝不动）-> RS 为 0/0 数学未定义，按**中性 50** 处理
       （多数图表软件口径；比返回 NaN 更利于下游布尔判定，已在测试固定该行为）。
     - 前 window 个值为 NaN（平滑未热身）。
     - NaN 洞：洞上以及**洞后首根**（跨洞差分未知）输出 NaN；平滑状态在洞后从
@@ -192,7 +192,7 @@ def rsi(close: pd.Series, window: int = 14) -> pd.Series:
     valid = denom.notna()
     flat = valid & (denom == 0)
     normal = valid & (denom > 0)
-    # RSI = 100·avg_gain/(avg_gain+avg_loss) 与 100−100/(1+RS) 代数等价，且天然处理 avg_loss=0。
+    # RSI = 100*avg_gain/(avg_gain+avg_loss) 与 100-100/(1+RS) 代数等价，且天然处理 avg_loss=0。
     out[normal] = 100.0 * avg_gain[normal] / denom[normal]
     out[flat] = 50.0
     # NaN 洞掩码：close 为 NaN（洞上）或 delta 为 NaN（洞后首根，差分不可知）-> NaN。
@@ -232,11 +232,11 @@ def stochastic(
 ) -> pd.DataFrame:
     """随机指标（Stochastic Oscillator，慢速口径）。
 
-    raw %K_t = 100 × (close_t − LL_w) / (HH_w − LL_w)，
+    raw %K_t = 100 × (close_t - LL_w) / (HH_w - LL_w)，
     其中 HH_w/LL_w 为近 w 日最高价最高点 / 最低价最低点（含当日，因果）。
     %K = SMA(raw %K, smooth_k)（`smooth_k=1` 即快速随机指标）；%D = SMA(%K, d_window)。
 
-    边界口径：HH_w = LL_w（w 日内价格区间为零）→ 0/0 未定义，置 NaN（诚实缺数据，
+    边界口径：HH_w = LL_w（w 日内价格区间为零）-> 0/0 未定义，置 NaN（诚实缺数据，
     不猜方向）；随 SMA 传播。
     """
     _require_positive(k_window=k_window, d_window=d_window, smooth_k=smooth_k)
@@ -266,14 +266,14 @@ def pullback(
     定义（三个条件同时成立记为回踩，全部只用 <= t 的数据）：
     1. **趋势向上**：SMA(close, ma_fast)_t > SMA(close, ma_slow)_t 且 close_t > SMA_slow_t
        （快线在慢线上方，价格仍站在慢线上——回踩没破坏趋势）。
-    2. **自近期高点回落**：retrace_t = 1 − close_t / max(high[t-lookback+1 .. t])
-       ∈ [min_retrace, max_retrace]。回落太浅不算回踩，太深视为趋势破位而非回踩。
+    2. **自近期高点回落**：retrace_t = 1 - close_t / max(high[t-lookback+1 .. t])
+        in  [min_retrace, max_retrace]。回落太浅不算回踩，太深视为趋势破位而非回踩。
     3. **高点非当日**：close_t < 当日 high 的 lookback 期高点（由 2 的 retrace >= min_retrace 隐含）。
 
     输出列：
     - `retrace_from_high`：条件 2 的回落深度（连续值，便于下游/仪表盘用）。
     - `in_uptrend`：条件 1 布尔。
-    - `pullback`：1 ∧ 2 布尔信号。
+    - `pullback`：1  and  2 布尔信号。
     NaN（均线/高点未热身）一律判 False。
     """
     if not 0 <= min_retrace < max_retrace:

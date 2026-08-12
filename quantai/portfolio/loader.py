@@ -1,4 +1,4 @@
-﻿"""真实持仓录入：`portfolio.local.yaml`（或 CSV）→ 类型化 `Portfolio`。
+"""真实持仓录入：`portfolio.local.yaml`（或 CSV）-> 类型化 `Portfolio`。
 
 隐私边界（硬要求）：真实持仓文件是 `portfolio.local.yaml`，被仓库 `.gitignore` 的
 `*.local.yaml` 规则排除，**永不入库**；仓库只带 `portfolio.example.yaml` 示例。
@@ -71,15 +71,15 @@ class Portfolio(BaseModel):
         return list(seen)
 
     def total_cost(self) -> float:
-        """全部持仓的成本总额 Σ shares × cost_basis（空头 lot 为负）。"""
+        """全部持仓的成本总额 sum shares × cost_basis（空头 lot 为负）。"""
         return float(sum(p.shares * p.cost_basis for p in self.positions))
 
 
 def load_portfolio(path: str | Path) -> Portfolio:
     """从 YAML 或 CSV 加载真实持仓。
 
-    - 文件不存在 → `FileNotFoundError`，报错信息指向 `portfolio.example.yaml`。
-    - 未知字段 / 非法值 → pydantic `ValidationError`（诚实报错，不静默丢弃）。
+    - 文件不存在 -> `FileNotFoundError`，报错信息指向 `portfolio.example.yaml`。
+    - 未知字段 / 非法值 -> pydantic `ValidationError`（诚实报错，不静默丢弃）。
     - 扩展名 `.yaml`/`.yml` 走 YAML，`.csv` 走 CSV，其它报 `ValueError`。
     """
     p = Path(path)

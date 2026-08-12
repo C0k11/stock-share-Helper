@@ -1,4 +1,4 @@
-"""Chartist overlay —— VLM 看 K 线给方向分（+1 支持 / -1 反对 / 0 中性）。
+"""Chartist overlay -- VLM 看 K 线给方向分（+1 支持 / -1 反对 / 0 中性）。
 
 迁移自 `strategy.py::_chartist_overlay`。拆成两块：
 - **纯打分**（`score_from_vlm`）：把 VLM 输出 {signal, confidence} + 提案方向 映射成 -1/0/1，

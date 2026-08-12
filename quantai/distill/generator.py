@@ -1,14 +1,14 @@
-"""蒸馏数据生成：场景 × 教师客户端 → SFT / DPO 训练 JSONL。
+"""蒸馏数据生成：场景 × 教师客户端 -> SFT / DPO 训练 JSONL。
 
 输出格式**严格对接**现有训练器（有测试锁）：
 - SFT（`quantai.llm.finetune.QLoRAFineTuner`）：每行
   `{"conversations": [{"role": "system"|"user"|"assistant", "content": ...}, ...]}`
-  ——`build_training_texts` 直接套 chat 模板。
+  --`build_training_texts` 直接套 chat 模板。
 - DPO（`quantai.llm.dpo.DPORunner`）：每行
   `{"prompt": <消息列表>, "chosen": str, "rejected": str}`
-  ——`REQUIRED_DPO_COLUMNS` 校验 + `format_prompt_messages` 兼容消息列表。
+  --`REQUIRED_DPO_COLUMNS` 校验 + `format_prompt_messages` 兼容消息列表。
 
-诚实口径：这是**离线蒸馏**（教师批量生成资料 → 学生离线 QLoRA/DPO），与项目里
+诚实口径：这是**离线蒸馏**（教师批量生成资料 -> 学生离线 QLoRA/DPO），与项目里
 lookahead 自查、online-learning 诚实占位是同一种 integrity 叙事——不宣称在线学习。
 DPO 的 rejected 侧当前是确定性弱基线（见 `weak_baseline_answer` 的诚实说明）。
 """
@@ -34,7 +34,7 @@ def _record_meta(scenario: Scenario) -> dict:
 
 
 def scenario_to_sft_record(scenario: Scenario, teacher_answer: str) -> dict:
-    """场景 + 教师回答 → SFT 行（conversations 格式）。"""
+    """场景 + 教师回答 -> SFT 行（conversations 格式）。"""
     return {
         "conversations": scenario.messages + [{"role": "assistant", "content": teacher_answer}],
         "meta": _record_meta(scenario),
@@ -44,7 +44,7 @@ def scenario_to_sft_record(scenario: Scenario, teacher_answer: str) -> dict:
 def scenario_to_dpo_record(
     scenario: Scenario, chosen: str, rejected: Optional[str] = None
 ) -> dict:
-    """场景 + 教师回答（chosen）→ DPO 偏好对行。rejected 默认弱基线。"""
+    """场景 + 教师回答（chosen）-> DPO 偏好对行。rejected 默认弱基线。"""
     return {
         "prompt": scenario.messages,
         "chosen": chosen,
@@ -88,7 +88,7 @@ class DistillGenerator:
         limit: Optional[int] = None,
         workers: int = 1,
     ) -> dict:
-        """场景 → 教师 → SFT+DPO 行。返回统计摘要。
+        """场景 -> 教师 -> SFT+DPO 行。返回统计摘要。
 
         - 单场景失败不炸整批（进 `failures` 如实汇报）；`limit` 是额度保险丝。
         - `workers > 1` 用线程池并发调教师（网络 IO 密集，千条级批量必开——

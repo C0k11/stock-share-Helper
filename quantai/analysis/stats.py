@@ -1,7 +1,7 @@
 """金融统计：收益分布、回撤、Sharpe/Sortino、beta vs 基准。
 
 Sharpe / 最大回撤直接**复用** `quantai.backtest.metrics`（同一口径：rf=2%/年、
-(日均×252 − rf)/(日 std×√252)、算术年化），不重复实现——分析层与回测层数字必须一致。
+(日均×252 - rf)/(日 std×sqrt(252))、算术年化），不重复实现——分析层与回测层数字必须一致。
 
 同 `trend.py` 的约定：纯函数、边界诚实。未定义的统计量（样本不足/分母为 0）
 返回 NaN 而非编数字，各函数 docstring 标明口径。
@@ -23,7 +23,7 @@ from quantai.backtest.metrics import (  # noqa: F401  (re-export)
 
 
 def returns_from_prices(close: pd.Series) -> pd.Series:
-    """价格 → 简单日收益。r_t = close_t/close_{t-1} − 1，首位 NaN 丢弃。"""
+    """价格 -> 简单日收益。r_t = close_t/close_{t-1} - 1，首位 NaN 丢弃。"""
     return close.pct_change(fill_method=None).dropna()
 
 
@@ -35,7 +35,7 @@ class ReturnDistribution:
     """日收益分布画像（全部基于简单日收益）。
 
     - ann_return = mean_daily × 252（算术年化，与 Sharpe 分子同口径）
-    - ann_volatility = std_daily × √252
+    - ann_volatility = std_daily × sqrt(252)
     - skewness / excess_kurtosis：pandas 口径（偏度 g1；峰度为超额峰度，正态=0）
     - var_95 = 日收益 5% 分位（历史模拟法 VaR，负数表示亏损）
     - cvar_95 = 低于 var_95 的日收益均值（Expected Shortfall）
@@ -62,7 +62,7 @@ class ReturnDistribution:
 def return_distribution(returns: pd.Series) -> ReturnDistribution:
     """日收益分布统计。见 :class:`ReturnDistribution` 各字段口径。
 
-    边界：空序列 → n_days=0，其余全 NaN；skew/kurt 分别需要 >=3 / >=4 个样本，
+    边界：空序列 -> n_days=0，其余全 NaN；skew/kurt 分别需要 >=3 / >=4 个样本，
     不足时 pandas 给 NaN（保留，不编数字）。NaN 值先剔除再统计。
     """
     r = returns.dropna()
@@ -92,7 +92,7 @@ def return_distribution(returns: pd.Series) -> ReturnDistribution:
 # 回撤
 # --------------------------------------------------------------------------- #
 def drawdown_curve(equity: pd.Series) -> pd.Series:
-    """回撤曲线。dd_t = equity_t / max(equity[..t]) − 1（<= 0）。"""
+    """回撤曲线。dd_t = equity_t / max(equity[..t]) - 1（<= 0）。"""
     peak = equity.expanding().max()
     return (equity / peak - 1.0).rename("drawdown")
 
@@ -117,7 +117,7 @@ class DrawdownStats:
 
 
 def drawdown_stats(equity: pd.Series) -> DrawdownStats:
-    """最大回撤 + 发生区间 + 最长水下期。空序列 → NaN/空串/0。"""
+    """最大回撤 + 发生区间 + 最长水下期。空序列 -> NaN/空串/0。"""
     eq = equity.dropna()
     if len(eq) == 0:
         return DrawdownStats(float("nan"), "", "", 0)
@@ -147,15 +147,15 @@ def sortino_ratio(
 ) -> float:
     """Sortino 比率（只惩罚下行波动）。
 
-    excess_t = r_t − rf/252（日超额收益，MAR = 无风险利率）；
-    downside_dev = √(mean(min(excess, 0)²)) × √252（下行偏差：整段样本上、
+    excess_t = r_t - rf/252（日超额收益，MAR = 无风险利率）；
+    downside_dev = sqrt(mean(min(excess, 0)^2)) × sqrt(252)（下行偏差：整段样本上、
     只取负超额的均方根——**分母对全样本取均值**，不是只对负样本，这是
     Sortino 的标准口径，否则会低估下行风险）；
     Sortino = (mean(excess) × 252) / downside_dev。
 
-    边界：无下行样本（一路超越 rf）→ 分母 0，数学未定义 → 返回 NaN（不像
+    边界：无下行样本（一路超越 rf）-> 分母 0，数学未定义 -> 返回 NaN（不像
     `sharpe_ratio` 返回 0——那是旧口径兼容；这里诚实标 NaN，测试固定该行为）。
-    空序列 → NaN。rf 与 `sharpe_ratio` 默认一致（2%/年）。
+    空序列 -> NaN。rf 与 `sharpe_ratio` 默认一致（2%/年）。
     """
     r = returns.dropna()
     if len(r) == 0:
@@ -172,10 +172,10 @@ def sortino_ratio(
 # beta
 # --------------------------------------------------------------------------- #
 def beta(asset_returns: pd.Series, benchmark_returns: pd.Series) -> float:
-    """CAPM beta。β = Cov(r_a, r_b) / Var(r_b)（样本协方差/方差，ddof=1）。
+    """CAPM beta。beta = Cov(r_a, r_b) / Var(r_b)（样本协方差/方差，ddof=1）。
 
     索引按交集对齐后剔除任一侧 NaN 的行。边界：有效样本 < 2 或基准方差为 0
-    → 未定义，返回 NaN。
+    -> 未定义，返回 NaN。
     """
     a, b = asset_returns.align(benchmark_returns, join="inner")
     mask = a.notna() & b.notna()
@@ -191,9 +191,9 @@ def beta(asset_returns: pd.Series, benchmark_returns: pd.Series) -> float:
 def rolling_beta(
     asset_returns: pd.Series, benchmark_returns: pd.Series, window: int = 60
 ) -> pd.Series:
-    """滚动 beta。β_t = Cov(r_a, r_b)[t-w+1..t] / Var(r_b)[t-w+1..t]。
+    """滚动 beta。beta_t = Cov(r_a, r_b)[t-w+1..t] / Var(r_b)[t-w+1..t]。
 
-    索引交集对齐；基准窗口方差为 0 → 该点 NaN。前 window-1 个位置 NaN。
+    索引交集对齐；基准窗口方差为 0 -> 该点 NaN。前 window-1 个位置 NaN。
     """
     if window < 2:
         raise ValueError(f"window 需 >= 2，收到 {window}")

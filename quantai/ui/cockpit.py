@@ -49,7 +49,7 @@ def collect_advices(
     fetch: Callable,
     lang: str = "zh",
 ) -> list[dict]:
-    """拉数据 → 日线五因子 + 盘中卖压 → 操作卡列表（持仓优先、|计分| 降序）。
+    """拉数据 -> 日线五因子 + 盘中卖压 -> 操作卡列表（持仓优先、|计分| 降序）。
 
     held_cost: {symbol: 成本均价}（键集合即持仓集合）。单标的失败静默跳过
     （数据源抖动不该放倒整个作战台）。
@@ -91,7 +91,7 @@ def collect_advices(
 
 
 class CockpitDaemon:
-    """常驻分析循环：加载分析员 → 每 interval 秒出一轮战术综述 + 新闻情绪入库。
+    """常驻分析循环：加载分析员 -> 每 interval 秒出一轮战术综述 + 新闻情绪入库。
 
     `state` 是唯一对外面（UI 直接渲染）：
     {status, model, out, ts, scored, usage, error, round}

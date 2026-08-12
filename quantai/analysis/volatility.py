@@ -1,4 +1,4 @@
-﻿"""波动 / 通道指标：realized & annualized 波动率、Bollinger、ATR、rolling 相关性。
+"""波动 / 通道指标：realized & annualized 波动率、Bollinger、ATR、rolling 相关性。
 
 同 `trend.py` 的约定：纯函数、因果窗口、边界诚实（数据不足给 NaN 不报错）。
 年化因子 252（NYSE 交易日，见 `modules/analysis.md`）。
@@ -22,9 +22,9 @@ def realized_volatility(
 ) -> pd.Series:
     """已实现波动率（rolling 标准差口径）。
 
-    r_t = close_t/close_{t-1} − 1（简单收益）；
+    r_t = close_t/close_{t-1} - 1（简单收益）；
     vol_t = std(r[t-w+1 .. t])（样本标准差，ddof=1）；
-    年化：vol_t × √252（美股日频惯例）。
+    年化：vol_t × sqrt(252)（美股日频惯例）。
 
     前 window 个位置 NaN（首个收益缺失 + 窗口热身）。window < 2 无意义，报错。
     """
@@ -48,14 +48,14 @@ def bollinger(
     mid = SMA(close, w)；sd = rolling std(close, w)（**ddof=0 总体标准差**，
     John Bollinger 原版 / TA-Lib / `ta` 库同口径，已与 `ta` 交叉验证逐位一致；
     注意与 :func:`realized_volatility` 的 ddof=1 样本口径不同——那是统计估计惯例）；
-    upper = mid + k·sd；lower = mid − k·sd；
-    bandwidth = (upper − lower) / mid（带宽，衡量波动挤压/扩张）；
-    percent_b = (close − lower) / (upper − lower) ∈ 大致 [0,1]（价格在带内的位置）。
+    upper = mid + k*sd；lower = mid - k*sd；
+    bandwidth = (upper - lower) / mid（带宽，衡量波动挤压/扩张）；
+    percent_b = (close - lower) / (upper - lower)  in  大致 [0,1]（价格在带内的位置）。
 
     边界口径：
-    - 价格恒定 → sd = 0 → upper = lower = mid，bandwidth = 0；percent_b 为 0/0
+    - 价格恒定 -> sd = 0 -> upper = lower = mid，bandwidth = 0；percent_b 为 0/0
       未定义，置 NaN（不猜位置）。
-    - mid = 0（理论上价格为 0）→ bandwidth 置 NaN。
+    - mid = 0（理论上价格为 0）-> bandwidth 置 NaN。
     """
     if window < 2:
         raise ValueError(f"window 需 >= 2，收到 {window}")
@@ -85,13 +85,13 @@ def atr(
 ) -> pd.Series:
     """平均真实波幅（Average True Range，Wilder 口径）。
 
-    TR_t = max(high_t − low_t, |high_t − close_{t-1}|, |low_t − close_{t-1}|)；
+    TR_t = max(high_t - low_t, |high_t - close_{t-1}|, |low_t - close_{t-1}|)；
     ATR = Wilder 平滑(TR, w) = `ewm(alpha=1/w, adjust=False)`（与 RSI 同一平滑）。
 
     边界口径（审计后收紧，2026-07-01）：
-    - 无前收（首日，或前一日 close 缺失）→ 回落 TR = high − low（首日惯例的推广，
+    - 无前收（首日，或前一日 close 缺失）-> 回落 TR = high - low（首日惯例的推广，
       跳空分量不可知就不计，**不再用 skipna 静默吞掉**旧实现会把 NaN 行低估成数值）。
-    - 当日 high 或 low 缺失 → 该日区间不可知，TR 与 ATR 输出 **NaN**；平滑在洞后
+    - 当日 high 或 low 缺失 -> 该日区间不可知，TR 与 ATR 输出 **NaN**；平滑在洞后
       从上一有效状态恢复递推（同 :func:`quantai.analysis.trend.rsi` 的洞口径）。
     - 前 window 个值置 NaN（平滑热身）。
     """
@@ -123,9 +123,9 @@ def rolling_correlation(
     价格相关系数虚高，spurious correlation），收益相关才是风控/配对里有意义的量。
     `on_returns=False` 保留价格相关（诊断用）。
 
-    索引按交集对齐（inner join）后计算；窗口内任一侧方差为 0 → 相关未定义，pandas
+    索引按交集对齐（inner join）后计算；窗口内任一侧方差为 0 -> 相关未定义，pandas
     给 NaN（保留该口径）。前导 NaN 数：收益口径恰 window 个（首收益 NaN 与窗口热身
-    重叠）、价格口径恰 window−1 个（实测校正过的精确计数）。
+    重叠）、价格口径恰 window-1 个（实测校正过的精确计数）。
     """
     if window < 2:
         raise ValueError(f"window 需 >= 2，收到 {window}")

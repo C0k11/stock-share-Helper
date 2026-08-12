@@ -1,4 +1,4 @@
-"""专家基类 `LLMExpert` —— scalper/analyst/news 的共同骨架。
+"""专家基类 `LLMExpert` -- scalper/analyst/news 的共同骨架。
 
 迁移自 `strategy.py::_model_infer`（prompt 构建 + 调模型 + 解析）与 `_heuristic_infer`
 （无模型时的动量兜底）。

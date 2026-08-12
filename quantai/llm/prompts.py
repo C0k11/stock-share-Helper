@@ -103,9 +103,9 @@ def normalize_decision(value: Any) -> str:
 def parse_decision(text: str) -> Dict[str, str]:
     """从模型原始输出解析出 `{"decision", "analysis"}`（忠实迁移 strategy.py）。
 
-    顺序：① 去围栏 → ② 取首个 `{` 到末个 `}` 试 `json.loads`，失败再试 `ast.literal_eval`
-    （容忍单引号等非严格 JSON）→ ③ 正则兜底 `decision[:=]...` / `final[:=]...` →
-    ④ 仍失败返回 `{"decision": "HOLD", "analysis": "parse_failed"}`（不乱交易）。
+    顺序：(1) 去围栏 -> (2) 取首个 `{` 到末个 `}` 试 `json.loads`，失败再试 `ast.literal_eval`
+    （容忍单引号等非严格 JSON）-> (3) 正则兜底 `decision[:=]...` / `final[:=]...` ->
+    (4) 仍失败返回 `{"decision": "HOLD", "analysis": "parse_failed"}`（不乱交易）。
     """
     raw = strip_code_fences(text)
 

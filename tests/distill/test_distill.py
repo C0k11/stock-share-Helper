@@ -1,6 +1,6 @@
 """distill/ 单测：场景构造、mock 教师全管线、密钥 fail-fast、格式对接训练器契约。
 
-⛔ 全部离线 + mock：本文件（及整个 CI）不产生任何真实 DeepSeek 调用。
+全部离线 + mock：本文件（及整个 CI）不产生任何真实 DeepSeek 调用。
 """
 
 from __future__ import annotations

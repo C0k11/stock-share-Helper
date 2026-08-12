@@ -1,11 +1,11 @@
 """向量化单资产回测引擎，按 `fill_timing` 切换成交时点。
 
 核心（lookahead 修复就在这里）：
-- 输入 `weight[t]`：在 **close[t]** 用 ≤t 的信息**决策**出的目标仓位。
-- fill_timing="close"（旧 / 有 lookahead）：让 `weight[t]` 直接吃下 close[t-1]→close[t] 的收益，
+- 输入 `weight[t]`：在 **close[t]** 用 <=t 的信息**决策**出的目标仓位。
+- fill_timing="close"（旧 / 有 lookahead）：让 `weight[t]` 直接吃下 close[t-1]->close[t] 的收益，
   等于"看到 close[t] 才定的仓位，却又用它赚了截至 close[t] 的钱" —— 历史业绩**虚高**的根源。
 - fill_timing="next_open"（新 / 修复）：close[t] 的决策在 **open[t+1]** 成交。当日收益拆成
-  隔夜(close[t-1]→open[t]) 持上上次决策 + 日内(open[t]→close[t]) 持昨日决策，全部只用过去仓位。
+  隔夜(close[t-1]->open[t]) 持上上次决策 + 日内(open[t]->close[t]) 持昨日决策，全部只用过去仓位。
 
 两种模式喂的是**同一个 weight、同一份成本**，因此对比表里的差异 = 纯 lookahead 影响（+成本时点的次要项）。
 """
@@ -32,7 +32,7 @@ class BacktestResult:
 
 
 def _turnover(weight: pd.Series) -> pd.Series:
-    """每次决策的换手 |Δweight|，首日记为 |weight[0]|（建仓）。"""
+    """每次决策的换手 |deltaweight|，首日记为 |weight[0]|（建仓）。"""
     turn = weight.diff().abs()
     turn.iloc[0] = abs(float(weight.iloc[0]))
     return turn.fillna(0.0)
@@ -53,7 +53,7 @@ def run_backtest(
         prices: 含 `open`/`close` 列、按交易日索引的 DataFrame。
         weight: 与 prices 对齐的目标仓位（close[t] 决策值），如 0/1 或 [-1,1]。
         fill_timing: "close"=旧(lookahead) / "next_open"=新(修复，默认)。
-        cost_per_turnover: 每单位换手的成本率（≈ 佣金率 + 滑点率）。
+        cost_per_turnover: 每单位换手的成本率（~ 佣金率 + 滑点率）。
     """
     if fill_timing not in ("close", "next_open"):
         raise ValueError(f"fill_timing must be 'close' or 'next_open', got {fill_timing!r}")

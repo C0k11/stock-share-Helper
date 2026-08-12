@@ -1,4 +1,4 @@
-"""Gatekeeper —— RL 门控 MLP（Q 值阈值过滤交易）。
+"""Gatekeeper -- RL 门控 MLP（Q 值阈值过滤交易）。
 
 迁移自 `src/agent/gatekeeper.py` + `strategy.py::_gatekeeper_approve`。
 

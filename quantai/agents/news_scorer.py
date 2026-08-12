@@ -16,9 +16,9 @@ from quantai.llm.json_utils import repair_and_parse_json
 
 #: 打分 system prompt（公开常量：distill 场景与生产打分**同源**，防两头漂移）
 SCORING_SYSTEM_PROMPT = (
-    "你是金融新闻情绪标注器。对每条头条给 sentiment ∈ [-1, 1]"
+    "你是金融新闻情绪标注器。对每条头条给 sentiment  in  [-1, 1]"
     "（-1 极度利空，0 中性，+1 极度利多，仅凭标题无法判断时给接近 0 的值）"
-    "和 label ∈ {bullish, bearish, neutral}。"
+    "和 label  in  {bullish, bearish, neutral}。"
     "只输出 JSON 数组，元素形如 {\"id\": 0, \"sentiment\": 0.5, \"label\": \"bullish\"}，"
     "不要输出任何其它文字。"
 )
@@ -26,17 +26,17 @@ _SYSTEM = SCORING_SYSTEM_PROMPT
 
 
 def build_scoring_prompt(items: list) -> str:
-    """头条列表 → 编号打分任务（一次调用打整批）。"""
+    """头条列表 -> 编号打分任务（一次调用打整批）。"""
     lines = ["对下列新闻头条打分："]
     for i, it in enumerate(items):
         sym = f"[{it.symbol}] " if getattr(it, "symbol", None) else ""
         summary = (getattr(it, "summary", "") or "")[:200]
-        lines.append(f"{i}. {sym}{it.title}" + (f" —— {summary}" if summary else ""))
+        lines.append(f"{i}. {sym}{it.title}" + (f" -- {summary}" if summary else ""))
     return "\n".join(lines)
 
 
 def score_news(items: list, llm) -> list[dict]:
-    """头条 → [{item, sentiment, label}]。解析不出的条目 sentiment=None（诚实缺失）。
+    """头条 -> [{item, sentiment, label}]。解析不出的条目 sentiment=None（诚实缺失）。
 
     返回长度恒等于输入长度、顺序一致；空输入直接返回 []（零 LLM 调用）。
     """
@@ -84,7 +84,7 @@ def score_news(items: list, llm) -> list[dict]:
 
 
 def aggregate_symbol_sentiment(scored: list[dict]) -> dict[str, Optional[float]]:
-    """按 symbol 聚合平均情绪（只算打出分的条目；一条都没打出 → None）。"""
+    """按 symbol 聚合平均情绪（只算打出分的条目；一条都没打出 -> None）。"""
     acc: dict[str, list[float]] = {}
     for row in scored:
         sym = getattr(row["item"], "symbol", None)

@@ -70,7 +70,7 @@ def _rule_based_trading_days(start: date, end: date) -> set[date]:
 
 
 def test_pmc_is_superset_of_rule_holidays() -> None:
-    """库不会在『手搓规则认为是节假日』的日子开市（pmc 交易日 ⊆ 规则交易日）。"""
+    """库不会在『手搓规则认为是节假日』的日子开市（pmc 交易日  subset of  规则交易日）。"""
     pmc_days = set(TradingCalendar().get_trading_days(START, END))
     rule_days = _rule_based_trading_days(START, END)
     assert pmc_days - rule_days == set()

@@ -1,7 +1,7 @@
 """绩效指标：总收益 / 年化(CAGR) / 年化波动 / Sharpe / 最大回撤 / 胜率。
 
 从旧 `src/backtest/metrics.py` 精简迁移（保留口径），加类型与 dataclass 报告。
-口径与旧版一致：CAGR 用 days/252 折算年数；Sharpe = (mean*252 - rf)/(std*sqrt252)；
+口径与旧版一致：CAGR 用 days/252 折算年数；Sharpe = (mean*252 - rf)/(std*sqrt(252))；
 胜率 = 正收益日占比（全样本日）。
 """
 

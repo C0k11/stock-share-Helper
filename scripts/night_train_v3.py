@@ -1,13 +1,13 @@
-"""v3 夜训编排：基线检查 → smoke 自检 → 阶梯降级 → 全量发射。
+"""v3 夜训编排：基线检查 -> smoke 自检 -> 阶梯降级 -> 全量发射。
 
-背景（2026-07-07 实测）：v3 语料含期权/市场报告长样本（p99≈3000 token，
-市况任务 p99≈1000），而 bs1/seq3584 与 bs1/seq3072 在 3.9GB 桌面基线下
+背景（2026-07-07 实测）：v3 语料含期权/市场报告长样本（p99~3000 token，
+市况任务 p99~1000），而 bs1/seq3584 与 bs1/seq3072 在 3.9GB 桌面基线下
 均 OOM（训练本体需求 >18.6GB）。故夜训流程固化为：
 
 1. 基线检查：GPU 已用 < --max-baseline-mb（默认 2500MB）才准起飞——
    睡前需关游戏/浏览器/模拟器等占卡进程；不达标列数字拒绝启动。
 2. smoke 自检：用最长的 24 条样本在候选 seq 上跑 1 epoch（~5 分钟），
-   OOM 就降档重试（3072 → 2560 → 2048），首个存活的 seq 胜出。
+   OOM 就降档重试（3072 -> 2560 -> 2048），首个存活的 seq 胜出。
 3. 全量：胜出 seq + bs1/accum16（等效 batch 16 与 v2 一致）/ckpt/4bit/
    lr1e-4/2ep。seq2048 兜底档会截断约六成期权答案——若落到这档，
    日志明说，盲评时重点核期权任务。
@@ -95,7 +95,7 @@ def main() -> int:
 
     used = gpu_used_mb()
     if used > args.max_baseline_mb and not args.force:
-        log(f"ABORT: GPU baseline {used}MB > {args.max_baseline_mb}MB —— "
+        log(f"ABORT: GPU baseline {used}MB > {args.max_baseline_mb}MB -- "
             f"先关掉占卡进程（游戏/浏览器/模拟器/仪表盘）再来，或 --force")
         return 2
     log(f"GPU baseline {used}MB OK")

@@ -3,8 +3,8 @@
 套路：规格不变、引擎换掉、结果对账。
 这里的"规格"是 powerbi/SPEC.md 的表计算语义，三条硬约定：
 1. 窗口 = 20 个**交易行**（该标的实际有 bar 的行），不是 20 个日历天；
-2. WINDOW_STDEV 是样本标准差 → pandas ddof=1 / DAX STDEVX.S；
-3. 窗口不足 20 行 → 空值（pandas rolling 默认 NaN / DAX 返回 BLANK）。
+2. WINDOW_STDEV 是样本标准差 -> pandas ddof=1 / DAX STDEVX.S；
+3. 窗口不足 20 行 -> 空值（pandas rolling 默认 NaN / DAX 返回 BLANK）。
 
 产出 powerbi/verify/expected_values.csv（check_id, description, expected）。
 Power BI 侧的 QA 页把对应 DAX 度量与这些值并排；浮点相对误差 > 1e-6 即 DAX 有错，
@@ -102,7 +102,7 @@ def main() -> int:
     add("news_scored", "fact_news rows with sentiment", scored)
     add("news_coverage", "scored / total", float(scored / len(news)))
 
-    # ---- 8. 关系传播测点（走 dim→fact 关系过滤，DAX 侧禁止 REMOVEFILTERS 维度表）----
+    # ---- 8. 关系传播测点（走 dim->fact 关系过滤，DAX 侧禁止 REMOVEFILTERS 维度表）----
     # 判据：删掉任何一条日期/符号关系，这组必须 FAIL——它们验证模型接线，不是度量算术。
     px = dfs["fact_prices"]
     add("rel_prices_20260727", "fact_prices rows via dim_date=2026-07-27",
@@ -146,7 +146,7 @@ def main() -> int:
 
     # ---- 9. 编码金丝雀：event_title 必须含弯引号（U+2019），乱码则 Power Query 读错 ----
     ev = dfs["fact_event_odds"]
-    curly = ev["event_title"].astype(str).str.contains("’").sum()
+    curly = ev["event_title"].astype(str).str.contains("\u2019").sum()
     add("encoding_curly_quote_rows", "event_title rows containing U+2019", int(curly))
 
     out = pd.DataFrame(checks, columns=["check_id", "description", "expected"])

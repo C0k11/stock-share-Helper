@@ -1,4 +1,4 @@
-﻿-- dim_symbol：标的维度（自然键 = symbol）。
+-- dim_symbol：标的维度（自然键 = symbol）。
 -- 成员 = 出现在任何 fact 源里的标的并集；价格覆盖范围与「当前是否持有」为属性。
 with universe as (
     select distinct symbol from {{ ref('stg_prices') }}

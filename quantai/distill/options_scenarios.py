@@ -1,4 +1,4 @@
-"""v3 期权教学场景：真实链面 + BS 引擎产物 → 教师决策论证任务。
+"""v3 期权教学场景：真实链面 + BS 引擎产物 -> 教师决策论证任务。
 
 覆盖用户点名的主题：
 - ``premium_selling``（玩权利金）：卖 covered call / cash-secured put 的时机、
@@ -55,7 +55,7 @@ OPT_TASKS: dict[str, str] = {
 
 
 def _fmt_rows(rows: list[dict], spot: float, n: int = 5) -> str:
-    """ATM 附近 ±n 档报价表（有报价的行）。"""
+    """ATM 附近 +/-n 档报价表（有报价的行）。"""
     priced = [r for r in rows if (r.get("strike") or 0) > 0
               and ((r.get("bid") or 0) > 0 or (r.get("lastPrice") or 0) > 0)]
     priced.sort(key=lambda r: abs(r["strike"] - spot))
@@ -74,7 +74,7 @@ def build_option_brief(
     symbol: str, spot: float, chain: dict, daily_vals: dict,
     nearest_chain: Optional[dict] = None,
 ) -> str:
-    """标的行情摘要 + 链面 + BS 引擎产物 → 期权简报（纯组装可测）。"""
+    """标的行情摘要 + 链面 + BS 引擎产物 -> 期权简报（纯组装可测）。"""
     stats = chain_stats(chain["calls"], chain["puts"], spot)
     days = chain["days_to_expiry"]
     T = max(days, 1) / 365.0
@@ -140,7 +140,7 @@ def build_option_scenarios(
     symbol: str, spot: float, chain: dict, daily_vals: dict,
     nearest_chain: Optional[dict] = None, as_of: str = "",
 ) -> Iterator[Scenario]:
-    """一个标的的链面 → 四类期权任务场景（zero_dte 仅在有近端链时产出）。"""
+    """一个标的的链面 -> 四类期权任务场景（zero_dte 仅在有近端链时产出）。"""
     brief = build_option_brief(symbol, spot, chain, daily_vals, nearest_chain)
     for task, ask in OPT_TASKS.items():
         if task == "zero_dte" and (

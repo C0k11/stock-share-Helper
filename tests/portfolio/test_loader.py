@@ -66,7 +66,7 @@ class TestCsvLoading:
 
     def test_csv_with_bom_and_blank_lines(self, tmp_path: Path):
         f = tmp_path / "p.csv"
-        f.write_text("﻿" + _CSV + "\n\n", encoding="utf-8")
+        f.write_text("\ufeff" + _CSV + "\n\n", encoding="utf-8")
         assert len(load_portfolio(f).positions) == 2
 
 

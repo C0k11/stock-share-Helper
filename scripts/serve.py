@@ -4,7 +4,7 @@
     python scripts/serve.py --host 0.0.0.0 --port 8000
 
 只暴露真实 endpoint（health / live / feedback / evolution / chat）。chat 需注入 LLM，
-默认无 → 返回 503（不伪造）。文档见 http://localhost:8000/docs。
+默认无 -> 返回 503（不伪造）。文档见 http://localhost:8000/docs。
 """
 from __future__ import annotations
 

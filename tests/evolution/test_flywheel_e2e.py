@@ -1,7 +1,7 @@
 """进化飞轮端到端契约测试（全 mock，零 GPU/零网络）。
 
-链路：paper trading 决策+结果 → PreferenceBuilder 记录 → 偏好对数据集 →
-EvolutionTrainer 离线 DPO（注入假 runner）→ active adapter 指针 →
+链路：paper trading 决策+结果 -> PreferenceBuilder 记录 -> 偏好对数据集 ->
+EvolutionTrainer 离线 DPO（注入假 runner）-> active adapter 指针 ->
 LocalLLM 按指针热切换 adapter（生成后复位默认）。
 
 各环节的单测在各自文件；本文件只保证**环节之间的数据契约**真的咬合。

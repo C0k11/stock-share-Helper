@@ -316,7 +316,7 @@ class PaperBroker:
         return float(eq), float(gross)
 
     def equity(self) -> float:
-        """当前总权益 = 现金 + Σ 持仓市值（多头加、空头减）。"""
+        """当前总权益 = 现金 + sum 持仓市值（多头加、空头减）。"""
         marks = {
             str(tk).upper(): self._mark_price(str(tk).upper(), fallback=float(p.avg_price or 0.0))
             for tk, p in (self.positions or {}).items()

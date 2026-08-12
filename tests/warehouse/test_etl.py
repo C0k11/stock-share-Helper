@@ -1,4 +1,4 @@
-﻿"""etl.py 单测：装载正确性 + 幂等性（delete-then-insert by batch key）。全部 :memory:。"""
+"""etl.py 单测：装载正确性 + 幂等性（delete-then-insert by batch key）。全部 :memory:。"""
 
 from __future__ import annotations
 

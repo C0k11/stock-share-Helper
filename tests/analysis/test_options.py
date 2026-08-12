@@ -17,7 +17,7 @@ from quantai.analysis.options import (
 
 class TestBlackScholes:
     def test_textbook_values(self):
-        # 经典基准：S=100, K=100, T=1y, r=5%, σ=20% → call≈10.4506, put≈5.5735
+        # 经典基准：S=100, K=100, T=1y, r=5%, sigma=20% -> call~10.4506, put~5.5735
         assert bs_price(100, 100, 1.0, 0.20, "call", r=0.05) == pytest.approx(10.4506, abs=1e-3)
         assert bs_price(100, 100, 1.0, 0.20, "put", r=0.05) == pytest.approx(5.5735, abs=1e-3)
 
@@ -52,7 +52,7 @@ class TestImpliedVol:
         assert iv == pytest.approx(0.45, abs=1e-4)
 
     def test_below_intrinsic_returns_none(self):
-        # put 内在价值 = 10；报价 5 低于内在 → 无解，诚实 None
+        # put 内在价值 = 10；报价 5 低于内在 -> 无解，诚实 None
         assert implied_vol(5.0, 130, 140, 0.25, "put") is None
 
 
@@ -75,18 +75,18 @@ class TestHedgePlans:
         _, puts = _chain()
         # 114 股：1 张合约覆盖 100 股，14 股零头如实报告
         plan = protective_put_plan(114, 152.0, puts, days_to_expiry=32, floor_pct=0.92)
-        assert plan["strike"] == 140  # 152*0.92≈139.8 → 最近 140
+        assert plan["strike"] == 140  # 152*0.92~139.8 -> 最近 140
         assert plan["contracts"] == 1
         assert plan["premium"] == pytest.approx(4.8)  # (4.6+5.0)/2
         assert plan["cost"] == pytest.approx(480.0)
         assert plan["uncovered_shares"] == pytest.approx(14)
-        # 覆盖部分锁损：(152-140)*100 + 480 = 1680 → /15200 ≈ 11.05%
+        # 覆盖部分锁损：(152-140)*100 + 480 = 1680 -> /15200 ~ 11.05%
         assert plan["max_loss_pct_covered"] == pytest.approx(1680 / 15200, rel=1e-9)
 
     def test_covered_call_math(self):
         calls, _ = _chain()
         plan = covered_call_plan(114, 152.0, calls, days_to_expiry=32, target_pct=1.06)
-        assert plan["strike"] == 160  # 152*1.06≈161.1 → 最近 160
+        assert plan["strike"] == 160  # 152*1.06~161.1 -> 最近 160
         assert plan["income"] == pytest.approx(450.0)  # (4.2+4.8)/2 ×100
         assert plan["annualized_pct"] == pytest.approx((450 / (114 * 152)) * 365 / 32, rel=1e-9)
         assert plan["upside_capped_pct"] == pytest.approx(160 / 152 - 1)

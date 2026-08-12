@@ -146,7 +146,7 @@ class EvolutionTrainer:
                 )
 
             class _RealRunner:
-                """把 DPORunner 适配到编排契约：train(records 列表) → 落 JSONL → 按路径训练。
+                """把 DPORunner 适配到编排契约：train(records 列表) -> 落 JSONL -> 按路径训练。
 
                 （审查实锤：旧默认路径 `DPORunner(llm_cfg=...)` 直接 TypeError、
                 `train(records)` 传列表给要文件路径的接口——真实路径从没通过。）

@@ -1,4 +1,4 @@
-﻿"""volatility.py 单测：已知值手算、边界（常数序列 / 数据不足 / 零方差）。"""
+"""volatility.py 单测：已知值手算、边界（常数序列 / 数据不足 / 零方差）。"""
 
 from __future__ import annotations
 

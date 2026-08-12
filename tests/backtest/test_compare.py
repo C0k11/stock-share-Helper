@@ -20,7 +20,7 @@ def test_markdown_with_benchmark_has_bh_and_gap_columns(prices: pd.DataFrame) ->
     results = compare_fill_timings(prices, weight)
     md = format_comparison_markdown(results, benchmark=buy_and_hold(prices), title="TEST")
     assert "Buy&Hold SPY" in md
-    assert "新版 − B&H" in md
+    assert "新版 - B&H" in md
     assert "Sharpe 口径" in md  # 脚注：写清 rf 与算法
     assert "rf=2.0%" in md
     assert "pp" in md  # 差距列用百分点

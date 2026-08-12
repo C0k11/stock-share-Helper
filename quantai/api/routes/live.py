@@ -1,7 +1,7 @@
 """实盘会话路由：启停 + 真实状态/成交。
 
 只读真实状态（`LiveRunner.snapshot()` / `broker.orders`）。无会话时 status 返回 active=False，
-trades 返回 404——**不返回假数据**（对比旧版的 fake regime/performance/alerts，C-2 已删）。
+trades 返回 404--**不返回假数据**（对比旧版的 fake regime/performance/alerts，C-2 已删）。
 """
 from __future__ import annotations
 

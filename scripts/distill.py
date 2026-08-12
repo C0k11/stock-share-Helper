@@ -1,6 +1,6 @@
-"""薄 CLI：教师-学生蒸馏管线（DeepSeek → SFT/DPO JSONL）。
+"""薄 CLI：教师-学生蒸馏管线（DeepSeek -> SFT/DPO JSONL）。
 
-⛔ 成本闸（硬约定）：
+成本闸（硬约定）：
 - 默认与 `--dry-run` **零真实调用**（mock 教师，走完整条管线落假数据验通路）。
 - 真实生成 = `--run --confirm-spend` 两个开关都给，且环境变量 DEEPSEEK_API_KEY
   已配（经 .env / .local/.env 注入，均已 .gitignore）。缺任一即拒绝执行。
@@ -150,7 +150,7 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.run:
         if not args.confirm_spend:
-            print("⛔ --run 需要同时给 --confirm-spend（这会消耗 DeepSeek API 额度）。", file=sys.stderr)
+            print("--run 需要同时给 --confirm-spend（这会消耗 DeepSeek API 额度）。", file=sys.stderr)
             return 2
         # key 经 .env / .local/.env 注入（都在 .gitignore；缺 key 下面会 fail-fast）
         load_dotenv(".env")
@@ -167,7 +167,7 @@ def main(argv: list[str] | None = None) -> int:
                 thinking=cfg.thinking,
             )
         except MissingApiKeyError as exc:
-            print(f"⛔ {exc}", file=sys.stderr)
+            print(f"{exc}", file=sys.stderr)
             return 3
         print(f"[distill] REAL run: model={cfg.model} limit={limit}")
     else:

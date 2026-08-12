@@ -138,7 +138,7 @@ def _events_section(rows: Optional[list[dict]]) -> str:
     for r in sorted(rows, key=lambda x: -float(x.get("volume_24h") or 0))[:10]:
         end = str(r.get("end_date") or "")[:10]
         lines.append(
-            f"- [{r.get('category', '-')}] {r['question']} — Yes {float(r['yes_price']) * 100:.0f}%"
+            f"- [{r.get('category', '-')}] {r['question']} - Yes {float(r['yes_price']) * 100:.0f}%"
             f"（24h 量 ${float(r.get('volume_24h') or 0) / 1e6:.1f}M{f'，截止 {end}' if end else ''}）"
         )
     return "\n".join(lines)
@@ -152,7 +152,7 @@ def build_brief(
     as_of: str = "",
     event_rows: Optional[list[dict]] = None,
 ) -> str:
-    """全部真实状态 → 一份 LLM 可读的 markdown 简报（纯组装，离线可测）。"""
+    """全部真实状态 -> 一份 LLM 可读的 markdown 简报（纯组装，离线可测）。"""
     parts = [f"# QuantAI 每日数据简报{f'（{as_of}）' if as_of else ''}"]
     parts.append(_portfolio_section(snap))
     parts.append(_watchlist_section(watchlist_rows or []))
@@ -163,15 +163,15 @@ def build_brief(
 
 
 def generate_commentary(brief: str, llm) -> str:
-    """brief → LLM 财经分析。llm 鸭子接口 `generate(user, system=...)`（LocalLLM 兼容）。"""
+    """brief -> LLM 财经分析。llm 鸭子接口 `generate(user, system=...)`（LocalLLM 兼容）。"""
     return llm.generate(brief, system=_SYSTEM_PROMPT)
 
 
 # --------------------------------------------------------------------------- #
-# 盘中模式（分钟级 bar → 当日会话统计 + 卖压代理指标）
+# 盘中模式（分钟级 bar -> 当日会话统计 + 卖压代理指标）
 # --------------------------------------------------------------------------- #
 def intraday_stats(df_1m, prev_close: float, avg_daily_volume: float) -> dict:
-    """当日分钟 bar → 会话统计（纯函数，可测）。
+    """当日分钟 bar -> 会话统计（纯函数，可测）。
 
     卖压/买压是**bar 级代理指标**（我们只有 OHLCV，没有逐笔/盘口数据，不冒充 order flow）：
     - `down_volume_share`：收跌 bar 的成交量占比（>0.5 = 抛压主导）。
@@ -236,7 +236,7 @@ def build_intraday_brief(
     symbol_sentiment: Optional[dict] = None,
     as_of: str = "",
 ) -> str:
-    """盘中会话统计 + 量化新闻 → 盘中简报（markdown，纯组装可测）。
+    """盘中会话统计 + 量化新闻 -> 盘中简报（markdown，纯组装可测）。
 
     rows: [{"symbol", **intraday_stats 输出}]；scored_news: news_scorer.score_news 输出。
     """
@@ -275,5 +275,5 @@ def build_intraday_brief(
 
 
 def generate_intraday_commentary(brief: str, llm) -> str:
-    """盘中简报 → LLM 盘中快评。"""
+    """盘中简报 -> LLM 盘中快评。"""
     return llm.generate(brief, system=_INTRADAY_SYSTEM)

@@ -1,14 +1,14 @@
-"""薄 CLI：本地学生模型训练（QLoRA SFT / DPO）——蒸馏产物 → LoRA adapter。
+"""薄 CLI：本地学生模型训练（QLoRA SFT / DPO）——蒸馏产物 -> LoRA adapter。
 
-⛔ 算力闸（硬约定，与 distill.py 的 --confirm-spend 同款）：真训练必须显式给
+算力闸（硬约定，与 distill.py 的 --confirm-spend 同款）：真训练必须显式给
 `--confirm-compute`，否则只打印计划就退出；本命令**只由用户手动执行**（需 GPU +
 `pip install -e .[llm]`），任何自动化流程不得调用。无 GPU 时在加载模型前明确报错。
 
 链路位置（见 README 飞轮图）：
-    scripts/distill.py  → data/distill/sft_*.jsonl + dpo_*.jsonl
-    scripts/train.py    → models/llm/<run>/lora_weights（本文件）
-    scripts/evolve.py   → 飞轮偏好对的离线 DPO（另一条数据来源）
-    回测对比            → quantai.backtest.run_backtest / scripts/lookahead_compare.py
+    scripts/distill.py  -> data/distill/sft_*.jsonl + dpo_*.jsonl
+    scripts/train.py    -> models/llm/<run>/lora_weights（本文件）
+    scripts/evolve.py   -> 飞轮偏好对的离线 DPO（另一条数据来源）
+    回测对比            -> quantai.backtest.run_backtest / scripts/lookahead_compare.py
 
 示例：
     # SFT：蒸馏 conversations JSONL -> QLoRA adapter（真跑要 --confirm-compute）
@@ -36,10 +36,10 @@ def _gpu_or_exit() -> None:
     try:
         import torch
     except ImportError:
-        print("⛔ 缺 torch：pip install -e .[llm]（需 GPU 环境）", file=sys.stderr)
+        print("缺 torch：pip install -e .[llm]（需 GPU 环境）", file=sys.stderr)
         raise SystemExit(2)
     if not torch.cuda.is_available():
-        print("⛔ 未检测到 CUDA GPU：QLoRA/DPO 训练需要 GPU。", file=sys.stderr)
+        print("未检测到 CUDA GPU：QLoRA/DPO 训练需要 GPU。", file=sys.stderr)
         raise SystemExit(2)
 
 
@@ -62,16 +62,16 @@ def main(argv: list[str] | None = None) -> int:
 
     data_path = args.sft or args.dpo
     if not Path(data_path).exists():
-        print(f"⛔ 数据文件不存在：{data_path}", file=sys.stderr)
+        print(f"数据文件不存在：{data_path}", file=sys.stderr)
         return 1
     if args.dpo and not args.sft_adapter:
-        print("⛔ DPO 按设计在 SFT adapter 之上继续对齐：请给 --sft-adapter <路径>。", file=sys.stderr)
+        print("DPO 按设计在 SFT adapter 之上继续对齐：请给 --sft-adapter <路径>。", file=sys.stderr)
         print("   （先跑 --sft 产出 lora_weights，再拿它做 DPO 初始化。）", file=sys.stderr)
         return 1
 
     print(f"[train] mode={mode} base={cfg.llm.model_name} data={data_path} out={out_dir}")
     if not args.confirm_compute:
-        print("⛔ 未给 --confirm-compute：只打印计划，不加载模型不训练（防自动化误触）。", file=sys.stderr)
+        print("未给 --confirm-compute：只打印计划，不加载模型不训练（防自动化误触）。", file=sys.stderr)
         return 2
     _gpu_or_exit()
 

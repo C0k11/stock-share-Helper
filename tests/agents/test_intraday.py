@@ -26,7 +26,7 @@ class TestIntradayStats:
         assert st["day_low"] == pytest.approx(98.5)
         # 区间位置 = (99-98.5)/(101.5-98.5)
         assert st["close_position"] == pytest.approx(0.5 / 3.0)
-        # VWAP = Σ(典型价×量)/Σ量；典型价=收盘（high/low 对称 ±0.5）
+        # VWAP = sum(典型价×量)/sum量；典型价=收盘（high/low 对称 +/-0.5）
         expected_vwap = (100 * 100 + 101 * 200 + 99 * 300) / 600
         assert st["vwap"] == pytest.approx(expected_vwap)
         assert st["vs_vwap_pct"] == pytest.approx(99 / expected_vwap - 1)
@@ -51,7 +51,7 @@ class TestIntradayStats:
         df.loc[df.index[1], "close"] = float("nan")
         st = intraday_stats(df, prev_close=100.0, avg_daily_volume=1000.0)
         # 有效行 [100, 99, 98]，量 [100, 300, 400]；首根 100 vs 昨收 100 不算跌，
-        # 99、98 均跌 → down = 700/800
+        # 99、98 均跌 -> down = 700/800
         assert st["down_volume_share"] == pytest.approx(700 / 800)
 
     def test_gap_down_open_counts_as_selling_pressure(self):

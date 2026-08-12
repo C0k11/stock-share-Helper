@@ -1,4 +1,4 @@
-"""每日决策日志飞轮：真实行情 → 规则学生判断 → 教师独立分析 + 打分 → 训练资产。
+"""每日决策日志飞轮：真实行情 -> 规则学生判断 -> 教师独立分析 + 打分 -> 训练资产。
 
 每个交易日积累一批带**三重标注**的样本（"有点 RL 意思"的离线数据采集闭环）：
 
@@ -15,7 +15,7 @@
 **增量日采**——每天一个快照，随时间自然覆盖多市况，且每条都带学生对照与结局。
 
 成本闸：真实教师调用只走 ``scripts/journal.py --run --confirm-spend``（定时任务的
-命令行里显式写这两个开关 = 用户的常设授权）；**每交易日一个文件天然幂等**——
+命令行里显式写这两个开关 = 用户的常设授权）；**每交易日一个文件天然幂等**--
 同一 as_of 重复运行直接跳过（周末/节假日 as_of 不前进，自动零花费）。
 """
 
@@ -50,7 +50,7 @@ def _fmt(x, nd: int = 2) -> str:
 
 
 def rule_student_answer(symbol: str, vals: dict) -> str:
-    """确定性规则学生：指标 dict → 与教师同格式的操作判断（引用真实数值）。
+    """确定性规则学生：指标 dict -> 与教师同格式的操作判断（引用真实数值）。
 
     诚实边界：这是"系统当前判断"的透明基线（趋势/动量/超买/回撤/波动五因子计分），
     不是模型输出；它的职责是给教师一个**可打分的对照**，教师低分时它就是
@@ -139,7 +139,7 @@ def rule_student_answer(symbol: str, vals: dict) -> str:
 
 
 def build_review_messages(scenario: Scenario, student_answer: str) -> list[dict]:
-    """场景 + 学生判断 → 教师评审对话（独立于教师自己作答的那次调用）。"""
+    """场景 + 学生判断 -> 教师评审对话（独立于教师自己作答的那次调用）。"""
     return [
         {"role": "system", "content": REVIEW_SYSTEM_PROMPT},
         {
@@ -175,7 +175,7 @@ def run_daily_journal(
     workers: int = 1,
     force: bool = False,
 ) -> dict:
-    """当日快照 → decision 场景 × (学生 + 教师作答 + 教师评审) → journal JSONL。
+    """当日快照 -> decision 场景 × (学生 + 教师作答 + 教师评审) -> journal JSONL。
 
     幂等按 **scenario_id 跨全部历史文件去重**（不是文件级）：每个标的以自己的
     最新 K 线日成 id，已采过的直接过滤——周末/节假日股票 as_of 不前进自动零花费；
@@ -333,7 +333,7 @@ def backfill_outcomes(journal_dir: str | Path, prices: dict) -> dict:
 
 
 def journal_to_sft_records(records: list[dict]) -> list[dict]:
-    """journal 记录 → SFT 行（conversations 契约，同 `scenario_to_sft_record`）。"""
+    """journal 记录 -> SFT 行（conversations 契约，同 `scenario_to_sft_record`）。"""
     out = []
     for r in records:
         if not (r.get("teacher_answer") or "").strip():
@@ -355,7 +355,7 @@ def journal_to_sft_records(records: list[dict]) -> list[dict]:
 
 
 def journal_to_dpo_records(records: list[dict], max_student_score: int = 6) -> list[dict]:
-    """journal 记录 → DPO 偏好对（教师=chosen，**低分**学生=rejected）。
+    """journal 记录 -> DPO 偏好对（教师=chosen，**低分**学生=rejected）。
 
     只有教师明确给出低分（score <= max_student_score）的样本才成对——
     学生答得好（高分）或没打出分（None）的不硬造偏好，宁缺毋滥。

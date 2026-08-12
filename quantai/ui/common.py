@@ -30,7 +30,7 @@ def fmt_pct(x: Any) -> str:
 
 
 def _load_llm_impl():
-    """驻留 LLM 单例底层（模块级唯一函数 → st.cache_resource 全站共享一份模型）。"""
+    """驻留 LLM 单例底层（模块级唯一函数 -> st.cache_resource 全站共享一份模型）。"""
     from quantai.agents.reporting import load_report_llm
 
     return load_report_llm()

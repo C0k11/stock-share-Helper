@@ -1,11 +1,11 @@
 """新闻通道：按标的抓 RSS 头条（Yahoo Finance per-ticker feed + config 自定义源）。
 
 设计：
-- **纯解析可测**：`entries_to_items`（feedparser entries → `NewsItem`）不碰网络，
+- **纯解析可测**：`entries_to_items`（feedparser entries -> `NewsItem`）不碰网络，
   单测注入假 entries；网络只在 `NewsFetcher.fetch_*`（`parser` 可注入替身）。
 - **诚实字段**：发布时间解析不出来就是 None（不用抓取时间冒充发布时间）；
   空标题的条目直接丢弃。
-- 下游：仓库 `raw.news`（etl.load_news，按 link 去重幂等）→ dbt `fact_news`；
+- 下游：仓库 `raw.news`（etl.load_news，按 link 去重幂等）-> dbt `fact_news`；
   streamlit 个股页展示；后续可接 agents 的 news expert / distill 场景。
 """
 
@@ -30,7 +30,7 @@ FEED_TIMEOUT_SEC = 20.0
 
 
 def _parse_feed(url: str):
-    """默认 parser：requests 限时拉取 → feedparser 解析字节（不让 feedparser 碰网络）。"""
+    """默认 parser：requests 限时拉取 -> feedparser 解析字节（不让 feedparser 碰网络）。"""
     resp = requests.get(url, timeout=FEED_TIMEOUT_SEC, headers={"User-Agent": "quantai-rss/1.0"})
     resp.raise_for_status()
     return feedparser.parse(resp.content)
@@ -59,7 +59,7 @@ class NewsItem:
 
 
 def _entry_published(entry) -> Optional[datetime]:
-    """feedparser entry → UTC datetime；缺失/解析失败 → None。"""
+    """feedparser entry -> UTC datetime；缺失/解析失败 -> None。"""
     parsed = entry.get("published_parsed") or entry.get("updated_parsed")
     if not parsed:
         return None
@@ -72,7 +72,7 @@ def _entry_published(entry) -> Optional[datetime]:
 def entries_to_items(
     entries: Iterable, symbol: Optional[str], source: str
 ) -> list[NewsItem]:
-    """feedparser entries → NewsItem 列表（纯逻辑，可测）。
+    """feedparser entries -> NewsItem 列表（纯逻辑，可测）。
 
     丢弃：空标题、空链接（无法去重的条目不入库）。summary 缺失落空串。
     """

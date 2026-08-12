@@ -14,7 +14,7 @@ def render() -> None:  # pragma: no cover - 需 streamlit 运行时
     from quantai.ui.i18n import tr
 
     lang = st.session_state.get("ui_lang", "zh")
-    st.title("QuantAI · 自选股" if lang == "zh" else "QuantAI · Watchlist")
+    st.title("QuantAI · 自选股" if lang == "zh" else "QuantAI - Watchlist")
     wl_file = load_config().portfolio.watchlist_file
     symbols = load_watchlist(wl_file)
 

@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
         else:
             report, out = make_daily_report(llm, out_dir=args.out_dir)
     except RuntimeError as exc:
-        print(f"⛔ {exc}", file=sys.stderr)
+        print(f"{exc}", file=sys.stderr)
         return 2
 
     print(report)

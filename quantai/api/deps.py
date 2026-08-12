@@ -1,7 +1,7 @@
 """API 依赖与应用状态 —— 取代旧 `src/api/main.py` 的一堆模块级全局。
 
 `ApiState` 持有：唯一的 `LiveRunner`（实盘会话）、`EvolutionRecorder`（反馈/轨迹）、可选的
-`LocalLLM`（chat 用，默认无→chat 返回 503，不伪造）。路由通过 `get_state()` 取它，测试可重置。
+`LocalLLM`（chat 用，默认无->chat 返回 503，不伪造）。路由通过 `get_state()` 取它，测试可重置。
 
 诚实边界：**只暴露真实状态**（来自 `LiveRunner.snapshot()` / broker / evolution）。旧版 5 个
 假数据 endpoint（regime/recommendations/performance/alerts/news_summary，C-2）与 movers 占位

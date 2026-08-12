@@ -168,7 +168,7 @@ class ExperienceCollector:
         return {"batch": batch, "pairs": pairs}
 
     def online_gradient_step(self, *args: Any, **kwargs: Any) -> None:
-        """❌ 在线实时梯度更新——**未实现**（B-1 诚实占位）。
+        """在线实时梯度更新——**未实现**（B-1 诚实占位）。
 
         旧 `online_learning.py::_trigger_update` 留了 `# TODO: gradient updates` 却静默打印
         假装在更新。这里改成**调用即报错**，杜绝"半成品冒充功能"。真训练请走离线：

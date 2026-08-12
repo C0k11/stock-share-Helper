@@ -1,4 +1,4 @@
-"""quantai.llm.finetune —— QLoRA 监督微调（lazy torch/peft）。
+"""quantai.llm.finetune -- QLoRA 监督微调（lazy torch/peft）。
 
 忠实迁移 `src/llm/finetune/train.py::FineTuner`：4-bit NF4 量化基座 + LoRA 适配器训练。
 torch/transformers/peft/datasets 全部方法内懒导入。可单测的纯逻辑接缝：
@@ -7,7 +7,7 @@ torch/transformers/peft/datasets 全部方法内懒导入。可单测的纯逻�
 
 名词卡（见 modules/finetune.md）：
 - **QLoRA** = 4-bit NF4 量化基座（省显存）+ 双量化 + LoRA 低秩适配器 + paged 8bit 优化器。
-- **LoRA** = 冻结基座，只训练注入到注意力投影（q/k/v/o）的低秩矩阵 A·B，参数量 <1%。
+- **LoRA** = 冻结基座，只训练注入到注意力投影（q/k/v/o）的低秩矩阵 A*B，参数量 <1%。
 """
 
 from __future__ import annotations

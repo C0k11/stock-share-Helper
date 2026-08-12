@@ -1,4 +1,4 @@
-"""quantai.llm.dpo —— DPO 偏好对齐训练（lazy trl）。
+"""quantai.llm.dpo -- DPO 偏好对齐训练（lazy trl）。
 
 忠实迁移 `scripts/train_dpo.py`：在 4-bit 基座 + SFT/Analyst LoRA 之上，用偏好对
 （prompt / chosen / rejected）做 DPO 对齐。torch/transformers/peft/trl/datasets 全部懒导入。
@@ -12,7 +12,7 @@
 
 诚实说明（接线现状）：在线自进化闭环 `src/rl/online_learning.py` 目前**只收集**经验并
 用 `PreferenceLogger` 落地 chosen/rejected 偏好对，其 `OnlineLearningManager._trigger_update`
-带着 `# TODO: Implement actual gradient updates`——**真正的 DPO 训练是离线的本模块**
+带着 `# TODO: Implement actual gradient updates`--**真正的 DPO 训练是离线的本模块**
 （旧 `scripts/train_dpo.py`），由 API/夜间任务以子进程触发，而非在线梯度更新。
 """
 

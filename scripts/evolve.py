@@ -50,7 +50,7 @@ def main() -> None:
     print(f"[evolve] dataset built: {path}")
     print(f"[evolve] preference records (DPO-ready): {len(pairs)}")
     if not pairs:
-        print("[evolve] (no pairs yet — run live with --collect to accumulate decisions/outcomes first)")
+        print("[evolve] (no pairs yet - run live with --collect to accumulate decisions/outcomes first)")
 
 
 def _read_pairs(path) -> list:

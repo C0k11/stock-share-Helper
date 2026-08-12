@@ -20,7 +20,7 @@ from quantai.config.schema import EvolutionConfig
 
 
 class PreferenceBuilder:
-    """决策→结果→DPO 偏好对（chosen/rejected）。"""
+    """决策->结果->DPO 偏好对（chosen/rejected）。"""
 
     def __init__(
         self,
@@ -92,7 +92,7 @@ class PreferenceBuilder:
     def generate_preference_pairs(
         self, min_pnl_diff: Optional[float] = None
     ) -> List[Dict[str, Any]]:
-        """把相似上下文（同 ticker + 同小时）里盈亏差≥阈值的最好/最差决策配成偏好对。"""
+        """把相似上下文（同 ticker + 同小时）里盈亏差>=阈值的最好/最差决策配成偏好对。"""
         threshold = self.min_pnl_diff if min_pnl_diff is None else float(min_pnl_diff)
         decisions = self._load_completed()
 

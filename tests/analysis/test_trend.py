@@ -1,4 +1,4 @@
-﻿"""trend.py 单测：已知值手算、方向性行为、边界（数据不足 / NaN / 常数序列）。"""
+"""trend.py 单测：已知值手算、方向性行为、边界（数据不足 / NaN / 常数序列）。"""
 
 from __future__ import annotations
 
@@ -96,7 +96,7 @@ class TestMACD:
         assert not (out["golden_cross"] & out["death_cross"]).any()
 
     def test_warmup_period_suppressed(self):
-        # 审计实锤的 bar-1 假信号：EMA 种子期 macd≈signal，bar 1 任何
+        # 审计实锤的 bar-1 假信号：EMA 种子期 macd~signal，bar 1 任何
         # 变动都"穿越"。前 slow 根必须恒 False——用 50 个随机序列扫。
         rng = np.random.default_rng(0)
         for _ in range(50):
@@ -252,7 +252,7 @@ class TestNaNSafety:
             assert len(out) == len(close)
 
     def test_ewm_family_nan_at_holes(self, prices):
-        """EWM 族（ema/macd/rsi）洞上输出 NaN——pandas ewm 默认穿透旧值，已显式掩掉。"""
+        """EWM 族（ema/macd/rsi）洞上输出 NaN--pandas ewm 默认穿透旧值，已显式掩掉。"""
         close = prices["close"].copy()
         close.iloc[50:53] = np.nan
         assert ema(close, 12).iloc[50:53].isna().all()

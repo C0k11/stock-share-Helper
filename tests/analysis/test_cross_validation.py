@@ -2,8 +2,8 @@
 
 `ta` 是核心依赖（pyproject），拿来当免费的独立对数器——防止自研实现口径漂移。
 EMA 族指标（RSI/ATR/MACD signal）两库种子惯例不同（我们 adjust=False 从 t0 递推，
-`ta` 带 min_periods），差异随时间指数衰减 → 只对**尾部 50 根**断言逐位一致。
-SMA 族（布林/随机/MACD 线）无种子问题 → 全程断言。
+`ta` 带 min_periods），差异随时间指数衰减 -> 只对**尾部 50 根**断言逐位一致。
+SMA 族（布林/随机/MACD 线）无种子问题 -> 全程断言。
 """
 
 from __future__ import annotations

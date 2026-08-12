@@ -1,4 +1,4 @@
-"""QC + held-out 拆分：教师 SFT JSONL → train/eval（蒸馏批后处理）。
+"""QC + held-out 拆分：教师 SFT JSONL -> train/eval（蒸馏批后处理）。
 
 QC（崩坏守卫，剔除并逐条报告）：
 - assistant 空/超短（< 50 字符）——教师 thinking 耗尽的漏网残留；

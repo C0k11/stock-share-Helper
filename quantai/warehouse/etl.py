@@ -1,8 +1,8 @@
-﻿"""pandas ETL：把项目数据（价格 / 日历 / 持仓 / 成交 / 信号 / 回测）装载进 `raw` 层。
+"""pandas ETL：把项目数据（价格 / 日历 / 持仓 / 成交 / 信号 / 回测）装载进 `raw` 层。
 
 分工（ELT，非 ETL 的 T 在这里）：
-- **这里只做 Extract + Load**：接收 DataFrame/领域对象 → 原样写 `raw.*`（附 `loaded_at`
-  审计列），**不做业务变换**——清洗/改名/建模全部在 dbt SQL（staging → marts），
+- **这里只做 Extract + Load**：接收 DataFrame/领域对象 -> 原样写 `raw.*`（附 `loaded_at`
+  审计列），**不做业务变换**——清洗/改名/建模全部在 dbt SQL（staging -> marts），
   变换逻辑因此可被 dbt test 断言、可被 SQL 阅读者审计。
 - **幂等 + 原子**：每个 loader 都是「先删本批次键，再插入」（delete-then-insert by
   batch key），且整段包在显式事务里（`_tx`）——重跑不产生重复行，**中途失败回滚、
@@ -28,8 +28,8 @@ from quantai.portfolio.loader import Portfolio
 def _tx(con: DuckDBPyConnection):
     """显式事务：delete-then-insert 必须原子。
 
-    DuckDB Python 连接默认逐语句 autocommit——DELETE 先落盘、INSERT 再失败会
-    **永久毁掉上一批数据**（审计实测确认：坏 volume 值重载 → 旧批次清零）。
+    DuckDB Python 连接默认逐语句 autocommit--DELETE 先落盘、INSERT 再失败会
+    **永久毁掉上一批数据**（审计实测确认：坏 volume 值重载 -> 旧批次清零）。
     包上 BEGIN/COMMIT，失败 ROLLBACK 保旧批。
     """
     con.execute("BEGIN")
@@ -45,7 +45,7 @@ _AUDIT = "loaded_at TIMESTAMP DEFAULT current_timestamp"
 
 #: 全部 raw 表 DDL（幂等）。集中登记，`init_raw_tables` 一次建齐——
 #: 某类数据还没产生时（如还没跑过 live 就没有成交），dbt 仍能对空表建模，
-#: 而不是 Catalog Error（实测踩过的坑：CLI 首跑无 trades 表 → dbt build 失败）。
+#: 而不是 Catalog Error（实测踩过的坑：CLI 首跑无 trades 表 -> dbt build 失败）。
 _DDL: dict[str, str] = {
     "prices": f"""CREATE TABLE IF NOT EXISTS raw.prices (
         symbol VARCHAR NOT NULL,
@@ -138,7 +138,7 @@ def _ensure(con: DuckDBPyConnection, ddl: str) -> None:
 # prices
 # --------------------------------------------------------------------------- #
 def load_prices(con: DuckDBPyConnection, prices: Mapping[str, pd.DataFrame]) -> int:
-    """{symbol: OHLCV df} → `raw.prices`。批次键 = symbol（重跑该 symbol 全量替换）。
+    """{symbol: OHLCV df} -> `raw.prices`。批次键 = symbol（重跑该 symbol 全量替换）。
 
     输入 df 需含 close（open/high/low/volume 可缺，落 NULL）；索引为日期。
     """
@@ -193,7 +193,7 @@ def load_prices(con: DuckDBPyConnection, prices: Mapping[str, pd.DataFrame]) -> 
 # NYSE 交易日历（dim_date 的数据源）
 # --------------------------------------------------------------------------- #
 def load_trading_days(con: DuckDBPyConnection, start: str, end: str) -> int:
-    """NYSE 交易日 → `raw.trading_days`（重跑全量替换）。
+    """NYSE 交易日 -> `raw.trading_days`（重跑全量替换）。
 
     dbt 的 `dim_date` 用它补齐「是否交易日/周几/年月季」等属性；日历真相来自
     `pandas_market_calendars`（含一次性休市/半日市），不手搓规则。
@@ -228,9 +228,9 @@ def load_trading_days(con: DuckDBPyConnection, start: str, end: str) -> int:
 def load_positions(
     con: DuckDBPyConnection, portfolio: Portfolio, as_of: str
 ) -> int:
-    """真实持仓 lots + 现金 → `raw.positions` / `raw.portfolio_cash`。
+    """真实持仓 lots + 现金 -> `raw.positions` / `raw.portfolio_cash`。
 
-    批次键 = as_of（同一快照日重跑替换；不同日期追加 → 持仓历史随时间积累）。
+    批次键 = as_of（同一快照日重跑替换；不同日期追加 -> 持仓历史随时间积累）。
     """
     _ensure(
         con,
@@ -271,7 +271,7 @@ def load_positions(
 def load_trades(
     con: DuckDBPyConnection, trades: Iterable[Mapping], run_id: str
 ) -> int:
-    """成交记录（`PaperBroker.orders` 的 dict 形状）→ `raw.trades`。批次键 = run_id。
+    """成交记录（`PaperBroker.orders` 的 dict 形状）-> `raw.trades`。批次键 = run_id。
 
     dict 键：ticker / action / price / shares / trace_id（缺失落 NULL）。
     """
@@ -314,7 +314,7 @@ def load_trades(
 def load_signals(
     con: DuckDBPyConnection, symbol: str, signals: pd.DataFrame
 ) -> int:
-    """`SignalGenerator.generate` 的输出 → `raw.signals`。批次键 = symbol。
+    """`SignalGenerator.generate` 的输出 -> `raw.signals`。批次键 = symbol。
 
     列：trend/momentum/ma_cross/breakout/composite_signal + signal_strength（枚举文本）。
     """
@@ -352,7 +352,7 @@ def load_signals(
 # news（RSS 头条）
 # --------------------------------------------------------------------------- #
 def load_news(con: DuckDBPyConnection, items: Iterable) -> int:
-    """`NewsItem` 流 → `raw.news`。幂等键 = link（同链接不重复入库，新闻只增不删）。
+    """`NewsItem` 流 -> `raw.news`。幂等键 = link（同链接不重复入库，新闻只增不删）。
 
     与其它 loader 的 delete-then-insert 不同：新闻是**追加型**数据（历史头条没有
     "重载一批"的语义），用 link 反连接去重。返回本次新插入的行数。
@@ -391,7 +391,7 @@ def load_news(con: DuckDBPyConnection, items: Iterable) -> int:
 def load_news_scores(
     con: DuckDBPyConnection, scored: Iterable[Mapping], model: str = ""
 ) -> int:
-    """`news_scorer.score_news` 输出 → `raw.news_scores`。幂等键 = link（重打分覆盖旧分）。
+    """`news_scorer.score_news` 输出 -> `raw.news_scores`。幂等键 = link（重打分覆盖旧分）。
 
     只入**打出分**的条目（sentiment=None 的诚实缺失不落库——空分入库会被下游当 0 用）。
     """
@@ -414,8 +414,8 @@ def load_news_scores(
 
 
 def load_event_odds(con: DuckDBPyConnection, odds: Iterable, as_of: str) -> int:
-    """Polymarket 事件概率快照 → `raw.event_odds`。幂等键 = as_of（同日重跑全量替换，
-    跨日累积 → 概率时间序列，BI 可画事件概率演变线）。"""
+    """Polymarket 事件概率快照 -> `raw.event_odds`。幂等键 = as_of（同日重跑全量替换，
+    跨日累积 -> 概率时间序列，BI 可画事件概率演变线）。"""
     _ensure(con, _DDL["event_odds"])
     rows = [o.as_dict() for o in odds if getattr(o, "market_id", "")]
     with _tx(con):
@@ -442,7 +442,7 @@ def load_backtest(
     strategy: str = "",
     symbol: str = "",
 ) -> int:
-    """`BacktestResult` → `raw.backtest_runs`（指标 1 行）+ `raw.backtest_equity`（曲线）。
+    """`BacktestResult` -> `raw.backtest_runs`（指标 1 行）+ `raw.backtest_equity`（曲线）。
 
     批次键 = run_id。metrics 展开为列（与 `PerformanceReport` 字段一一对应）。
     """

@@ -37,11 +37,11 @@ _TACTICAL_SYSTEM_PROMPT_EN = (
     "You are the tactical analyst on an intraday trading desk. Summarize the live "
     "tactics-board data (per-symbol action cards, intraday sell-pressure metrics, "
     "news sentiment). Rules: 1) cite only numbers and facts present in the given "
-    "data — never invent; 2) answer in English with three sections "
+    "data - never invent; 2) answer in English with three sections "
     "[Market Read] [Actions] [Risks]; actions must name specific symbols with an "
     "action (add/hold/trim/exit/watch) and a reference level such as a stop, and "
     "explain any disagreement with the rule cards; 3) discuss held positions first; "
-    "4) short, restrained sentences — analysis reference, not investment advice. "
+    "4) short, restrained sentences - analysis reference, not investment advice. "
     "The data brief may be written in Chinese; still answer in English."
 )
 
@@ -76,7 +76,7 @@ _TXT = {
         "ma_bull": "MAs in bullish stack {v:.2f}", "ma_bear": "MAs in bearish stack {v:.2f}",
         "uptrend": "20d trend up", "macd": "MACD hist {v:+.3f}", "r20": "20d {v:+.1f}%",
         "rsi_hot": "RSI {v:.0f} overbought", "retrace": "-{v:.0f}% off 20d high",
-        "vol_hot": "annualized vol {v:.0f}% high — size down",
+        "vol_hot": "annualized vol {v:.0f}% high - size down",
         "sell_pressure": "intraday sell pressure ({d:.0f}% down-volume, {p:.1f}% below VWAP)",
         "at_low": "at day low", "vol_crash": "high-volume drop ({x:.1f}× avg vol, {c:+.1f}%)",
         "take_profit": "consider partial profit taking",
@@ -106,7 +106,7 @@ def advise(
     avg_cost: Optional[float] = None,
     lang: str = "zh",
 ) -> dict:
-    """日线因子 + 盘中修正 → 一张操作卡。
+    """日线因子 + 盘中修正 -> 一张操作卡。
 
     Args:
         daily_vals: `build_indicator_brief` 的数值 dict（**收盘口径**——调用方负责
@@ -145,7 +145,7 @@ def advise(
         # 阈值与 rule_v1 对齐（70）：同族引擎对同一数据必须给同一分
         score -= 1
         risks.append(_txt(lang, "rsi_hot", v=rsi))
-    # retrace_from_20d_high 生产口径恒为正（1 - close/rolling_high ∈ [0,1)，
+    # retrace_from_20d_high 生产口径恒为正（1 - close/rolling_high  in  [0,1)，
     # 越大回撤越深）——旧判 `<= -0.15` 是永假死代码（审查实锤，rule_v1 同病同修）
     retrace = _f(daily_vals, "retrace_from_20d_high")
     if retrace is not None and retrace >= 0.15:
@@ -217,19 +217,19 @@ def advise(
 
 
 def advice_row(adv: dict, lang: str = "zh") -> dict:
-    """操作卡 → 表格行（渲染层 dataframe 直接吃；表头/动作词按语言）。"""
+    """操作卡 -> 表格行（渲染层 dataframe 直接吃；表头/动作词按语言）。"""
     from quantai.ui.i18n import tr
 
     stop = adv.get("stop")
     held_tag = (" [持仓]" if lang == "zh" else " [HELD]") if adv.get("held") else ""
     return {
         tr(lang, "card.symbol"): adv["symbol"] + held_tag,
-        tr(lang, "card.last"): f"{adv['last']:.2f}" if adv.get("last") is not None else "—",
-        tr(lang, "card.day"): f"{adv['day_pct'] * 100:+.2f}%" if adv.get("day_pct") is not None else "—",
+        tr(lang, "card.last"): f"{adv['last']:.2f}" if adv.get("last") is not None else "-",
+        tr(lang, "card.day"): f"{adv['day_pct'] * 100:+.2f}%" if adv.get("day_pct") is not None else "-",
         tr(lang, "card.action"): action_label(adv["action"], lang),
-        tr(lang, "card.stop"): f"{stop:.2f}" if stop is not None else "—",
-        tr(lang, "card.reasons"): "；".join(adv.get("reasons", [])[:3]) or "—",
-        tr(lang, "card.risks"): "；".join(adv.get("risks", [])[:2]) or "—",
+        tr(lang, "card.stop"): f"{stop:.2f}" if stop is not None else "-",
+        tr(lang, "card.reasons"): "；".join(adv.get("reasons", [])[:3]) or "-",
+        tr(lang, "card.risks"): "；".join(adv.get("risks", [])[:2]) or "-",
     }
 
 
@@ -265,7 +265,7 @@ def hedge_lines(
     pp: Optional[dict], cc: Optional[dict], stats: Optional[dict],
     expiry: str = "", shares: float = 0, lang: str = "zh",
 ) -> list[str]:
-    """期权对冲计算结果 → 可读句子（BS 引擎算数，这里只做措辞；LLM 只转述不心算）。"""
+    """期权对冲计算结果 -> 可读句子（BS 引擎算数，这里只做措辞；LLM 只转述不心算）。"""
     zh = lang != "en"
     out: list[str] = []
     if stats and stats.get("atm_iv") is not None:
@@ -310,7 +310,7 @@ def build_tactical_brief(
     hedges: Optional[list[str]] = None,
     events: Optional[list[str]] = None,
 ) -> str:
-    """操作卡 + 新闻情绪 → 驻留 LLM 的战术简报（纯组装可测）。"""
+    """操作卡 + 新闻情绪 -> 驻留 LLM 的战术简报（纯组装可测）。"""
     lines = [f"# 实时作战台数据{f'（{as_of}）' if as_of else ''}", "", "## 操作卡（规则引擎）"]
     for a in advices:
         head = f"- {a['symbol']}{'（持仓）' if a.get('held') else ''}: "

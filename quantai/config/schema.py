@@ -85,7 +85,7 @@ class BacktestConfig(_Base):
     costs: CostModel = Field(default_factory=CostModel)
     rebalance: RebalanceConfig = Field(default_factory=RebalanceConfig)
     initial_capital: float = Field(default=100_000.0, gt=0)
-    # 修 lookahead：d 日用 ≤d 信息决策，成交价取 open[d+1]。
+    # 修 lookahead：d 日用 <=d 信息决策，成交价取 open[d+1]。
     # "close" 保留为旧（虚高）行为，仅用于显式复现对比。
     fill_timing: Literal["next_open", "close"] = "next_open"
 
@@ -313,7 +313,7 @@ class AgentsConfig(_Base):
 
 
 # --------------------------------------------------------------------------- #
-# evolution（数据飞轮：采集 → 建数据集 → 离线训练 → 热切换）
+# evolution（数据飞轮：采集 -> 建数据集 -> 离线训练 -> 热切换）
 # --------------------------------------------------------------------------- #
 class EvolutionConfig(_Base):
     """数据飞轮配置。

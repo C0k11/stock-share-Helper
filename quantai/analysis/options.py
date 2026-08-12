@@ -43,7 +43,7 @@ def bs_greeks(S: float, K: float, T: float, sigma: float, kind: str = "call",
               r: float = DEFAULT_RISK_FREE) -> dict:
     """Greeks（单位注释齐全，直接可读）：
 
-    - delta：股价 +$1 期权价变化（call ∈ (0,1)，put ∈ (-1,0)）
+    - delta：股价 +$1 期权价变化（call  in  (0,1)，put  in  (-1,0)）
     - gamma：股价 +$1 时 delta 的变化
     - theta_per_day：**每自然日**时间损耗（负=持有方掏钱）
     - vega_per_pct：IV +1 个百分点的价格变化
@@ -69,7 +69,7 @@ def bs_greeks(S: float, K: float, T: float, sigma: float, kind: str = "call",
 
 def implied_vol(price: float, S: float, K: float, T: float, kind: str = "call",
                 r: float = DEFAULT_RISK_FREE, tol: float = 1e-6) -> Optional[float]:
-    """二分法反推 IV ∈ [0.1%, 500%]。价格越界（低于内在价值/高于上界）→ None（诚实缺失）。"""
+    """二分法反推 IV  in  [0.1%, 500%]。价格越界（低于内在价值/高于上界）-> None（诚实缺失）。"""
     if price <= 0 or min(S, K, T) <= 0:
         return None
     lo, hi = 0.001, 5.0
@@ -93,7 +93,7 @@ def implied_vol(price: float, S: float, K: float, T: float, kind: str = "call",
 # 对冲计算器（输入 = 期权链 records：[{strike, bid, ask, lastPrice, impliedVolatility}...]）
 # --------------------------------------------------------------------------- #
 def _premium(row: dict) -> Optional[float]:
-    """成交参考价：优先 (bid+ask)/2（都为正时），退回 lastPrice；无有效价 → None。"""
+    """成交参考价：优先 (bid+ask)/2（都为正时），退回 lastPrice；无有效价 -> None。"""
     bid, ask = row.get("bid") or 0.0, row.get("ask") or 0.0
     if bid > 0 and ask > 0 and ask >= bid:
         return (bid + ask) / 2.0
@@ -112,7 +112,7 @@ def protective_put_plan(
 ) -> Optional[dict]:
     """保护性 put：给持仓上"地板"。
 
-    选 strike ≈ spot×floor_pct 的 put，按 100 股/张买入：
+    选 strike ~ spot×floor_pct 的 put，按 100 股/张买入：
     - `cost`：总保费（premium×100×张数）
     - `cost_pct`：保费占持仓市值比例
     - `max_loss_pct`：锁定后的最大损失（跌破 strike 后由 put 兜底）÷ 市值
@@ -151,7 +151,7 @@ def covered_call_plan(
 ) -> Optional[dict]:
     """备兑 call：持股收租。
 
-    选 strike ≈ spot×target_pct 的 call，按 100 股/张卖出：
+    选 strike ~ spot×target_pct 的 call，按 100 股/张卖出：
     - `income`：权利金收入；`income_pct`：占市值比例；`annualized_pct`：年化（按到期日粗算）
     - `called_away_at`：被行权价（涨过它股票被买走——上行封顶，如实标注）
     """
@@ -185,7 +185,7 @@ def covered_call_plan(
 def chain_stats(calls: list[dict], puts: list[dict], spot: float) -> dict:
     """链面快照：P/C 成交量比、ATM IV（call/put 均值）、25% 档偏斜的粗代理。
 
-    数据源 IV 缺失的行不参与均值；全缺 → 对应字段 None（诚实缺失，不填 0）。
+    数据源 IV 缺失的行不参与均值；全缺 -> 对应字段 None（诚实缺失，不填 0）。
     """
     def vol_sum(rows):
         return sum(float(r.get("volume") or 0) for r in rows)

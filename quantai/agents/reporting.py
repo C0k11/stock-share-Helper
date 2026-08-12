@@ -81,7 +81,7 @@ def _persist_scores(scored: list[dict], model: str) -> int:
 def make_daily_report(
     llm=None, out_dir: str = _REPORTS_DIR, log: Callable[[str], None] = print
 ) -> tuple[str, Path]:
-    """日报（收盘口径）：持仓+自选股+新闻+仓库摘要 →（可选 LLM）→ 落盘。"""
+    """日报（收盘口径）：持仓+自选股+新闻+仓库摘要 ->（可选 LLM）-> 落盘。"""
     from quantai.analysis import realized_volatility, rsi
     from quantai.data.news import NewsFetcher
     from quantai.data.prices import PriceFetcher
@@ -178,7 +178,7 @@ def make_intraday_report(
     out_dir: str = _REPORTS_DIR,
     log: Callable[[str], None] = print,
 ) -> tuple[str, Path]:
-    """盘中快报：当日 1 分钟会话统计 + 卖压代理 →（可选 LLM 打分+快评）→ 落盘。"""
+    """盘中快报：当日 1 分钟会话统计 + 卖压代理 ->（可选 LLM 打分+快评）-> 落盘。"""
     import yfinance as yf
 
     from quantai.data.news import NewsFetcher
@@ -199,7 +199,7 @@ def make_intraday_report(
             d5 = t.history(period="10d", interval="1d")
             if m1.empty or len(d5) < 2:
                 continue
-            # 节假日/收盘后 yfinance 的 period='1d' 会返回**上一交易日整场**——
+            # 节假日/收盘后 yfinance 的 period='1d' 会返回**上一交易日整场**--
             # 把昨日会话冒充实时盘中是重大误导（实测 7/7 凌晨拿到 7/6 全场 390 根）。
             # 非当日（交易所时区）bar 直接跳过，全跳过时简报走"无盘中数据"诚实空态。
             last_ts = m1.index[-1]

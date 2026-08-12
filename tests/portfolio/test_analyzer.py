@@ -1,4 +1,4 @@
-﻿"""analyzer.py 单测：盈亏/权重手算、lot 聚合、缺价诚实处理、beta/风险统计、空组合。
+"""analyzer.py 单测：盈亏/权重手算、lot 聚合、缺价诚实处理、beta/风险统计、空组合。
 
 价格全部合成注入（无网络）。
 """
@@ -91,7 +91,7 @@ class TestPnLMath:
 
 class TestDayChange:
     def test_flat_book_reports_exactly_zero(self):
-        """+5%/−5% 等前收市值组合的日变动必须恰为 0——旧实现按当日市值加权
+        """+5%/-5% 等前收市值组合的日变动必须恰为 0——旧实现按当日市值加权
         会报 +0.25% 系统性正偏（审计实锤）。"""
         aaa = _df([100.0] * 10 + [105.0])  # +5%
         bbb = _df([100.0] * 10 + [95.0])  # -5%
@@ -173,7 +173,7 @@ class TestHonesty:
         assert np.isnan(snap.current_holdings_max_drawdown)
 
     def test_short_book_concentration_uses_gross(self):
-        """多空账本：集中度用 gross 口径（|mv|/Σ|mv|），净分母会让权重 >1。"""
+        """多空账本：集中度用 gross 口径（|mv|/sum|mv|），净分母会让权重 >1。"""
         prices = {
             "AAA": _df([100.0] * 250),  # long 10 -> +1000
             "BBB": _df([90.0] * 250),  # short -10 -> -900

@@ -84,7 +84,7 @@ def render() -> None:  # pragma: no cover - 需 streamlit 运行时
                 c1.metric(tr(lang, "ws.held_pos", sym=p_sym, shares=f"{shares:,.0f}"),
                           f"${last:,.2f}",
                           f"{(last / prev - 1) * 100:+.2f}% {tr(lang, 'ws.today')}" if prev == prev else None)
-                c2.metric(tr(lang, "ws.avg_cost"), f"${cost / shares:,.2f}" if shares else "—")
+                c2.metric(tr(lang, "ws.avg_cost"), f"${cost / shares:,.2f}" if shares else "-")
                 c3.metric(tr(lang, "ws.mkt_value"), f"${shares * last:,.2f}")
                 c4.metric(tr(lang, "ws.unreal_pnl"), f"${pnl:,.2f}",
                           f"{pnl / abs(cost) * 100:+.2f}%" if cost else None)
@@ -143,7 +143,7 @@ def render() -> None:  # pragma: no cover - 需 streamlit 运行时
 
         up = chg >= 0
         color = theme.UP if up else theme.DOWN
-        # 自定义头部（WS 式：大价格 + 内联涨跌；不用 st.metric——$ 会触发 LaTeX、涨跌不能内联）
+        # 自定义头部（WS 式：大价格 + 内联涨跌；不用 st.metric--$ 会触发 LaTeX、涨跌不能内联）
         st.markdown(
             f"""<div style="line-height:1.15;margin:2px 0 6px 0">
   <span style="color:{theme.TEXT_MUTED};font-size:0.95rem">{sym}</span><br>
@@ -153,7 +153,7 @@ def render() -> None:  # pragma: no cover - 需 streamlit 运行时
   </span><br>
   <span style="color:{theme.TEXT_MUTED};font-size:0.85rem">
     O&nbsp;${o:,.2f}&emsp;H&nbsp;${h:,.2f}&emsp;L&nbsp;${l:,.2f}&emsp;C&nbsp;${last:,.2f}
-    &emsp;·&emsp;{interval} bars</span>
+    &emsp;-&emsp;{interval} bars</span>
 </div>""",
             unsafe_allow_html=True,
         )
@@ -350,7 +350,7 @@ def render() -> None:  # pragma: no cover - 需 streamlit 运行时
     def g(key, money=False, compact=False):
         v = info.get(key)
         if v is None:
-            return "—"
+            return "-"
         if compact and isinstance(v, (int, float)):
             for unit, div in (("B", 1e9), ("M", 1e6), ("K", 1e3)):
                 if abs(v) >= div:

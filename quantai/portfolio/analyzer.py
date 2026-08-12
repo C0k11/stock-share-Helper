@@ -1,11 +1,11 @@
-﻿"""组合分析器：真实持仓 × 价格历史 → 盈亏 / 暴露 / 风险 / 技术指标快照。
+"""组合分析器：真实持仓 × 价格历史 -> 盈亏 / 暴露 / 风险 / 技术指标快照。
 
 **可测性**：`PortfolioAnalyzer` 只吃注入的价格数据（`dict[symbol, DataFrame]`），
 不碰网络；联网抓数在 `scripts/analyze.py` / api 层用 `PriceFetcher` 完成后注入。
 
 **诚实口径**（重要，docstring 逐条对应字段）：
 - 我们只有「当前持仓 + 每股成本」，**没有完整交易流水**，因此：
-  - 未实现盈亏 = (最新价 − 加权平均成本) × 股数 —— 这是准确的。
+  - 未实现盈亏 = (最新价 - 加权平均成本) × 股数 —— 这是准确的。
   - 组合风险统计（波动/Sharpe/Sortino/回撤/beta）基于**当前持仓固定不变**的
     合成历史（industry 标准的 holdings-based analysis），字段名带 `current_holdings_`
     前缀明示假设；它不是你的真实历史 PnL 曲线。
@@ -76,12 +76,12 @@ class PortfolioSnapshot:
     total_unrealized_pnl_pct: float
     day_change_pct: float  # 持仓部分的单日变动（市值加权）
     top_weight: float  # 最大单一持仓权重（集中度）
-    herfindahl: float  # HHI = Σ w_i²（持仓权重，不含现金；越高越集中）
+    herfindahl: float  # HHI = sum w_i^2（持仓权重，不含现金；越高越集中）
     current_holdings_ann_vol: float
     current_holdings_sharpe: float
     current_holdings_sortino: float
     current_holdings_max_drawdown: float
-    portfolio_beta: float  # Σ w_i·β_i（现金权重摊薄）
+    portfolio_beta: float  # sum w_i*beta_i（现金权重摊薄）
     positions: list[PositionSnapshot] = field(default_factory=list)
     missing_prices: list[str] = field(default_factory=list)
 
@@ -92,9 +92,9 @@ class PortfolioSnapshot:
 
 
 def _aggregate_lots(portfolio: Portfolio) -> list[tuple[str, float, float, str]]:
-    """多 lot 聚合 → (symbol, total_shares, 加权平均成本, 最早建仓日)。
+    """多 lot 聚合 -> (symbol, total_shares, 加权平均成本, 最早建仓日)。
 
-    加权平均成本 = Σ(shares×cost)/Σshares；多空 lot 对冲后 shares 为 0 的标的
+    加权平均成本 = sum(shares×cost)/sum(shares)；多空 lot 对冲后 shares 为 0 的标的
     直接剔除（净持仓为零，无暴露）。
     """
     agg: dict[str, dict] = {}
@@ -114,7 +114,7 @@ def _aggregate_lots(portfolio: Portfolio) -> list[tuple[str, float, float, str]]
 
 
 class PortfolioAnalyzer:
-    """真实组合 × 注入的价格历史 → 快照。
+    """真实组合 × 注入的价格历史 -> 快照。
 
     Args:
         prices: {symbol: OHLC DataFrame}，需含 `close` 列（`high` 缺失时用 close 兜底，
@@ -159,8 +159,8 @@ class PortfolioAnalyzer:
         snapshots: list[PositionSnapshot] = []
         missing: list[str] = []
         value_series: dict[str, pd.Series] = {}  # symbol -> shares×close 历史
-        prev_value_total = 0.0  # Σ shares×前收（组合日变动的正确分母）
-        delta_value_total = 0.0  # Σ shares×(last−prev)
+        prev_value_total = 0.0  # sum shares×前收（组合日变动的正确分母）
+        delta_value_total = 0.0  # sum shares×(last-prev)
         day_change_ok = True
 
         for sym, shares, avg_cost, open_date in lots:
@@ -218,16 +218,16 @@ class PortfolioAnalyzer:
         total_pnl = total_mv - total_cost
 
         # 权重回填（分母 = 总值含现金，带符号=暴露方向）；
-        # 集中度改用 **gross** 口径（|mv|/Σ|mv|）——净分母在含空头时权重会 >1、
+        # 集中度改用 **gross** 口径（|mv|/sum|mv|）——净分母在含空头时权重会 >1、
         # HHI 无界、近似美元中性组合直接爆表（审计确认后修正）。
         for s in snapshots:
             s.weight = s.market_value / total_value if total_value else float("nan")
         gross_mv = float(sum(abs(s.market_value) for s in snapshots))
         inner_w = [abs(s.market_value) / gross_mv for s in snapshots] if gross_mv else []
-        # 组合日变动 = Σ shares·(last−prev) / |Σ shares·prev|（**前收市值**加权。
-        # 旧实现用当日市值加权：+5%/−5% 等权组合会报 +0.25% 的系统性正偏、
+        # 组合日变动 = sum shares*(last-prev) / |sum shares*prev|（**前收市值**加权。
+        # 旧实现用当日市值加权：+5%/-5% 等权组合会报 +0.25% 的系统性正偏、
         # 净空头账本符号还会翻转——审计确认后重写）。分母含空头取 abs
-        # 保证「亏=负」；净暴露≈0 时数学未定义 → NaN。
+        # 保证「亏=负」；净暴露~0 时数学未定义 -> NaN。
         day_change = (
             delta_value_total / abs(prev_value_total)
             if day_change_ok and snapshots and abs(prev_value_total) > 1e-12
@@ -236,7 +236,7 @@ class PortfolioAnalyzer:
 
         # 当前持仓固定的合成历史（holdings-based；交易日索引取各标的交集）。
         # 合成净值 <= 0（深度净空头 + 低现金）时 pct_change 收益无意义
-        # （符号翻转、Sharpe 垃圾值）→ 统计全 NaN（诚实拒算）。
+        # （符号翻转、Sharpe 垃圾值）-> 统计全 NaN（诚实拒算）。
         vol = sharpe = sortino = mdd = float("nan")
         if value_series:
             values = pd.concat(value_series.values(), axis=1, join="inner").sum(axis=1)
@@ -248,7 +248,7 @@ class PortfolioAnalyzer:
                 sortino = float(sortino_ratio(rets))
                 mdd = float(drawdown_curve(values).min())
 
-        # 组合 beta = Σ w_i·β_i（w 含现金摊薄；缺 beta 的标的按 NaN 传播诚实处理）
+        # 组合 beta = sum w_i*beta_i（w 含现金摊薄；缺 beta 的标的按 NaN 传播诚实处理）
         betas = [s.beta_vs_benchmark * s.weight for s in snapshots]
         portfolio_beta = float(sum(betas)) if betas and not any(np.isnan(b) for b in betas) else float("nan")
 
@@ -279,7 +279,7 @@ class PortfolioAnalyzer:
 
 
 def format_snapshot_text(snap: PortfolioSnapshot) -> str:
-    """快照 → 终端可读报告（纯文本，CLI 用）。"""
+    """快照 -> 终端可读报告（纯文本，CLI 用）。"""
 
     def pct(x: float) -> str:
         return f"{x * 100:+.2f}%" if x == x else "n/a"

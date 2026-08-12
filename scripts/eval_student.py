@@ -10,7 +10,7 @@
 1. held-out 日期场景（训练时留出的 eval JSONL，同分布不同日）；
 2. 现抓的**训练外标的**新鲜场景（真正的泛化考题，v1 就是在这里露馅）。
 
-GPU 串行两轮（先基座后学生，各自加载→生成→卸载），4090 单卡友好。
+GPU 串行两轮（先基座后学生，各自加载->生成->卸载），4090 单卡友好。
 产物：data/reports/eval_base_vs_student_v2.md（指标表 + 并排全文）。
 
 客观指标（诚实：这些是"崩坏检测器"，不是质量分；终审靠人读并排）：
@@ -34,7 +34,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 # 客观指标（纯函数）
 # --------------------------------------------------------------------------- #
 def repeated_ngram_ratio(text: str, n: int = 8) -> float:
-    """重复 n-gram 占比 ∈ [0,1]。>0.3 基本就是复读机。"""
+    """重复 n-gram 占比  in  [0,1]。>0.3 基本就是复读机。"""
     toks = text.split()
     if len(toks) < n * 2:
         return 0.0
@@ -43,7 +43,7 @@ def repeated_ngram_ratio(text: str, n: int = 8) -> float:
 
 
 def cited_numbers(prompt: str, answer: str) -> int:
-    """prompt 中出现且被回答引用的数值个数（≥3 字符的数字串，去平凡值）。"""
+    """prompt 中出现且被回答引用的数值个数（>=3 字符的数字串，去平凡值）。"""
     nums = {m for m in re.findall(r"\d+\.\d+|\d{3,}", prompt)}
     return sum(1 for x in nums if x in answer)
 
@@ -56,7 +56,7 @@ def has_format(answer: str) -> bool:
 # 评测用例构造
 # --------------------------------------------------------------------------- #
 def load_heldout_cases(path: str, n: int) -> list[dict]:
-    """eval JSONL → 评测用例（剥掉教师答案，按 task 分层取样保覆盖面）。"""
+    """eval JSONL -> 评测用例（剥掉教师答案，按 task 分层取样保覆盖面）。"""
     rows = [json.loads(l) for l in Path(path).read_text(encoding="utf-8").splitlines() if l.strip()]
     by_task: dict[str, list[dict]] = {}
     for r in rows:
@@ -90,7 +90,7 @@ def build_fresh_cases(symbols: list[str], min_bars: int = 60) -> list[dict]:
 # 生成
 # --------------------------------------------------------------------------- #
 def generate_all(cases: list[dict], adapter_path: str | None, log) -> list[str]:
-    """加载（可选 adapter）→ 逐用例生成 → 卸载。返回与 cases 对齐的回答列表。"""
+    """加载（可选 adapter）-> 逐用例生成 -> 卸载。返回与 cases 对齐的回答列表。"""
     from quantai.config import load_config
     from quantai.llm.inference import LocalLLM
 
@@ -123,7 +123,7 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
 
     if not Path(args.adapter).exists():
-        print(f"⛔ adapter 不存在：{args.adapter}", file=sys.stderr)
+        print(f"adapter 不存在：{args.adapter}", file=sys.stderr)
         return 1
 
     cases = load_heldout_cases(args.eval_jsonl, args.n) + build_fresh_cases(args.fresh_symbols)
