@@ -8,15 +8,15 @@ reconciles every number against it (67 checks, rel. tol 1e-6).
 ## Data model (star schema)
 
 ```
-dim_date (date) 1 ──── * fact_prices (date, symbol) * ──── 1 dim_symbol (symbol)
-                  └──── * fact_signals (date, symbol) * ───┘
-                  └──── * fact_backtest_equity (date; run_id)
-fact_positions (as_of, symbol) * ──── 1 dim_symbol
-fact_trades (symbol) * ──── 1 dim_symbol
-fact_backtest_results (run_id) 1 ──── * fact_backtest_equity (run_id)
+dim_date (date) 1 ---- * fact_prices (date, symbol) * ---- 1 dim_symbol (symbol)
+                  +---- * fact_signals (date, symbol) * ---+
+                  +---- * fact_backtest_equity (date; run_id)
+fact_positions (as_of, symbol) * ---- 1 dim_symbol
+fact_trades (symbol) * ---- 1 dim_symbol
+fact_backtest_results (run_id) 1 ---- * fact_backtest_equity (run_id)
 ```
 
-Relationships are logical joins on the declared grains — each fact keeps its
+Relationships are logical joins on the declared grains - each fact keeps its
 own grain. `dim_date.is_trading_day` filters non-trading days.
 `fact_prices.daily_return`, `pct_from_52w_high` and
 `fact_backtest_equity.drawdown` are computed in the SQL layer; consumers read
@@ -24,7 +24,7 @@ them as-is and never re-derive them.
 
 ## Window semantics (binding for every rolling measure)
 
-Rolling measures are specified as view-window table calculations — e.g.
+Rolling measures are specified as view-window table calculations - e.g.
 20-day rolling volatility is
 
 ```
@@ -36,7 +36,7 @@ with three hard rules the implementation must honor:
 1. the window is **20 trading rows** (rows where the symbol actually has a
    bar), not 20 calendar days;
 2. `WINDOW_STDEV` is the **sample** standard deviation (pandas `ddof=1`);
-3. a window shorter than 20 rows renders **empty** — never a partial-window
+3. a window shorter than 20 rows renders **empty** - never a partial-window
    number.
 
 Moving averages use `WINDOW_AVG` over the same trading-row windows.
@@ -45,8 +45,8 @@ Moving averages use `WINDOW_AVG` over the same trading-row windows.
 
 ### 1. Portfolio Overview
 - **KPI cards** (latest `fact_positions.as_of`): total market value
-  Σ`market_value`, total cost Σ`cost_value`, unrealized PnL
-  Σ`unrealized_pnl` (red/green coded), PnL % = Σpnl / |Σcost|.
+  sum`market_value`, total cost sum`cost_value`, unrealized PnL
+  sum`unrealized_pnl` (red/green coded), PnL % = sumpnl / |sumcost|.
 - **Position weight bars**: symbol × `market_value`, descending; color =
   sign of `unrealized_pnl`.
 - **Concentration**: `market_value` treemap.
@@ -54,7 +54,7 @@ Moving averages use `WINDOW_AVG` over the same trading-row windows.
 ### 2. PnL
 - **Per-symbol PnL bars**: symbol × `unrealized_pnl`, labeled with
   `unrealized_pnl_pct`.
-- **Cost vs price dumbbell**: `avg_cost` → `last_close`, one row per symbol.
+- **Cost vs price dumbbell**: `avg_cost` -> `last_close`, one row per symbol.
 - Reference line at 0; tooltips carry `first_open_date` / `price_date`.
 
 ### 3. Signals & Backtest vs Benchmark
@@ -74,7 +74,7 @@ Moving averages use `WINDOW_AVG` over the same trading-row windows.
 - **Daily-return distribution**: `fact_prices.daily_return` histogram
   (symbol filter).
 - **Rolling volatility**: the 20-trading-row `WINDOW_STDEV` measure above,
-  annualized ×√252 — semantics identical to the warehouse layer.
+  annualized ×sqrt252 - semantics identical to the warehouse layer.
 
 ### 5. Technical
 - **Price + moving averages**: `close` line + 20/50/200-day `WINDOW_AVG`.
@@ -85,5 +85,5 @@ Moving averages use `WINDOW_AVG` over the same trading-row windows.
 ## Theme
 
 Dark: background `#1B1B1F` / accent `#4C8BF5` / up `#26A69A` /
-down `#EF5350` — the same design tokens as `quantai/ui/theme.py` and
+down `#EF5350` - the same design tokens as `quantai/ui/theme.py` and
 `.streamlit/config.toml`.
